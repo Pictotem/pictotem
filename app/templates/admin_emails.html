@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Emails — {{ config.get('ui', {}).get('app_title', 'Photomaton') }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .admin-wrap { max-width: 900px; margin: 0 auto; padding: 32px 20px 60px; }
+    .admin-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
+    .admin-header h1 { font-size: 26px; font-weight: 700; margin: 0 0 4px; }
+    .admin-header p  { color: var(--muted); margin: 0; font-size: 14px; }
+    .admin-nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .flash-list { list-style: none; padding: 0; margin: 0 0 20px; }
+    .flash-list li { padding: 11px 15px; border-radius: 10px; margin-bottom: 6px; font-weight: 600; font-size: 14px; }
+    .flash-list li.success { background: rgba(13,139,143,.18); border: 1px solid rgba(13,139,143,.4); color: #5cf5f9; }
+    .flash-list li.error   { background: rgba(200,50,50,.18);  border: 1px solid rgba(200,50,50,.4);  color: #f97b7b; }
+
+    /* Toolbar */
+    .email-toolbar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+      padding: 14px 16px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; margin-bottom: 14px;
+    }
+    .search-form { display: flex; gap: 8px; flex: 1; min-width: 200px; }
+    .search-form input[type=text] {
+      flex: 1; background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 999px; padding: 8px 14px; font-size: 14px;
+    }
+    .search-form input[type=text]:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .tb-sep { flex: 1; }
+    .tb-group { display: flex; gap: 4px; }
+    .tb-btn {
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+      border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 600;
+      cursor: pointer; text-decoration: none; white-space: nowrap; transition: .15s;
+    }
+    .tb-btn.active { background: var(--accent); border-color: transparent; color: #fff; }
+    .tb-btn:hover  { border-color: var(--accent); color: var(--text); }
+
+    /* Add form */
+    .add-form {
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      padding: 14px 16px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; margin-bottom: 14px;
+    }
+    .add-form label { font-size: 13px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+    .add-form input[type=email] {
+      flex: 1; min-width: 200px; background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 999px; padding: 8px 14px; font-size: 14px;
+    }
+    .add-form input[type=email]:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+    /* Table */
+    .email-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .email-table th {
+      text-align: left; font-size: 11px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .07em;
+      padding: 8px 12px; border-bottom: 1px solid var(--border);
+    }
+    .email-table td {
+      padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.05);
+      vertical-align: middle;
+    }
+    .email-table tr:hover td { background: rgba(255,255,255,.03); }
+    .email-table .col-id    { color: var(--muted); width: 50px; }
+    .email-table .col-email { font-family: monospace; font-size: 13px; }
+    .email-table .col-date  { color: var(--muted); font-size: 12px; white-space: nowrap; width: 140px; }
+    .email-table .col-act   { width: 180px; text-align: right; }
+    .email-inline-form { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+    .email-inline-form input[type=email] {
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 8px; padding: 5px 10px; font-size: 13px; font-family: monospace; width: 200px;
+    }
+    .btn-icon {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      border-radius: 8px; padding: 5px 9px; font-size: 13px; cursor: pointer; transition: .15s;
+    }
+    .btn-icon:hover { border-color: var(--accent); color: var(--text); }
+    .btn-icon.del:hover { border-color: rgba(200,50,50,.7); color: #f97b7b; }
+    .btn-icon.save { border-color: var(--accent); color: var(--accent); }
+    .btn-icon.save:hover { background: var(--accent); color: #fff; }
+
+    /* Footer actions */
+    .footer-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap; gap: 12px; }
+    .footer-count { font-size: 13px; color: var(--muted); }
+
+    @media (max-width: 600px) {
+      .email-table .col-date { display: none; }
+      .email-inline-form input[type=email] { width: 130px; }
+    }
+  </style>
+</head>
+<body class="gallery-body">
+<div class="admin-wrap">
+
+  <div class="admin-header">
+    <div>
+      <h1>Emails</h1>
+      <p>
+        {{ emails|length }} résultat(s){% if search %} pour « {{ search }} »{% endif %}
+        — {{ total }} au total
+      </p>
+    </div>
+    <nav class="admin-nav">
+      <a class="action-btn" href="{{ url_for('admin_emails_export_csv') }}">↓ CSV</a>
+      <a class="action-btn" href="{{ url_for('admin_emails_export_json') }}">↓ JSON</a>
+      <a class="action-btn" href="{{ url_for('admin_home') }}">← Admin</a>
+      <a class="action-btn" href="{{ url_for('logout') }}">Déconnexion</a>
+    </nav>
+  </div>
+
+  {% if alert_success %}<ul class="flash-list"><li class="success">{{ alert_success }}</li></ul>{% endif %}
+  {% if alert_error   %}<ul class="flash-list"><li class="error">{{ alert_error }}</li></ul>{% endif %}
+
+  <!-- Barre de recherche + tri -->
+  <div class="email-toolbar">
+    <form class="search-form" method="get" action="{{ url_for('admin_emails') }}">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="text" name="q" value="{{ search }}" placeholder="Rechercher un email…" autofocus>
+      <button class="tb-btn" type="submit">Rechercher</button>
+      {% if search %}<a class="tb-btn" href="{{ url_for('admin_emails', sort=sort) }}">✕</a>{% endif %}
+    </form>
+    <span class="tb-sep"></span>
+    <div class="tb-group">
+      <a class="tb-btn {% if sort == 'desc' %}active{% endif %}"
+         href="{{ url_for('admin_emails', sort='desc', q=search) }}">↓ Récent</a>
+      <a class="tb-btn {% if sort == 'asc' %}active{% endif %}"
+         href="{{ url_for('admin_emails', sort='asc',  q=search) }}">↑ Ancien</a>
+    </div>
+  </div>
+
+  <!-- Formulaire d'ajout -->
+  <form class="add-form" method="post" action="{{ url_for('admin_email_add') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="search" value="{{ search }}">
+    <label>Ajouter :</label>
+    <input type="email" name="email" placeholder="contact@exemple.com" required>
+    <button class="action-btn primary small" type="submit">Ajouter</button>
+  </form>
+
+  <!-- Tableau -->
+  {% if emails %}
+  <table class="email-table">
+    <thead>
+      <tr>
+        <th class="col-id">#</th>
+        <th>Email</th>
+        <th class="col-date">Date</th>
+        <th class="col-act">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in emails %}
+      <tr>
+        <td class="col-id">{{ row.id }}</td>
+        <td class="col-email">
+          <form class="email-inline-form" method="post"
+                action="{{ url_for('admin_email_edit', email_id=row.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            <input type="hidden" name="search" value="{{ search }}">
+            <input type="email" name="email" value="{{ row.email }}" required>
+            <button class="btn-icon save" type="submit" title="Enregistrer">✓</button>
+          </form>
+        </td>
+        <td class="col-date">{{ row.created_at | format_dt }}</td>
+        <td class="col-act">
+          <form method="post" action="{{ url_for('admin_email_delete', email_id=row.id) }}"
+                style="display:inline"
+                onsubmit="return confirm('Supprimer {{ row.email }} ?')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            <input type="hidden" name="search" value="{{ search }}">
+            <button class="btn-icon del" type="submit" title="Supprimer">✕ Supprimer</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="footer-actions">
+    <span class="footer-count">{{ emails|length }} email(s) affichés</span>
+    {% if not search %}
+    <form method="post" action="{{ url_for('admin_emails_delete_all') }}"
+          onsubmit="return confirm('Supprimer TOUS les {{ total }} emails ? Cette action est irréversible.')">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="action-btn small danger" type="submit">Tout supprimer ({{ total }})</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% else %}
+  <p style="text-align:center;color:var(--muted);padding:40px 0;">
+    {% if search %}Aucun email ne correspond à « {{ search }} ».{% else %}Aucun email enregistré.{% endif %}
+  </p>
+  {% endif %}
+
+</div>
+</body>
+</html>

@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ config.get('ui', {}).get('app_title', 'Photomaton') }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    /* Tailles réglables depuis /admin/texts (texte de droite + QR code de la
+       barre du bas ; hauteur/couleur de la barre de progression tout en haut)
+       — surchargent les variables par défaut de style.css. */
+    :root {
+      --bottom-bar-right-font-size: {{ bottom_bar_sizes.right_font_size }}px;
+      --bottom-bar-qr-size: {{ bottom_bar_sizes.qr_size }}px;
+      --top-bar-height: {{ top_bar.height }}px;
+      --top-bar-color: {{ top_bar.color }};
+    }
+
+    /* Barre de progression tout en haut de l'écran : illustre n'importe quel
+       compte à rebours de l'appli (veille, décompte photo/vidéo avant capture,
+       enregistrement vidéo, retour auto à l'accueil) en se réduisant de 100%
+       à 0% sur la durée voulue. Un seul élément partagé, piloté par
+       startTopBarCountdown()/stopTopBarCountdown() dans app.js — un seul
+       compte à rebours est actif à la fois, jamais de conflit. */
+    .top-countdown-bar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 25000;
+      height: var(--top-bar-height); background: rgba(255,255,255,.10);
+      overflow: hidden; pointer-events: none;
+    }
+    .top-countdown-bar.hidden { display: none; }
+    .top-countdown-bar-fill {
+      height: 100%; width: 100%; background: var(--top-bar-color);
+    }
+
+    .idle-timer-wrap {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 60;
+      pointer-events: none;
+    }
+    .idle-timer-badge {
+      position: absolute; top: 10px; right: 16px;
+      font-size: 13px; color: rgba(255,255,255,.85);
+      background: rgba(0,0,0,.55); padding: 5px 13px;
+      border-radius: 999px; backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,.12);
+      white-space: nowrap;
+    }
+    .idle-timer-badge strong { font-weight: 700; }
+
+    /* Modale de sortie du mode kiosque — 100% intégrée à la page (pas de
+       boîte de dialogue OS type prompt()/alert(), qui peut rester masquée
+       derrière une fenêtre plein écran "always on top"). */
+    .kiosk-unlock-modal {
+      position: fixed; inset: 0; z-index: 20000;
+      background: rgba(0,0,0,.75);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .kiosk-unlock-modal.hidden { display: none; }
+    .kiosk-unlock-box {
+      background: #14161a; border: 1px solid rgba(255,255,255,.14); border-radius: 16px;
+      padding: 26px; width: 320px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    }
+    .kiosk-unlock-title { font-weight: 700; font-size: 16px; margin-bottom: 14px; color: #fff; }
+    .kiosk-unlock-input {
+      width: 100%; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18);
+      color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 15px; box-sizing: border-box;
+    }
+    .kiosk-unlock-input:focus { outline: 2px solid var(--accent, #f2c94c); border-color: transparent; }
+    .kiosk-unlock-msg { min-height: 16px; font-size: 12px; color: #f97b7b; margin-top: 9px; }
+    .kiosk-unlock-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; }
+
+    /* Écran de veille : diaporama plein écran affiché après N minutes sans
+       interaction sur l'accueil (voir setupScreensaver() dans app.js). Rendu
+       en DOM direct (pas d'iframe) pour que les clics/touches à l'intérieur
+       remontent normalement au document et referment la veille. */
+    .screensaver-overlay {
+      position: fixed; inset: 0; z-index: 15000; background: #000;
+    }
+    .screensaver-overlay.hidden { display: none; }
+    .screensaver-slide {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity 0.8s ease;
+    }
+    .screensaver-slide.active { opacity: 1; }
+    .screensaver-slide img, .screensaver-slide video {
+      width: 100%; height: 100%; object-fit: contain; display: block; background: #000;
+    }
+  </style>
+</head>
+<body class="kiosk-body"
+  data-countdown="{{ config.get('ui', {}).get('countdown_seconds', 3) }}"
+  data-show-gallery-qr="{{ 1 if config.get('ui', {}).get('show_gallery_qr', False) else 0 }}"
+  data-bottom-bg="{{ config.get('ui', {}).get('bottom_bar', {}).get('background_color', 'rgba(0,0,0,.62)') }}"
+  data-bottom-text="{{ config.get('ui', {}).get('bottom_bar', {}).get('text_color', '#ffffff') }}"
+  data-bottom-muted="{{ config.get('ui', {}).get('bottom_bar', {}).get('muted_text_color', 'rgba(255,255,255,.82)') }}"
+  data-bottom-font-size="{{ config.get('ui', {}).get('bottom_bar', {}).get('font_size_px', 22) }}"
+  data-bottom-right-font-size="{{ config.get('ui', {}).get('bottom_bar', {}).get('right_message_font_size_px', 16) }}"
+  data-bottom-padding-y="{{ config.get('ui', {}).get('bottom_bar', {}).get('padding_y_px', 18) }}"
+  data-bottom-padding-x="{{ config.get('ui', {}).get('bottom_bar', {}).get('padding_x_px', 22) }}"
+  data-bottom-gap="{{ config.get('ui', {}).get('bottom_bar', {}).get('column_gap_px', 20) }}"
+  data-bottom-border-top="{{ config.get('ui', {}).get('bottom_bar', {}).get('border_top_color', 'rgba(255,255,255,.12)') }}"
+  data-bottom-qr-size="{{ config.get('ui', {}).get('bottom_bar', {}).get('qr_size_px', 96) }}"
+  data-replay-top="{{ config.get('ui', {}).get('replay_badge', {}).get('top_px', 18) }}"
+  data-replay-left="{{ config.get('ui', {}).get('replay_badge', {}).get('left_px', 18) }}"
+  data-replay-font-size="{{ config.get('ui', {}).get('replay_badge', {}).get('font_size_px', 20) }}"
+  data-replay-text-color="{{ config.get('ui', {}).get('replay_badge', {}).get('text_color', '#ffffff') }}"
+  data-replay-bg="{{ config.get('ui', {}).get('replay_badge', {}).get('background_color', 'rgba(0,0,0,.62)') }}"
+  data-replay-border="{{ config.get('ui', {}).get('replay_badge', {}).get('border_color', 'rgba(255,255,255,.14)') }}"
+  data-replay-radius="{{ config.get('ui', {}).get('replay_badge', {}).get('border_radius_px', 999) }}"
+  data-replay-padding-y="{{ config.get('ui', {}).get('replay_badge', {}).get('padding_y_px', 10) }}"
+  data-replay-padding-x="{{ config.get('ui', {}).get('replay_badge', {}).get('padding_x_px', 14) }}"
+  data-replay-letter-spacing="{{ config.get('ui', {}).get('replay_badge', {}).get('letter_spacing_em', 0.08) }}"
+  data-replay-mobile-top="{{ config.get('ui', {}).get('replay_badge', {}).get('mobile_top_px', 14) }}"
+  data-replay-mobile-left="{{ config.get('ui', {}).get('replay_badge', {}).get('mobile_left_px', 14) }}"
+  data-replay-mobile-font-size="{{ config.get('ui', {}).get('replay_badge', {}).get('mobile_font_size_px', 16) }}"
+  data-replay-mobile-padding-y="{{ config.get('ui', {}).get('replay_badge', {}).get('mobile_padding_y_px', 8) }}"
+  data-replay-mobile-padding-x="{{ config.get('ui', {}).get('replay_badge', {}).get('mobile_padding_x_px', 13) }}"
+  data-photo-btn-bg="{{ config.get('ui', {}).get('capture_buttons', {}).get('photo_bg', '#0d8b8f') }}"
+  data-photo-btn-text="{{ config.get('ui', {}).get('capture_buttons', {}).get('photo_text', '#ffffff') }}"
+  data-video-btn-bg="{{ config.get('ui', {}).get('capture_buttons', {}).get('video_bg', '#8b2f0d') }}"
+  data-video-btn-text="{{ config.get('ui', {}).get('capture_buttons', {}).get('video_text', '#ffffff') }}"
+  data-capture-font-size="{{ config.get('ui', {}).get('capture_buttons', {}).get('font_size_px', 38) }}"
+  data-capture-side-offset="{{ config.get('ui', {}).get('capture_buttons', {}).get('side_offset_px', 360) }}"
+  data-capture-gap="{{ config.get('ui', {}).get('capture_buttons', {}).get('gap_px', 320) }}"
+  data-capture-vertical-position="{{ config.get('ui', {}).get('capture_buttons', {}).get('vertical_position', '80%') }}"
+  data-start-btn-text="{{ config.get('ui', {}).get('start_button', {}).get('text', "C'est parti") }}"
+  data-start-btn-bg="{{ config.get('ui', {}).get('start_button', {}).get('background_color', '#f2c94c') }}"
+  data-start-btn-text-color="{{ config.get('ui', {}).get('start_button', {}).get('text_color', '#111111') }}"
+  data-start-btn-font-size="{{ config.get('ui', {}).get('start_button', {}).get('font_size_px', 24) }}"
+  data-start-btn-font-weight="{{ config.get('ui', {}).get('start_button', {}).get('font_weight', 800) }}"
+  data-start-btn-radius="{{ config.get('ui', {}).get('start_button', {}).get('border_radius_px', 999) }}"
+  data-start-btn-padding-y="{{ config.get('ui', {}).get('start_button', {}).get('padding_y_px', 18) }}"
+  data-start-btn-padding-x="{{ config.get('ui', {}).get('start_button', {}).get('padding_x_px', 28) }}"
+  data-start-btn-border="{{ config.get('ui', {}).get('start_button', {}).get('border_color', 'rgba(255,255,255,.16)') }}"
+  data-start-btn-shadow="{{ config.get('ui', {}).get('start_button', {}).get('shadow', '0 14px 34px rgba(0,0,0,.28)') }}"
+  data-look-here-text="{{ config.get('ui', {}).get('look_here', {}).get('text', 'regardez ici !') }}"
+  data-bottom-left-home="{{ config.get('ui', {}).get('bottom_bar', {}).get('left_message_home', 'Touchez un bouton pour lancer une capture') }}"
+  data-bottom-left-frame="{{ config.get('ui', {}).get('bottom_bar', {}).get('left_message_frame', 'Choisissez un cadre décoratif puis lancez la capture') }}"
+  data-bottom-left-replay="{{ config.get('ui', {}).get('bottom_bar', {}).get('left_message_replay', 'Votre capture est prête') }}"
+  data-bottom-right="{{ config.get('ui', {}).get('bottom_bar', {}).get('right_message', 'Scannez pour retrouver vos photos et vidéos') }}"
+>
+  <!-- Barre de progression tout en haut de l'écran, partagée par tous les
+       comptes à rebours (veille, capture, retour auto accueil). Voir app.js. -->
+  <div id="topCountdownBar" class="top-countdown-bar hidden" aria-hidden="true">
+    <div id="topCountdownBarFill" class="top-countdown-bar-fill"></div>
+  </div>
+
+  <!-- Zone discrète : 5 appuis rapides (ou Ctrl+Maj+K) demandent le mot de
+       passe admin pour sortir/rentrer du plein écran. Voir static/app.js. -->
+  <div id="kioskUnlockZone" aria-hidden="true"
+       style="position:fixed;top:0;left:0;width:64px;height:64px;z-index:9999;background:transparent;"></div>
+
+  <div id="kioskUnlockModal" class="kiosk-unlock-modal hidden">
+    <div class="kiosk-unlock-box">
+      <div class="kiosk-unlock-title">Accès administrateur</div>
+      <input type="password" id="kioskUnlockInput" class="kiosk-unlock-input"
+             placeholder="Mot de passe" autocomplete="off">
+      <div class="kiosk-unlock-msg" id="kioskUnlockMsg"></div>
+      <div class="kiosk-unlock-actions">
+        <button class="action-btn ter" id="kioskUnlockCancel" type="button">Annuler</button>
+        <button class="action-btn pri" id="kioskUnlockConfirm" type="button">Valider</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="preview-shell" id="previewShell">
+    <img class="preview-stream" src="{{ url_for('stream_mjpg') }}" alt="Prévisualisation" />
+    <div class="overlay">
+      <div id="welcomeOverlayEl" class="frame-overlay-live{% if not welcome_frame_url %} hidden{% endif %}"
+           style="{% if welcome_frame_url %}background-image:url('{{ welcome_frame_url }}');{% endif %}"></div>
+      <div id="frameOverlayImg" class="frame-overlay-live hidden"></div>
+
+      <!-- Badge "Retour dans Ns" — la barre elle-même est #topCountdownBar,
+           partagée, tout en haut de l'écran. -->
+      <div id="idleTimerEl" class="idle-timer-wrap hidden">
+        <div class="idle-timer-badge" id="idleTimerBadge"></div>
+      </div>
+
+      <div class="top-bar">
+        <div class="brand">{{ texts.app_title }}</div>
+      </div>
+
+      <div class="look-here-banner" id="lookHereBanner">
+        <div class="look-here-arrow"></div>
+        <div class="look-here-label" id="lookHereLabel">{{ texts.look_here }}</div>
+      </div>
+
+      <div class="countdown hidden" id="countdown">3</div>
+      <div class="countdown-recording hidden" id="countdownRecording">
+        <span class="recording-dot"></span>
+        <span id="recordingSeconds"></span>
+      </div>
+
+      <div class="processing-overlay hidden" id="processingOverlay">
+        <div class="processing-card">
+          <div class="processing-spinner"></div>
+          <div class="processing-title">{{ texts.processing_title }}</div>
+          <div class="processing-text">{{ texts.processing_text }}</div>
+        </div>
+      </div>
+
+      <div class="result-shell hidden" id="resultShell">
+        <div class="result-media" id="resultMedia"></div>
+        <div class="message-box">
+          <div class="message-copy" id="resultMessage">{{ config.get('ui', {}).get('message_text', 'Merci pour votre visite !') }}</div>
+          <img class="result-qr" id="resultQr" src="{{ url_for('qr_png') }}" alt="QR Galerie">
+        </div>
+      </div>
+
+      <div class="replay-badge hidden" id="replayBadge">{{ texts.replay_badge }}</div>
+
+      <div class="bottom-action-bar" id="bottomActionBar">
+        <div class="bottom-bar-zone bottom-bar-left">
+          <button class="action-btn ter hidden" id="btnFrameStepBack">{{ texts.btn_retour }}</button>
+          <div class="bottom-bar-message" id="bottomLeftMessage">{{ texts.bottom_left_home }}</div>
+        </div>
+
+        <div class="bottom-bar-zone bottom-bar-center">
+          <div class="bottom-bar-buttons" id="homeBtns">
+            <button class="action-btn pri" id="btnTakePhoto">{{ texts.btn_photo }}</button>
+            <button class="action-btn sec" id="btnTakeVideo">{{ texts.btn_video }}</button>
+          </div>
+          <div class="bottom-bar-buttons hidden" id="frameStepBtns">
+            <button class="action-btn sec" id="btnChooseFrame">{{ texts.btn_choose_frame }}</button>
+            <button class="action-btn pri" id="btnStartCapture">{{ texts.start_btn }}</button>
+          </div>
+          <div class="bottom-bar-buttons hidden" id="replayPhotoBtns">
+            <button class="action-btn pri" id="btnBackPhoto">{{ texts.btn_retour }}</button>
+            {% if not hide_print_button %}
+            <button class="action-btn sec" id="btnPrintPhoto">{{ texts.btn_imprimer }}</button>
+            {% endif %}
+          </div>
+          <div class="bottom-bar-buttons hidden" id="replayVideoBtns">
+            <button class="action-btn pri" id="btnBackVideo">{{ texts.btn_retour }}</button>
+          </div>
+        </div>
+
+        <div class="bottom-bar-zone bottom-bar-right">
+          <div class="bottom-bar-qr-wrap">
+            <div class="bottom-bar-qr-texts">
+              <div class="bottom-bar-qr-text" id="bottomRightMessage">{{ texts.bottom_right }}</div>
+              {% if texts.bottom_right_sub %}<div class="bottom-bar-qr-sub">{{ texts.bottom_right_sub }}</div>{% endif %}
+            </div>
+            {% if config.get('ui', {}).get('bottom_bar', {}).get('qr_enabled', True) %}
+            <img class="bottom-bar-qr" src="{{ url_for('qr_png') }}" alt="QR Galerie">
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="screensaverOverlay" class="screensaver-overlay hidden" aria-hidden="true">
+    <div id="screensaverSlideA" class="screensaver-slide"></div>
+    <div id="screensaverSlideB" class="screensaver-slide"></div>
+  </div>
+
+  <div id="framePickerPanel" class="frame-picker-panel hidden">
+    <div class="picker-drag-handle" id="pickerDragHandle">
+      <div class="picker-drag-bar"></div>
+    </div>
+    <div class="picker-inner">
+      <button class="action-btn ter" id="btnFramePickerBack">{{ texts.btn_retour }}</button>
+      <button class="picker-nav-btn" id="btnPickerLeft" aria-label="Précédent">&#8249;</button>
+      <div class="picker-strip" id="pickerStrip"></div>
+      <button class="picker-nav-btn" id="btnPickerRight" aria-label="Suivant">&#8250;</button>
+      <button class="action-btn pri" id="btnFramePickerApply">{{ texts.btn_appliquer }}</button>
+    </div>
+  </div>
+
+  <script>
+    window.PHOTOMATON = {
+      countdownSeconds: {{ config.get('ui', {}).get('countdown_seconds', 3) }},
+      defaultFrame: {{ default_frame | tojson }},
+      frames: {{ frames | tojson }},
+      showTakePhoto: {{ 'true' if config.get('ui', {}).get('show_take_photo', True) else 'false' }},
+      showTakeVideo: {{ 'true' if config.get('ui', {}).get('show_take_video', True) else 'false' }},
+      showGalleryQR: {{ 'true' if config.get('ui', {}).get('show_gallery_qr', True) else 'false' }},
+      galleryUrl: {{ ((config.get('server', {}).get('base_url', '') | string).rstrip('/') ~ config.get('server', {}).get('gallery_path', '/gallery')) | tojson }},
+      galleryTitle: {{ config.get('gallery', {}).get('title', 'Galerie') | tojson }},
+      gallerySort: {{ config.get('gallery', {}).get('sort', 'desc') | tojson }},
+      videoDurationSec: {{ config.get('capture', {}).get('video', {}).get('default_duration_sec', 5) }},
+      welcomeFrame: {{ welcome_frame_url | tojson }},
+      bottomLeftHome:   {{ texts.bottom_left_home | tojson }},
+      bottomLeftFrame:  {{ texts.bottom_left_frame | tojson }},
+      bottomLeftReplay: {{ texts.bottom_left_replay | tojson }},
+      bottomRight:      {{ texts.bottom_right | tojson }},
+      startBtnText:     {{ texts.start_btn | tojson }},
+      idleTimerEnabled:    {{ 'true' if idle_timer_enabled else 'false' }},
+      idleTimerSeconds:    {{ idle_timer_seconds }},
+      idleTimerBadgeText:  {{ idle_timer_badge_text | tojson }},
+      idleTimerFontSize:   {{ idle_timer_font_size }},
+      idleTimerPaddingY:   {{ idle_timer_padding_y }},
+      idleTimerPaddingX:   {{ idle_timer_padding_x }},
+      screensaverEnabled:        {{ 'true' if screensaver_enabled else 'false' }},
+      screensaverTimeoutSeconds: {{ screensaver_timeout_seconds }},
+    };
+  </script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

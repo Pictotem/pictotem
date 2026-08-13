@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Écran de veille — {{ config.get('ui', {}).get('app_title', 'Photomaton') }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .admin-wrap  { max-width: 900px; margin: 0 auto; padding: 40px 20px 60px; }
+    .back-link   { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
+                   text-decoration: none; font-size: 14px; margin-bottom: 28px; }
+    .back-link:hover { color: var(--text); }
+    h1 { font-size: 28px; font-weight: 700; margin: 0 0 4px; }
+    .subtitle { color: var(--muted); font-size: 14px; margin: 0 0 32px; }
+    .alert { padding: 12px 16px; border-radius: 10px; margin-bottom: 24px; font-size: 14px; }
+    .alert-ok  { background: rgba(50,200,100,.15); border:1px solid rgba(50,200,100,.3); color:#4ecca0; }
+    .alert-err { background: rgba(200,50,50,.15);  border:1px solid rgba(200,50,50,.3);  color:#e57373; }
+    .section-title { font-size: 18px; font-weight: 700; border-bottom: 1px solid var(--border);
+                     padding-bottom: 10px; margin: 0 0 20px; }
+    .section { margin-bottom: 48px; }
+    .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+    .field { margin-bottom: 18px; }
+    .field label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+    .field input[type=number] {
+      width: 100%; max-width: 200px; background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px;
+    }
+    .field-row  { display: flex; gap: 24px; flex-wrap: wrap; }
+    .field-half { flex: 1; min-width: 180px; }
+    .checkbox-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+    .checkbox-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+    .btn-primary { background: var(--accent); color: #000; font-weight: 700; border: none;
+                   border-radius: 10px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
+    .btn-primary:hover { opacity: .85; }
+    .btn-danger  { background: rgba(180,40,40,.7); color: #fff; font-weight: 600; border: none;
+                   border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+    .btn-danger:hover { background: rgba(220,50,50,.9); }
+
+    /* Grille images */
+    .img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px;
+                margin-bottom: 24px; }
+    .img-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+                overflow: hidden; }
+    .img-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+    .img-card-foot { padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+    .img-card-name { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis;
+                     white-space: nowrap; flex: 1; }
+
+    /* Upload zone */
+    .upload-zone { background: var(--surface); border: 2px dashed var(--border); border-radius: 14px;
+                   padding: 28px 24px; text-align: center; transition: border-color .15s; }
+    .upload-zone:focus-within { border-color: var(--accent); }
+    .upload-zone input[type=file] { display: none; }
+    .upload-label { color: var(--accent); font-size: 14px; cursor: pointer; display: block; margin-bottom: 6px; }
+    .upload-hint  { font-size: 12px; color: var(--muted); }
+    #upload-name  { margin-top: 4px; font-size: 13px; color: var(--text); }
+  </style>
+</head>
+<body class="gallery-body">
+<div class="admin-wrap">
+
+  <a class="back-link" href="{{ url_for('admin_home') }}">← Administration</a>
+  <h1>Écran de veille</h1>
+  <p class="subtitle">
+    Diaporama plein écran affiché sur l'interface principale après une période d'inactivité sur l'accueil.
+    N'interrompt jamais une capture en cours et se referme au premier appui/clic/touche.
+  </p>
+
+  {% if alert_success %}
+  <div class="alert alert-ok">{{ alert_success }}</div>
+  {% endif %}
+  {% if alert_error %}
+  <div class="alert alert-err">{{ alert_error }}</div>
+  {% endif %}
+
+  <!-- Paramètres -->
+  <div class="section">
+    <p class="section-title">Paramètres</p>
+    <div class="form-card">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="settings">
+
+        <div class="field">
+          <label class="checkbox-row">
+            <input type="checkbox" name="enabled" value="1" {% if settings.enabled %}checked{% endif %}>
+            Activer l'écran de veille
+          </label>
+        </div>
+
+        <div class="field-row">
+          <div class="field field-half">
+            <label>Délai avant veille (minutes d'inactivité sur l'accueil)</label>
+            <input type="number" name="timeout_min" min="1" max="120" value="{{ settings.timeout_min }}">
+          </div>
+          <div class="field field-half">
+            <label>Délai entre chaque image (secondes)</label>
+            <input type="number" name="delay" min="1" max="300" value="{{ settings.delay }}">
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="checkbox-row">
+            <input type="checkbox" name="include_captures" value="1" {% if settings.include_captures %}checked{% endif %}>
+            Inclure les photos/vidéos prises par les visiteurs à la borne
+          </label>
+          <p style="font-size:12px;color:var(--muted);margin:6px 0 0 28px">
+            Décoché : le diaporama de veille n'utilise que les images ci-dessous, jamais les captures des visiteurs.
+          </p>
+        </div>
+
+        <button class="btn-primary" type="submit">Enregistrer</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Images -->
+  <div class="section">
+    <p class="section-title">Images
+      <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
+        {% if settings.include_captures %}
+        Mêlées aux photos/vidéos prises à la borne pour composer le diaporama de veille
+        {% else %}
+        Seules images utilisées pour le diaporama de veille (captures visiteurs désactivées ci-dessus)
+        {% endif %}
+      </span>
+    </p>
+
+    {% if images %}
+    <div class="img-grid">
+      {% for img in images %}
+      <div class="img-card">
+        <img src="{{ url_for('static', filename='screensaver/' + img.filename) }}"
+             alt="{{ img.filename }}" loading="lazy">
+        <div class="img-card-foot">
+          <span class="img-card-name" title="{{ img.filename }}">{{ img.filename }}</span>
+          <form method="post" onsubmit="return confirm('Supprimer cette image ?')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="image_id" value="{{ img.id }}">
+            <button class="btn-danger" type="submit">✕</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:var(--muted);font-size:14px;margin-bottom:20px">
+      Aucune image dédiée — le diaporama de veille utilisera uniquement les photos/vidéos de la borne.
+    </p>
+    {% endif %}
+
+    <!-- Upload -->
+    <form method="post" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="upload">
+      <div class="upload-zone">
+        <label class="upload-label" for="ss-img-input">Choisir une image…</label>
+        <input type="file" id="ss-img-input" name="image"
+               accept=".png,.jpg,.jpeg,.webp,.gif"
+               onchange="document.getElementById('upload-name').textContent = this.files[0]?.name || ''">
+        <span id="upload-name"></span>
+        <p class="upload-hint">PNG, JPG, WEBP, GIF — résolution recommandée : 1920×1080</p>
+        <div style="margin-top:14px">
+          <button class="btn-primary" type="submit">Ajouter</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+</div>
+</body>
+</html>

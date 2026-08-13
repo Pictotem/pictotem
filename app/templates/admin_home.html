@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Administration — {{ config.get('ui', {}).get('app_title', 'Photomaton') }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .admin-wrap { max-width: 860px; margin: 0 auto; padding: 40px 20px 60px; }
+    .admin-hero { margin-bottom: 40px; }
+    .admin-hero h1 { font-size: 32px; font-weight: 700; margin: 0 0 6px; }
+    .admin-hero p { color: var(--muted); margin: 0; }
+    .admin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+    .admin-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 22px 20px; text-decoration: none; color: var(--text);
+      transition: border-color .15s, background .15s; display: flex; flex-direction: column; gap: 6px;
+    }
+    .admin-card:hover { border-color: var(--accent); background: var(--surface-2); }
+    .admin-card-title { font-weight: 700; font-size: 17px; }
+    .admin-card-desc { font-size: 13px; color: var(--muted); line-height: 1.4; }
+    .admin-card.logout { border-color: rgba(200,50,50,.3); }
+    .admin-card.logout:hover { border-color: rgba(200,50,50,.7); }
+    .section-label { font-size: 12px; font-weight: 700; text-transform: uppercase;
+                     letter-spacing: .08em; color: var(--muted); margin: 28px 0 10px; }
+  </style>
+</head>
+<body class="gallery-body">
+<div class="admin-wrap">
+
+  <div class="admin-hero">
+    <h1>Administration</h1>
+    <p>{{ config.get('ui', {}).get('app_title', 'Photomaton') }}</p>
+  </div>
+
+  <p class="section-label">Contenu</p>
+  <div class="admin-cards">
+    <a class="admin-card" href="{{ url_for('admin_frames') }}">
+      <div class="admin-card-title">Cadres</div>
+      <div class="admin-card-desc">Cadres de capture, cadre d'accueil, cadre par défaut</div>
+    </a>
+    <a class="admin-card" href="{{ url_for('admin_gallery') }}">
+      <div class="admin-card-title">Galerie</div>
+      <div class="admin-card-desc">Texte d'introduction affiché dans la galerie</div>
+    </a>
+    <a class="admin-card" href="{{ url_for('admin_texts') }}">
+      <div class="admin-card-title">Textes</div>
+      <div class="admin-card-desc">Boutons, messages et libellés de l'interface kiosque</div>
+    </a>
+    <a class="admin-card" href="{{ url_for('admin_emails') }}">
+      <div class="admin-card-title">Emails</div>
+      <div class="admin-card-desc">Liste, filtrage, CRUD et export des emails collectés</div>
+    </a>
+    <a class="admin-card" href="{{ url_for('admin_captures') }}">
+      <div class="admin-card-title">Captures</div>
+      <div class="admin-card-desc">Parcourir et supprimer les photos et vidéos enregistrées</div>
+    </a>
+    <a class="admin-card" href="{{ url_for('admin_system') }}">
+      <div class="admin-card-title">Caméra &amp; écran</div>
+      <div class="admin-card-desc">Choix de la caméra, résolution, rotation, miroir, écran kiosque</div>
+    </a>
+  </div>
+
+    <a class="admin-card" href="{{ url_for('admin_slideshow') }}">
+      <div class="admin-card-title">Slideshow Best Of</div>
+      <div class="admin-card-desc">Diaporama public /bestof — type, délai, ordre, dates, images intermédiaires</div>
+    </a>
+    <a class="admin-card" href="{{ url_for('admin_screensaver') }}">
+      <div class="admin-card-title">Écran de veille</div>
+      <div class="admin-card-desc">Diaporama plein écran après inactivité sur l'accueil — délai, images dédiées</div>
+    </a>
+    <a class="admin-card" href="{{ url_for('admin_votes') }}">
+      <div class="admin-card-title">Votes</div>
+      <div class="admin-card-desc">Activer les votes sur la galerie, couleurs et seuils du gradient</div>
+    </a>
+
+  <p class="section-label">Navigation</p>
+  <div class="admin-cards">
+    <a class="admin-card" href="{{ url_for('index') }}">
+      <div class="admin-card-title">Kiosque</div>
+      <div class="admin-card-desc">Retour à l'interface principale du photomaton</div>
+    </a>
+    <a class="admin-card" href="{{ url_for('gallery') }}">
+      <div class="admin-card-title">Galerie</div>
+      <div class="admin-card-desc">Parcourir les captures</div>
+    </a>
+    <a class="admin-card logout" href="{{ url_for('logout') }}">
+      <div class="admin-card-title">Déconnexion</div>
+      <div class="admin-card-desc">Se déconnecter de l'administration</div>
+    </a>
+  </div>
+
+</div>
+</body>
+</html>

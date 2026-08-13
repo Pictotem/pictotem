@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Captures — {{ config.get('ui', {}).get('app_title', 'Photomaton') }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .admin-wrap { max-width: 1100px; margin: 0 auto; padding: 32px 20px 60px; }
+    .admin-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
+    .admin-header h1 { font-size: 26px; font-weight: 700; margin: 0 0 4px; }
+    .admin-header p  { color: var(--muted); margin: 0; font-size: 14px; }
+    .admin-nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .flash-list { list-style: none; padding: 0; margin: 0 0 20px; }
+    .flash-list li { padding: 11px 15px; border-radius: 10px; margin-bottom: 6px; font-weight: 600; font-size: 14px; }
+    .flash-list li.success { background: rgba(13,139,143,.18); border: 1px solid rgba(13,139,143,.4); color: #5cf5f9; }
+    .flash-list li.error   { background: rgba(200,50,50,.18);  border: 1px solid rgba(200,50,50,.4);  color: #f97b7b; }
+
+    .toolbar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+      padding: 12px 16px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; margin-bottom: 16px;
+    }
+    .tb-sep { flex: 1; }
+    .tb-group { display: flex; gap: 4px; }
+    .tb-btn {
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+      border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 600;
+      cursor: pointer; text-decoration: none; white-space: nowrap; transition: .15s;
+    }
+    .tb-btn.active { background: var(--accent); border-color: transparent; color: #fff; }
+    .tb-btn:hover  { border-color: var(--accent); color: var(--text); }
+
+    .capture-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+    }
+    .cap-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; overflow: hidden;
+    }
+    .cap-thumb {
+      aspect-ratio: 16/9; background: #000; position: relative; overflow: hidden;
+    }
+    .cap-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .cap-thumb-empty {
+      width: 100%; height: 100%; display: flex; align-items: center;
+      justify-content: center; color: var(--muted); font-size: 12px;
+    }
+    .video-badge {
+      position: absolute; inset: 0; display: flex; align-items: center;
+      justify-content: center; pointer-events: none;
+    }
+    .video-badge span {
+      background: rgba(0,0,0,.55); color: #fff; border-radius: 50%;
+      width: 36px; height: 36px; display: flex; align-items: center;
+      justify-content: center; font-size: 16px;
+    }
+    .cap-body { padding: 10px 12px; }
+    .cap-meta { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+    .cap-filename { font-size: 11px; color: rgba(255,255,255,.3); font-family: monospace;
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 0 10px; }
+    .cap-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .danger { background: rgba(180,40,40,.7) !important; border-color: rgba(255,100,100,.3) !important; color: #fff !important; }
+    .danger:hover { background: rgba(220,50,50,.9) !important; }
+
+    .pagination { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 24px 0 0; flex-wrap: wrap; }
+
+    .cap-vote { display: flex; align-items: center; gap: 4px; margin-top: 8px; }
+    .vadj { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border);
+            background: var(--surface-2); color: var(--muted); font-size: 15px; font-weight: 700;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            padding: 0; line-height: 1; transition: .15s; }
+    .vadj:hover { border-color: var(--accent); color: var(--text); }
+    .vadj:disabled { opacity: .4; cursor: default; }
+    .vscore { font-size: 13px; font-weight: 700; min-width: 28px; text-align: center; }
+  </style>
+</head>
+<body class="gallery-body">
+<div class="admin-wrap">
+
+  <div class="admin-header">
+    <div>
+      <h1>Captures</h1>
+      <p>{{ total }} capture(s) au total — page {{ page }}/{{ total_pages }}</p>
+    </div>
+    <nav class="admin-nav">
+      <a class="action-btn" href="{{ url_for('admin_home') }}">← Admin</a>
+      <a class="action-btn" href="{{ url_for('gallery') }}">Galerie</a>
+      <a class="action-btn" href="{{ url_for('logout') }}">Déconnexion</a>
+    </nav>
+  </div>
+
+  {% if alert_success %}<ul class="flash-list"><li class="success">{{ alert_success }}</li></ul>{% endif %}
+  {% if alert_error   %}<ul class="flash-list"><li class="error">{{ alert_error }}</li></ul>{% endif %}
+
+  <!-- Filtres -->
+  <div class="toolbar">
+    <div class="tb-group">
+      <a class="tb-btn {% if kind == '' %}active{% endif %}"     href="{{ url_for('admin_captures', kind='',      sort=sort) }}">Tous</a>
+      <a class="tb-btn {% if kind == 'photo' %}active{% endif %}" href="{{ url_for('admin_captures', kind='photo', sort=sort) }}">Photos</a>
+      <a class="tb-btn {% if kind == 'video' %}active{% endif %}" href="{{ url_for('admin_captures', kind='video', sort=sort) }}">Vidéos</a>
+    </div>
+    <div class="tb-group">
+      <a class="tb-btn {% if sort == 'desc' %}active{% endif %}" href="{{ url_for('admin_captures', kind=kind, sort='desc') }}">↓ Récent</a>
+      <a class="tb-btn {% if sort == 'asc'  %}active{% endif %}" href="{{ url_for('admin_captures', kind=kind, sort='asc')  }}">↑ Ancien</a>
+    </div>
+  </div>
+
+  <!-- Grille -->
+  <div class="capture-grid">
+    {% for item in captures %}
+    {% set thumb_url = url_for('media_thumb', filename=item.thumb_filename) if item.thumb_filename else '' %}
+    <div class="cap-card">
+      <div class="cap-thumb">
+        {% if thumb_url %}
+        <img src="{{ thumb_url }}" alt="{{ item.kind }}" loading="lazy">
+        {% else %}
+        <div class="cap-thumb-empty">Pas de miniature</div>
+        {% endif %}
+        {% if item.kind == 'video' %}
+        <div class="video-badge"><span>&#9654;</span></div>
+        {% endif %}
+      </div>
+      <div class="cap-body">
+        <p class="cap-meta">#{{ item.id }} · {{ item.created_at | format_dt }} · {{ item.kind }}</p>
+        <p class="cap-filename" title="{{ item.filename }}">{{ item.filename }}</p>
+        <div class="cap-vote">
+          <button class="vadj" onclick="vadj({{ item.id }}, 1, this)">+</button>
+          <span class="vscore" id="vscore-{{ item.id }}" data-score="{{ item.vote_score }}">{{ item.vote_score }}</span>
+          <button class="vadj" onclick="vadj({{ item.id }}, -1, this)">−</button>
+        </div>
+        <div class="cap-actions">
+          {% if item.kind == 'photo' %}
+          <a class="action-btn small" href="{{ url_for('media_photo', filename=item.filename) }}" target="_blank">Voir</a>
+          {% else %}
+          <a class="action-btn small" href="{{ url_for('media_video', filename=item.filename) }}" target="_blank">Voir</a>
+          {% endif %}
+          <form method="post" action="{{ url_for('admin_capture_delete', capture_id=item.id) }}"
+                onsubmit="return confirm('Supprimer cette capture (#{{ item.id }}) ? Les fichiers seront supprimés.')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            <input type="hidden" name="kind" value="{{ kind }}">
+            <input type="hidden" name="page" value="{{ page }}">
+            <button class="action-btn small danger" type="submit">Supprimer</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <p style="grid-column:1/-1;text-align:center;color:var(--muted);padding:40px">Aucune capture.</p>
+    {% endfor %}
+  </div>
+
+  <!-- Pagination -->
+  {% if total_pages > 1 %}
+  <nav class="pagination">
+    {% if page > 1 %}
+    <a class="tb-btn" href="{{ url_for('admin_captures', kind=kind, sort=sort, page=page-1) }}">← Précédent</a>
+    {% else %}
+    <span class="tb-btn" style="opacity:.35;cursor:default;">← Précédent</span>
+    {% endif %}
+
+    {% for p in range(1, total_pages + 1) %}
+      {% if p == page %}
+      <span class="tb-btn active">{{ p }}</span>
+      {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
+      <a class="tb-btn" href="{{ url_for('admin_captures', kind=kind, sort=sort, page=p) }}">{{ p }}</a>
+      {% elif p == page - 3 or p == page + 3 %}
+      <span class="tb-btn" style="opacity:.4;cursor:default;">…</span>
+      {% endif %}
+    {% endfor %}
+
+    {% if page < total_pages %}
+    <a class="tb-btn" href="{{ url_for('admin_captures', kind=kind, sort=sort, page=page+1) }}">Suivant →</a>
+    {% else %}
+    <span class="tb-btn" style="opacity:.35;cursor:default;">Suivant →</span>
+    {% endif %}
+  </nav>
+  {% endif %}
+
+</div>
+
+<script>
+  const VOTE_CFG = {
+    blueMax:  parseInt('{{ vote_cfg.blue_max  }}') || 10,
+    greenMax: parseInt('{{ vote_cfg.green_max }}') || 10,
+    redMax:   parseInt('{{ vote_cfg.red_max   }}') || 20
+  };
+  const VOTE_COLORS = {
+    negMax: '{{ vote_cfg.color_neg_max }}',
+    negMid: '{{ vote_cfg.color_neg_mid }}',
+    zero:   '{{ vote_cfg.color_zero }}',
+    posMid: '{{ vote_cfg.color_pos_mid }}',
+    posMax: '{{ vote_cfg.color_pos_max }}',
+  };
+
+  function hexRgb(h) {
+    const s = h.replace('#','');
+    return [parseInt(s.slice(0,2),16), parseInt(s.slice(2,4),16), parseInt(s.slice(4,6),16)];
+  }
+  function lerpColor(h1, h2, t) {
+    t = Math.max(0, Math.min(1, t));
+    const [r1,g1,b1] = hexRgb(h1), [r2,g2,b2] = hexRgb(h2);
+    return `rgb(${Math.round(r1+(r2-r1)*t)},${Math.round(g1+(g2-g1)*t)},${Math.round(b1+(b2-b1)*t)})`;
+  }
+  function scoreColor(score) {
+    const C = VOTE_COLORS, T = VOTE_CFG;
+    if (score === 0) return C.zero;
+    if (score < 0) {
+      const half = T.blueMax / 2, abs = Math.abs(score);
+      if (abs <= half) return lerpColor(C.zero, C.negMid, abs / half);
+      return lerpColor(C.negMid, C.negMax, Math.min(1, (abs - half) / half));
+    }
+    if (score <= T.greenMax) return lerpColor(C.zero, C.posMid, score / T.greenMax);
+    return lerpColor(C.posMid, C.posMax, Math.min(1, (score - T.greenMax) / Math.max(1, T.redMax - T.greenMax)));
+  }
+
+  function applyScore(el, score) {
+    el.textContent = score > 0 ? '+' + score : String(score);
+    el.style.color = scoreColor(score);
+  }
+
+  document.querySelectorAll('.vscore').forEach(el =>
+    applyScore(el, parseInt(el.dataset.score || '0'))
+  );
+
+  async function vadj(captureId, delta, btn) {
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/admin/captures/${captureId}/vote-adjust`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delta })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const el = document.getElementById('vscore-' + captureId);
+        el.dataset.score = data.score;
+        applyScore(el, data.score);
+      }
+    } catch(e) { console.error(e); }
+    finally { btn.disabled = false; }
+  }
+</script>
+</body>
+</html>

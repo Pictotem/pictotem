@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Caméra &amp; écran — {{ config.get('ui', {}).get('app_title', 'Photomaton') }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .admin-wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 60px; }
+    .admin-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 36px; flex-wrap: wrap; }
+    .admin-header h1 { font-size: 28px; font-weight: 700; margin: 0 0 4px; }
+    .admin-header p { color: var(--muted); margin: 0; }
+    .admin-nav { display: flex; gap: 10px; flex-wrap: wrap; }
+    .flash-list { list-style: none; padding: 0; margin: 0 0 24px; }
+    .flash-list li { padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; font-weight: 600; }
+    .flash-list li.success { background: rgba(13,139,143,.18); border: 1px solid rgba(13,139,143,.4); color: #5cf5f9; }
+    .flash-list li.error   { background: rgba(200,50,50,.18); border: 1px solid rgba(200,50,50,.4); color: #f97b7b; }
+    .text-section { margin-bottom: 36px; }
+    .text-section h2 { font-size: 16px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+                       letter-spacing: .07em; margin: 0 0 14px; padding-bottom: 10px;
+                       border-bottom: 1px solid var(--border); }
+    .text-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+    .text-field { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+    .field-label { display: block; font-size: 12px; font-weight: 700; color: var(--muted);
+                   text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+    .field-default { font-size: 11px; color: rgba(255,255,255,.35); margin-top: 5px; }
+    input[type=text], input[type=number], select {
+      width: 100%; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 8px; padding: 9px 12px; font-size: 14px; box-sizing: border-box;
+    }
+    input[type=text]:focus, input[type=number]:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  </style>
+</head>
+<body class="gallery-body">
+<div class="admin-wrap">
+
+  <div class="admin-header">
+    <div>
+      <h1>Caméra &amp; écran</h1>
+      <p>Les changements caméra s'appliquent immédiatement. Ceux de l'écran/kiosque au prochain lancement de run.bat.</p>
+    </div>
+    <nav class="admin-nav">
+      <a class="action-btn" href="{{ url_for('admin_home') }}">← Admin</a>
+      <a class="action-btn" href="{{ url_for('logout') }}">Déconnexion</a>
+    </nav>
+  </div>
+
+  {% if alert_success %}<ul class="flash-list"><li class="success">{{ alert_success }}</li></ul>{% endif %}
+  {% if alert_error   %}<ul class="flash-list"><li class="error">{{ alert_error }}</li></ul>{% endif %}
+
+  <form method="post" action="{{ url_for('admin_system') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <div class="text-section">
+      <h2>Caméra</h2>
+      <div class="text-fields">
+        <div class="text-field">
+          <label class="field-label" for="camera_device">Caméra (index)</label>
+          <input type="number" id="camera_device" name="camera_device" value="{{ camera.device }}" min="0" max="10">
+          <p class="field-default">0 = première caméra détectée par Windows, 1 = deuxième, etc.</p>
+        </div>
+        <div class="text-field">
+          <label class="field-label" for="camera_rotation">Rotation</label>
+          <select id="camera_rotation" name="camera_rotation">
+            <option value="0"   {% if camera.rotation == 0   %}selected{% endif %}>0°</option>
+            <option value="90"  {% if camera.rotation == 90  %}selected{% endif %}>90°</option>
+            <option value="180" {% if camera.rotation == 180 %}selected{% endif %}>180°</option>
+            <option value="270" {% if camera.rotation == 270 %}selected{% endif %}>270°</option>
+          </select>
+        </div>
+        <div class="text-field">
+          <label class="field-label" for="camera_width">Largeur (px)</label>
+          <input type="number" id="camera_width" name="camera_width" value="{{ camera.width }}" min="1" step="1">
+        </div>
+        <div class="text-field">
+          <label class="field-label" for="camera_height">Hauteur (px)</label>
+          <input type="number" id="camera_height" name="camera_height" value="{{ camera.height }}" min="1" step="1">
+        </div>
+        <div class="text-field" style="grid-column:1/-1">
+          <label class="field-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+            <input type="checkbox" name="camera_preview_mirror" value="1"
+                   {% if camera.preview_mirror %}checked{% endif %}
+                   style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">
+            Effet miroir sur l'aperçu
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-section">
+      <h2>Écran / mode kiosque</h2>
+      <div class="text-fields">
+        <div class="text-field" style="grid-column:1/-1">
+          <label class="field-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+            <input type="checkbox" name="ui_kiosk_mode" value="1"
+                   {% if screen.kiosk_mode %}checked{% endif %}
+                   style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">
+            Lancer le navigateur en plein écran (mode kiosque) au démarrage
+          </label>
+          <p class="field-default" style="margin-top:8px">
+            Décoché : ouverture dans une fenêtre de navigateur normale (pratique en développement).
+          </p>
+        </div>
+        <div class="text-field">
+          <label class="field-label" for="ui_kiosk_screen">Écran (index)</label>
+          <input type="number" id="ui_kiosk_screen" name="ui_kiosk_screen" value="{{ screen.kiosk_screen }}" min="0" max="10">
+          <p class="field-default">0 = premier écran (le plus à gauche), 1 = deuxième, etc.</p>
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="action-btn primary" style="margin-top:8px">Enregistrer</button>
+
+  </form>
+
+  <div class="text-section" style="margin-top:8px">
+    <h2>Plein écran — bascule immédiate</h2>
+    <div class="text-fields">
+      <div class="text-field" style="grid-column:1/-1">
+        <p class="field-default" style="margin:0 0 12px">
+          Bascule tout de suite le plein écran de la fenêtre actuellement affichée sur la borne,
+          sans redémarrer l'application — indépendant du réglage « au démarrage » ci-dessus.
+          Équivalent au déverrouillage par mot de passe depuis l'interface principale (5 appuis
+          dans le coin haut-gauche ou Ctrl+Maj+K), mais ne demande pas de mot de passe ici car
+          l'accès à cette page est déjà protégé.
+        </p>
+        <form method="post" action="{{ url_for('admin_toggle_fullscreen') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="action-btn">Basculer le plein écran maintenant</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="text-section" style="margin-top:8px">
+    <h2>Démarrage automatique Windows</h2>
+    <div class="text-fields">
+      <div class="text-field" style="grid-column:1/-1">
+        <p class="field-default" style="margin:0 0 12px">
+          {% if autostart_enabled %}
+          Actuellement <strong style="color:var(--accent)">activé</strong> : l'application se lance
+          automatiquement à l'ouverture de session Windows (raccourci vers <code>run.bat</code> dans le
+          dossier Démarrage de l'utilisateur courant).
+          {% else %}
+          Actuellement désactivé : lancement uniquement manuel via <code>run.bat</code>.
+          {% endif %}
+        </p>
+        <form method="post" action="{{ url_for('admin_toggle_autostart') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="action-btn{% if not autostart_enabled %} primary{% endif %}">
+            {% if autostart_enabled %}Désactiver le démarrage automatique{% else %}Activer le démarrage automatique{% endif %}
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

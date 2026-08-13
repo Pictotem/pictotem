@@ -1,0 +1,19 @@
+# Généré au premier lancement (voir README.md) — jamais à committer.
+python-embed/
+ffmpeg/
+data/
+logs/
+
+# Pack de démarrage optionnel (contenu propre à chaque événement/utilisateur).
+pack/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Éditeurs / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

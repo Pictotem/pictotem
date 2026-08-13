@@ -1,0 +1,188 @@
+[server]
+host = "0.0.0.0"
+port = 80
+base_url = "http://127.0.0.1"
+gallery_path = "/gallery"
+secret_key = "change-me-production-secret"
+
+[camera]
+device = 0
+width = 1920
+height = 1080
+rotation = 0
+fps = 20
+jpeg_quality = 92
+preview_mirror = true
+warmup_frames = 5
+force_portrait_crop = false
+portrait_ratio = "9:16"
+
+[capture.photo]
+enabled = true
+format = "jpg"
+save_dir = "data/photos"
+save_raw = true
+raw_dir = "data/photos_raw"
+
+[capture.video]
+enabled = true
+format = "mp4"
+codec = "mp4v"
+transcode_h264 = true
+default_duration_sec = 5
+max_duration_sec = 7
+save_dir = "data/videos"
+save_raw = true
+raw_dir = "data/videos_raw"
+
+[storage]
+root_dir = "data"
+db_path = "data/app.db"
+thumbs_dir = "data/thumbs"
+exports_dir = "data/exports"
+logs_dir = "logs"
+
+[emails]
+enabled = true
+cookie_name = "photomaton_email"
+cookie_max_age_days = 30
+storage_jsonl = "data/emails.jsonl"
+export_csv = "data/exports/emails.csv"
+export_json = "data/exports/emails.json"
+deduplicate = true
+
+[gallery]
+enabled = true
+title = "Galerie"
+sort = "desc"
+show_timestamp = true
+allow_download = true
+allow_delete = false
+allow_edit = false
+page_size = 60
+
+[print]
+enabled = true
+printer_name = ""
+copies = 1
+
+# IMPORTANT : changez ces mots de passe avant tout usage réel (valeurs
+# d'exemple ci-dessous, à ne jamais garder telles quelles).
+[auth]
+enabled = true
+trust_proxy = false
+local_addresses = ["127.0.0.1", "::1"]
+main_password = "changeme"
+gallery_password = "changeme"
+main_session_name = "photomaton_main_auth"
+gallery_session_name = "photomaton_gallery_auth"
+
+[admin]
+password = "changeme"
+
+[ui]
+app_title = "Photomaton"
+show_take_photo = true
+show_take_video = true
+show_gallery_qr = true
+message_mode = "file"
+message_text = "Merci pour votre visite !"
+message_file = "config/message.txt"
+countdown_seconds = 3
+# Affiche l'interface en plein écran (fenêtre native, sans barre d'adresse ni
+# menus — aucun navigateur externe requis) au démarrage — pour la borne face
+# au public. Mettre à false en développement pour une fenêtre normale
+# redimensionnable (avec DevTools accessibles via clic droit).
+kiosk_mode = true
+# Écran sur lequel ouvrir le mode kiosque, en cas de PC multi-écrans :
+# 0 = premier écran (le plus à gauche), 1 = deuxième, etc. Sans effet si
+# kiosk_mode = false.
+kiosk_screen = 0
+
+[ui.look_here]
+text = "regardez ici !"
+
+[ui.start_button]
+text = "C'est parti"
+background_color = "#f2c94c"
+text_color = "#111111"
+font_size_px = 24
+font_weight = 800
+border_radius_px = 999
+padding_y_px = 18
+padding_x_px = 28
+border_color = "rgba(255,255,255,0.16)"
+shadow = "0 14px 34px rgba(0,0,0,.28)"
+
+[ui.capture_buttons]
+side_offset_px = 360
+vertical_position = "80%"
+gap_px = 320
+font_size_px = 38
+photo_bg = "#0d8b8f"
+photo_text = "#ffffff"
+video_bg = "#8b2f0d"
+video_text = "#ffffff"
+
+[ui.replay_badge]
+enabled = true
+text = "REPLAY"
+top_px = 18
+left_px = 18
+font_size_px = 20
+text_color = "#ffffff"
+background_color = "rgba(0, 0, 0, 0.62)"
+border_color = "rgba(255,255,255,0.14)"
+border_radius_px = 999
+padding_y_px = 10
+padding_x_px = 14
+letter_spacing_em = 0.08
+mobile_top_px = 14
+mobile_left_px = 14
+mobile_font_size_px = 16
+mobile_padding_y_px = 8
+mobile_padding_x_px = 13
+
+[ui.bottom_bar]
+enabled = true
+left_message_home = "Choisissez un bouton pour lancer une capture"
+left_message_frame = "Choisissez un cadre décoratif optionnel et/ou lancez la capture immédiatement"
+left_message_replay = "Votre capture est prête"
+right_message = "Scannez ce QR-code pour retrouver vos photos et vidéos"
+qr_enabled = true
+qr_size_px = 96
+background_color = "rgba(0, 0, 0, 0.62)"
+text_color = "#ffffff"
+muted_text_color = "rgba(255,255,255,0.82)"
+font_size_px = 22
+right_message_font_size_px = 16
+padding_y_px = 18
+padding_x_px = 22
+column_gap_px = 20
+border_top_color = "rgba(255,255,255,0.12)"
+
+[ui.frame_gallery]
+default_frame = "none"
+none_label = "Aucun cadre"
+card_background = "rgba(20,22,26,0.92)"
+card_border = "rgba(255,255,255,0.12)"
+active_border = "#f2c94c"
+text_color = "#ffffff"
+
+[[ui.frame_gallery.frames]]
+id = "none"
+label = "Aucun cadre"
+preview = ""
+overlay = ""
+
+[[ui.frame_gallery.frames]]
+id = "gold"
+label = "Cadre Or"
+preview = "/static/frames/gold-preview.jpg"
+overlay = "/static/frames/gold-overlay.png"
+
+[[ui.frame_gallery.frames]]
+id = "party"
+label = "Party"
+preview = "/static/frames/party-preview.jpg"
+overlay = "/static/frames/party-overlay.png"
