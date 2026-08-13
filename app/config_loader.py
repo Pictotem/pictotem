@@ -11,7 +11,7 @@ except ModuleNotFoundError:
 # app\app.py depuis run.bat, qui se place d'abord dans ce dossier — mais on
 # se base sur le chemin réel du fichier plutôt que sur le répertoire courant,
 # pour rester correct quel que soit l'endroit d'où le script est appelé.
-_env_base = os.environ.get('PHOTOMATON_BASE_DIR', '').strip()
+_env_base = os.environ.get('PICTOTEM_BASE_DIR', '').strip()
 BASE_DIR = Path(_env_base) if _env_base else Path(__file__).resolve().parents[1]
 
 CONFIG_PATH = BASE_DIR / 'config' / 'config.toml'

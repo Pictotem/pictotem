@@ -8,7 +8,7 @@ import numpy as np
 from config_loader import CONFIG, FRAMES_DIR
 from db import get_frame_by_id_db, get_setting
 
-logger = logging.getLogger('photomaton')
+logger = logging.getLogger('pictotem')
 
 CAM_LOCK = threading.Lock()
 CAM = None

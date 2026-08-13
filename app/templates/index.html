@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{{ config.get('ui', {}).get('app_title', 'Photomaton') }}</title>
+  <title>{{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
     /* Tailles réglables depuis /admin/texts (texte de droite + QR code de la
@@ -269,7 +269,7 @@
   </div>
 
   <script>
-    window.PHOTOMATON = {
+    window.PICTOTEM = {
       countdownSeconds: {{ config.get('ui', {}).get('countdown_seconds', 3) }},
       defaultFrame: {{ default_frame | tojson }},
       frames: {{ frames | tojson }},

@@ -37,7 +37,7 @@ function Write-Relayed {
 }
 
 Write-Log "===================================================="
-Write-Log "Lancement de Photomaton"
+Write-Log "Lancement de Pictotem"
 
 try {
     $pythonExe = Join-Path $root "python-embed\python.exe"

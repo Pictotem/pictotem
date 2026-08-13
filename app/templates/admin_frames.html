@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Gestion des cadres — {{ config.get('ui', {}).get('app_title', 'Photomaton') }}</title>
+  <title>Gestion des cadres — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
     .admin-wrap { max-width: 960px; margin: 0 auto; padding: 32px 20px 60px; }
@@ -52,7 +52,7 @@
   <div class="admin-header">
     <div>
       <h1>Gestion des cadres</h1>
-      <p>{{ frames|length }} cadre(s) — {{ config.get('ui', {}).get('app_title', 'Photomaton') }}</p>
+      <p>{{ frames|length }} cadre(s) — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</p>
     </div>
     <nav class="admin-nav">
       <a class="action-btn" href="{{ url_for('admin_home') }}">← Admin</a>

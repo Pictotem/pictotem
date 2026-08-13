@@ -7,21 +7,21 @@ from flask import abort, redirect, request, session, url_for
 
 from config_loader import CONFIG
 
-logger = logging.getLogger('photomaton')
+logger = logging.getLogger('pictotem')
 
 
 # ── Point 1 : lecture des mots de passe avec priorité aux variables d'env ────
 
 def _get_main_password() -> str:
-    return os.environ.get('PHOTOMATON_MAIN_PASSWORD') or str(CONFIG.get('auth', {}).get('main_password', ''))
+    return os.environ.get('PICTOTEM_MAIN_PASSWORD') or str(CONFIG.get('auth', {}).get('main_password', ''))
 
 
 def _get_gallery_password() -> str:
-    return os.environ.get('PHOTOMATON_GALLERY_PASSWORD') or str(CONFIG.get('auth', {}).get('gallery_password', ''))
+    return os.environ.get('PICTOTEM_GALLERY_PASSWORD') or str(CONFIG.get('auth', {}).get('gallery_password', ''))
 
 
 def _get_admin_password() -> str:
-    return os.environ.get('PHOTOMATON_ADMIN_PASSWORD') or str(CONFIG.get('admin', {}).get('password', ''))
+    return os.environ.get('PICTOTEM_ADMIN_PASSWORD') or str(CONFIG.get('admin', {}).get('password', ''))
 
 
 # ── Point 2 : clé secrète robuste ────────────────────────────────────────────
@@ -34,9 +34,9 @@ def build_secret_key() -> str:
         logger.warning(
             'SECRET KEY non configurée ou par défaut — clé éphémère générée. '
             'Les sessions seront invalidées à chaque redémarrage. '
-            'Définissez server.secret_key dans config.toml ou la variable PHOTOMATON_SECRET_KEY.'
+            'Définissez server.secret_key dans config.toml ou la variable PICTOTEM_SECRET_KEY.'
         )
-    env_key = os.environ.get('PHOTOMATON_SECRET_KEY', '').strip()
+    env_key = os.environ.get('PICTOTEM_SECRET_KEY', '').strip()
     return env_key if env_key else key
 
 
@@ -85,11 +85,11 @@ def is_local_request() -> bool:
 
 
 def main_session_key() -> str:
-    return CONFIG.get('auth', {}).get('main_session_name', 'photomaton_main_auth')
+    return CONFIG.get('auth', {}).get('main_session_name', 'pictotem_main_auth')
 
 
 def gallery_session_key() -> str:
-    return CONFIG.get('auth', {}).get('gallery_session_name', 'photomaton_gallery_auth')
+    return CONFIG.get('auth', {}).get('gallery_session_name', 'pictotem_gallery_auth')
 
 
 def is_main_authenticated() -> bool:
@@ -112,7 +112,7 @@ def is_gallery_authenticated() -> bool:
 def is_admin_authenticated() -> bool:
     if not _get_admin_password():
         return True
-    return bool(session.get('photomaton_admin_auth', False))
+    return bool(session.get('pictotem_admin_auth', False))
 
 
 # ── Décorateurs de route ──────────────────────────────────────────────────────

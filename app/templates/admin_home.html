@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Administration — {{ config.get('ui', {}).get('app_title', 'Photomaton') }}</title>
+  <title>Administration — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
     .admin-wrap { max-width: 860px; margin: 0 auto; padding: 40px 20px 60px; }
@@ -30,7 +30,7 @@
 
   <div class="admin-hero">
     <h1>Administration</h1>
-    <p>{{ config.get('ui', {}).get('app_title', 'Photomaton') }}</p>
+    <p>{{ config.get('ui', {}).get('app_title', 'Pictotem') }}</p>
   </div>
 
   <p class="section-label">Contenu</p>
@@ -78,7 +78,7 @@
   <div class="admin-cards">
     <a class="admin-card" href="{{ url_for('index') }}">
       <div class="admin-card-title">Kiosque</div>
-      <div class="admin-card-desc">Retour à l'interface principale du photomaton</div>
+      <div class="admin-card-desc">Retour à l'interface principale du pictotem</div>
     </a>
     <a class="admin-card" href="{{ url_for('gallery') }}">
       <div class="admin-card-title">Galerie</div>

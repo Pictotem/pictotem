@@ -1,4 +1,4 @@
-const cfg = window.PHOTOMATON || {};
+const cfg = window.PICTOTEM || {};
 
 // — Éléments DOM —
 const countdown          = document.getElementById('countdown');

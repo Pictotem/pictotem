@@ -75,7 +75,7 @@ logging.basicConfig(
         logging.StreamHandler(),
     ]
 )
-logger = logging.getLogger('photomaton')
+logger = logging.getLogger('pictotem')
 
 # Création des répertoires manquants
 for _p in [PHOTO_DIR, VIDEO_DIR, THUMBS_DIR, EXPORTS_DIR, LOGS_DIR]:
@@ -93,7 +93,7 @@ _UI = CONFIG.get('ui', {})
 _BB = _UI.get('bottom_bar', {})
 
 TEXT_DEFAULTS: dict[str, str] = {
-    'app_title':          _UI.get('app_title', 'Photomaton'),
+    'app_title':          _UI.get('app_title', 'Pictotem'),
     'look_here':          _UI.get('look_here', {}).get('text', 'Regardez ici !'),
     'bottom_left_home':   _BB.get('left_message_home', 'Touchez un bouton pour lancer une capture'),
     'bottom_left_frame':  _BB.get('left_message_frame', 'Choisissez un cadre puis lancez la capture'),
@@ -200,7 +200,7 @@ def login_admin():
     if request.method == 'POST':
         password = (request.form.get('password') or '').strip()
         if check_admin_password(password):
-            session['photomaton_admin_auth'] = True
+            session['pictotem_admin_auth'] = True
             return redirect(next_url)
         error = 'Mot de passe incorrect'
     return render_template('login.html', config=CONFIG, error=error, next_url=next_url,
@@ -221,7 +221,7 @@ def login_main():
             return redirect(next_url)
         error = 'Mot de passe incorrect'
     return render_template('login.html', config=CONFIG, error=error, next_url=next_url,
-                           title='Accès interface principale', subtitle='Accès distant sécurisé au photomaton.')
+                           title='Accès interface principale', subtitle='Accès distant sécurisé au pictotem.')
 
 
 @app.route('/login/gallery', methods=['GET', 'POST'])
@@ -245,7 +245,7 @@ def login_gallery():
 def logout():
     session.pop(main_session_key(), None)
     session.pop(gallery_session_key(), None)
-    session.pop('photomaton_admin_auth', None)
+    session.pop('pictotem_admin_auth', None)
     return redirect(url_for('index'))
 
 
@@ -1551,7 +1551,7 @@ def _run_native_window(port: int):
         logger.warning('Détection des écrans impossible, écran principal utilisé.', exc_info=True)
 
     window_kwargs = dict(
-        title=ui_cfg.get('app_title', 'Photomaton'),
+        title=ui_cfg.get('app_title', 'Pictotem'),
         url=url,
         fullscreen=kiosk_mode,
     )
@@ -1591,7 +1591,7 @@ if __name__ == '__main__':
         )
         _port = 8080
 
-    logger.info('Démarrage photomaton sur %s:%s', _host, _port)
+    logger.info('Démarrage pictotem sur %s:%s', _host, _port)
 
     # Flask tourne en arrière-plan (thread démon) ; la fenêtre native occupe
     # le thread principal — obligatoire pour l'event loop GUI sous Windows.

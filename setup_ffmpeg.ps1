@@ -21,8 +21,8 @@ if (Test-Path $ffmpegExe) {
 }
 
 $zipUrl      = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-$zipPath     = Join-Path $env:TEMP "photomaton-ffmpeg-essentials.zip"
-$extractPath = Join-Path $env:TEMP ("photomaton-ffmpeg-extract-" + [guid]::NewGuid().ToString())
+$zipPath     = Join-Path $env:TEMP "pictotem-ffmpeg-essentials.zip"
+$extractPath = Join-Path $env:TEMP ("pictotem-ffmpeg-extract-" + [guid]::NewGuid().ToString())
 
 try {
     Write-Host "Telechargement de ffmpeg (portable, ~90 Mo, une seule fois)..."

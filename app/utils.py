@@ -12,7 +12,7 @@ from PIL import Image
 
 from config_loader import CONFIG, MESSAGE_FILE
 
-logger = logging.getLogger('photomaton')
+logger = logging.getLogger('pictotem')
 
 # Cache QR : clé = URL complète. Quand l'IP change, la nouvelle URL
 # manque dans le cache → régénération automatique. Les anciennes entrées
@@ -151,7 +151,7 @@ def validate_printer():
 # admin requis, contrairement à une entrée registre HKLM ou une tâche
 # planifiée système). Se lance à l'ouverture de session Windows.
 
-_STARTUP_SHORTCUT_NAME = 'Photomaton.lnk'
+_STARTUP_SHORTCUT_NAME = 'Pictotem.lnk'
 
 
 def _startup_shortcut_path() -> Path | None:

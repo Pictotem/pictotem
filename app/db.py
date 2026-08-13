@@ -9,7 +9,7 @@ from pathlib import Path
 
 from config_loader import CONFIG, DB_PATH, EMAILS_JSONL
 
-logger = logging.getLogger('photomaton')
+logger = logging.getLogger('pictotem')
 
 
 def db_conn():

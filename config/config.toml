@@ -44,7 +44,7 @@ logs_dir = "logs"
 
 [emails]
 enabled = true
-cookie_name = "photomaton_email"
+cookie_name = "pictotem_email"
 cookie_max_age_days = 30
 storage_jsonl = "data/emails.jsonl"
 export_csv = "data/exports/emails.csv"
@@ -74,14 +74,14 @@ trust_proxy = false
 local_addresses = ["127.0.0.1", "::1"]
 main_password = "changeme"
 gallery_password = "changeme"
-main_session_name = "photomaton_main_auth"
-gallery_session_name = "photomaton_gallery_auth"
+main_session_name = "pictotem_main_auth"
+gallery_session_name = "pictotem_gallery_auth"
 
 [admin]
 password = "changeme"
 
 [ui]
-app_title = "Photomaton"
+app_title = "Pictotem"
 show_take_photo = true
 show_take_video = true
 show_gallery_qr = true

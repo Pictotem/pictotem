@@ -1,6 +1,6 @@
-# Photomaton — édition Windows
+# Pictotem — édition Windows
 
-Application pour borne photomaton : caméra USB/webcam, interface plein écran locale, galerie distante, QR code, impression via l'imprimante Windows par défaut, stockage des emails exportable. Se lance via **`run.bat`**, sans installation préalable de Python : un interpréteur Python portable (distribution "embeddable" officielle) est téléchargé et configuré automatiquement au premier lancement, dans `python-embed\` à côté de l'application. L'interface s'affiche dans une **fenêtre native** (pywebview / WebView2) — aucune application navigateur (Edge, Chrome...) n'est requise, seul le runtime Microsoft Edge WebView2, préinstallé sur Windows 10/11 à jour.
+Application pour borne pictotem : caméra USB/webcam, interface plein écran locale, galerie distante, QR code, impression via l'imprimante Windows par défaut, stockage des emails exportable. Se lance via **`run.bat`**, sans installation préalable de Python : un interpréteur Python portable (distribution "embeddable" officielle) est téléchargé et configuré automatiquement au premier lancement, dans `python-embed\` à côté de l'application. L'interface s'affiche dans une **fenêtre native** (pywebview / WebView2) — aucune application navigateur (Edge, Chrome...) n'est requise, seul le runtime Microsoft Edge WebView2, préinstallé sur Windows 10/11 à jour.
 
 ## Arborescence
 - `run.bat` : point d'entrée, à double-cliquer
@@ -25,6 +25,18 @@ Application pour borne photomaton : caméra USB/webcam, interface plein écran l
    - Les lancements suivants démarrent directement, entièrement hors-ligne.
    - Une fenêtre native s'ouvre automatiquement en plein écran (sans barre d'adresse ni menus, aucun navigateur externe) — voir `ui.kiosk_mode` ci-dessous pour désactiver.
 3. Adapter `config/config.toml` si besoin : `server.base_url`, `camera.device` (index webcam, 0 par défaut), `print.printer_name` (vide = imprimante par défaut Windows), `ui.kiosk_mode` (false = fenêtre normale redimensionnable, pratique en développement). Un redémarrage de `run.bat` suffit.
+
+## Mot de passe du back office
+L'accès au back office (`/admin`) est protégé par un mot de passe défini dans `config/config.toml` :
+```toml
+[admin]
+password = "changeme"
+```
+La valeur par défaut `changeme` **doit être changée avant tout usage réel** — n'importe qui connaissant cette valeur par défaut pourrait accéder à l'administration. Éditez simplement `password` dans `config/config.toml` (section `[admin]`) et relancez `run.bat`.
+
+Le même principe s'applique aux deux autres accès protégés par mot de passe, dans la section `[auth]` du même fichier : `main_password` (interface principale, si activée en accès distant) et `gallery_password` (galerie). Les trois sont indépendants et à changer séparément.
+
+Alternative sans toucher au fichier : définir les variables d'environnement `PICTOTEM_ADMIN_PASSWORD`, `PICTOTEM_MAIN_PASSWORD` ou `PICTOTEM_GALLERY_PASSWORD`, qui sont prioritaires sur `config.toml`.
 
 ## Pack de démarrage (cadres, accueil)
 Pour préparer le thème d'un événement sans repasser par l'admin à chaque fois : déposez un dossier `pack\` à la racine (à côté de `run.bat`), contenant un `pack.json` et les images qu'il référence. À **chaque lancement**, l'application le recharge automatiquement (avant l'ouverture du navigateur) — modifiable/remplaçable à tout moment, il suffit de relancer `run.bat`.
