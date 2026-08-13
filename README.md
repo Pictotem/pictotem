@@ -2,6 +2,12 @@
 
 Application pour borne pictotem : caméra USB/webcam, interface plein écran locale, galerie distante, QR code, impression via l'imprimante Windows par défaut, stockage des emails exportable. Se lance via **`run.bat`**, sans installation préalable de Python : un interpréteur Python portable (distribution "embeddable" officielle) est téléchargé et configuré automatiquement au premier lancement, dans `python-embed\` à côté de l'application. L'interface s'affiche dans une **fenêtre native** (pywebview / WebView2) — aucune application navigateur (Edge, Chrome...) n'est requise, seul le runtime Microsoft Edge WebView2, préinstallé sur Windows 10/11 à jour.
 
+## Prérequis matériel
+- PC Windows 10/11
+- Caméra embarquée ou USB
+- Écran tactile, ou pilotage clavier/souris
+- Espace disque disponible : application < 1 Mo (hors `python-embed\`, `ffmpeg\` et les données générées par l'usage — photos, vidéos)
+
 ## Arborescence
 - `run.bat` : point d'entrée, à double-cliquer
 - `run.ps1` : orchestration réelle du lancement (appelé par `run.bat`), journalise tout dans `logs\launcher.log`
