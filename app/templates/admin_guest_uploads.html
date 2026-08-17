@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Upload invités — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .admin-wrap  { max-width: 900px; margin: 0 auto; padding: 40px 20px 60px; }
+    .back-link   { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
+                   text-decoration: none; font-size: 14px; margin-bottom: 28px; }
+    .back-link:hover { color: var(--text); }
+    h1 { font-size: 28px; font-weight: 700; margin: 0 0 4px; }
+    .subtitle { color: var(--muted); font-size: 14px; margin: 0 0 32px; }
+    .alert { padding: 12px 16px; border-radius: 10px; margin-bottom: 24px; font-size: 14px; }
+    .alert-ok  { background: rgba(50,200,100,.15); border:1px solid rgba(50,200,100,.3); color:#4ecca0; }
+    .alert-err { background: rgba(200,50,50,.15);  border:1px solid rgba(200,50,50,.3);  color:#e57373; }
+    .section-title { font-size: 18px; font-weight: 700; border-bottom: 1px solid var(--border);
+                     padding-bottom: 10px; margin: 0 0 20px; display: flex; align-items: center; gap: 10px; }
+    .section-title .tag {
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+      padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted);
+    }
+    .section-title .tag.on  { color: #4ecca0; border-color: rgba(78,204,160,.4); }
+    .section { margin-bottom: 48px; }
+    .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+    .field { margin-bottom: 18px; }
+    .field label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+    .field input[type=number] {
+      width: 100%; max-width: 160px; background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px;
+    }
+    .field-row  { display: flex; gap: 24px; flex-wrap: wrap; }
+    .field-half { flex: 1; min-width: 180px; }
+    .checkbox-row { display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 14px; }
+    .checkbox-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+    .checkbox-row .cb-label { font-size: 14px; }
+    .checkbox-row .cb-desc  { font-size: 12px; color: var(--muted); display: block; margin-top: 2px; }
+    .btn-primary { background: var(--accent); color: #000; font-weight: 700; border: none;
+                   border-radius: 10px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
+    .btn-primary:hover { opacity: .85; }
+    .btn-danger  { background: rgba(180,40,40,.7); color: #fff; font-weight: 600; border: none;
+                   border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+    .btn-danger:hover { background: rgba(220,50,50,.9); }
+    .btn-ok      { background: rgba(50,160,110,.85); color: #fff; font-weight: 600; border: none;
+                   border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; margin-right: 6px; }
+    .btn-ok:hover { background: rgba(60,190,130,.95); }
+    .btn-ghost   { background: rgba(255,255,255,.06); border: 1px solid var(--border); color: var(--text);
+                   border-radius: 8px; padding: 8px 16px; font-size: 13px; cursor: pointer; }
+
+    .share-link-box { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
+    .share-link-box img { width: 110px; height: 110px; background: #fff; border-radius: 10px; padding: 6px; }
+    .share-link-url { font-size: 13px; color: var(--muted); word-break: break-all; max-width: 340px; }
+
+    .img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+    .img-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .img-card img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; }
+    .img-card-foot { padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+    .img-card-name { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis;
+                     white-space: nowrap; flex: 1; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+    .tab-btn {
+      background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+      border-radius: 999px; padding: 7px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .tab-btn.active { background: var(--accent); border-color: transparent; color: #000; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .empty-hint { color: var(--muted); font-size: 14px; }
+  </style>
+</head>
+<body class="gallery-body">
+<div class="admin-wrap">
+
+  <a class="back-link" href="{{ url_for('admin_home') }}">← Administration</a>
+  <h1>Upload invités</h1>
+  <p class="subtitle">
+    Les invités envoient leurs propres photos (smartphone) via un lien séparé — elles rejoignent
+    le diaporama <a href="{{ url_for('bestof') }}" target="_blank" style="color:var(--accent)">/bestof</a>
+    une fois approuvées. Sans effet sur la galerie tant que c'est désactivé ci-dessous.
+  </p>
+
+  {% if alert_success %}<div class="alert alert-ok">{{ alert_success }}</div>{% endif %}
+  {% if alert_error   %}<div class="alert alert-err">{{ alert_error }}</div>{% endif %}
+
+  <!-- Paramètres -->
+  <div class="section">
+    <p class="section-title">
+      Paramètres
+      <span class="tag {% if settings.enabled %}on{% endif %}">
+        {{ 'Activé' if settings.enabled else 'Désactivé' }}
+      </span>
+    </p>
+    <div class="form-card">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="settings">
+
+        <label class="checkbox-row">
+          <input type="checkbox" name="enabled" {% if settings.enabled %}checked{% endif %}>
+          <span>
+            <span class="cb-label">Activer l'upload invités</span>
+            <span class="cb-desc">Affiche le lien « Ajoutez vos photos » dans la galerie et ouvre la page /share.</span>
+          </span>
+        </label>
+
+        <label class="checkbox-row">
+          <input type="checkbox" name="require_moderation" {% if settings.require_moderation %}checked{% endif %}>
+          <span>
+            <span class="cb-label">Modération avant publication</span>
+            <span class="cb-desc">Les photos envoyées restent « en attente » jusqu'à validation ci-dessous. Décoché : publication immédiate dans /bestof.</span>
+          </span>
+        </label>
+
+        <label class="checkbox-row">
+          <input type="checkbox" name="include_in_bestof" {% if settings.include_in_bestof %}checked{% endif %}>
+          <span>
+            <span class="cb-label">Inclure dans le diaporama /bestof</span>
+            <span class="cb-desc">Décoché : les photos approuvées restent stockées mais n'apparaissent pas dans le diaporama.</span>
+          </span>
+        </label>
+
+        <div class="field-row">
+          <div class="field field-half">
+            <label>Taille maximum par photo (Mo)</label>
+            <input type="number" name="max_file_size_mb" min="1" max="100" value="{{ settings.max_file_size_mb }}">
+          </div>
+          <div class="field field-half">
+            <label>Quota par invité (nombre de photos)</label>
+            <input type="number" name="max_per_guest" min="1" max="500" value="{{ settings.max_per_guest }}">
+            <p style="font-size:12px;color:var(--muted);margin-top:6px">
+              Compté par appareil (cookie), indépendamment de la modération.
+            </p>
+          </div>
+        </div>
+
+        <button class="btn-primary" type="submit">Enregistrer</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Lien de partage -->
+  <div class="section">
+    <p class="section-title">Lien de partage</p>
+    <div class="form-card">
+      {% if share_url %}
+      <div class="share-link-box">
+        <img src="{{ url_for('admin_guest_upload_qr') }}" alt="QR code">
+        <div>
+          <p class="share-link-url">{{ share_url }}</p>
+          <p style="font-size:12px;color:var(--muted);margin-top:8px">
+            À afficher/imprimer pour l'évènement. La régénération ci-dessous invalide immédiatement
+            ce lien et ce QR code.
+          </p>
+        </div>
+      </div>
+      {% else %}
+      <p class="empty-hint">Aucun lien configuré — enregistrez les paramètres pour en générer un.</p>
+      {% endif %}
+      <form method="post" style="margin-top:16px">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="regenerate_token">
+        <button class="btn-ghost" type="submit"
+                onclick="return confirm('Régénérer le lien ? L\'ancien lien/QR cessera de fonctionner immédiatement.')">
+          Régénérer le lien
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modération -->
+  <div class="section">
+    <p class="section-title">Photos reçues</p>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="pending" onclick="showTab('pending')">
+        En attente ({{ pending|length }})
+      </button>
+      <button class="tab-btn" data-tab="approved" onclick="showTab('approved')">
+        Publiées ({{ approved|length }})
+      </button>
+    </div>
+
+    <div class="tab-panel active" id="tab-pending">
+      {% if pending %}
+      <div class="img-grid">
+        {% for item in pending %}
+        <div class="img-card">
+          <img src="{{ url_for('media_thumb', filename=item.thumb_filename) if item.thumb_filename else url_for('media_guest', filename=item.filename) }}"
+               alt="{{ item.original_filename }}" loading="lazy">
+          <div class="img-card-foot" style="flex-direction:column;align-items:stretch;gap:8px">
+            <span class="img-card-name" title="{{ item.original_filename }}">{{ item.created_at | format_dt }}</span>
+            <div>
+              <form method="post" style="display:inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="approve">
+                <input type="hidden" name="upload_id" value="{{ item.id }}">
+                <button class="btn-ok" type="submit">Approuver</button>
+              </form>
+              <form method="post" style="display:inline" onsubmit="return confirm('Supprimer définitivement cette photo ?')">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="upload_id" value="{{ item.id }}">
+                <button class="btn-danger" type="submit">Refuser</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="empty-hint">Aucune photo en attente.</p>
+      {% endif %}
+    </div>
+
+    <div class="tab-panel" id="tab-approved">
+      {% if approved %}
+      <div class="img-grid">
+        {% for item in approved %}
+        <div class="img-card">
+          <img src="{{ url_for('media_thumb', filename=item.thumb_filename) if item.thumb_filename else url_for('media_guest', filename=item.filename) }}"
+               alt="{{ item.original_filename }}" loading="lazy">
+          <div class="img-card-foot">
+            <span class="img-card-name">{{ item.created_at | format_dt }}</span>
+            <form method="post" onsubmit="return confirm('Supprimer définitivement cette photo ?')">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="upload_id" value="{{ item.id }}">
+              <button class="btn-danger" type="submit">✕</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="empty-hint">Aucune photo publiée.</p>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+<script>
+  function showTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+  }
+</script>
+</body>
+</html>

@@ -119,6 +119,21 @@ def init_db():
             created_at TEXT NOT NULL
         )
         """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS guest_uploads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            thumb_filename TEXT,
+            original_filename TEXT,
+            kind TEXT NOT NULL DEFAULT 'photo',
+            guest_token TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_guest_uploads_status ON guest_uploads(status)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_guest_uploads_token  ON guest_uploads(guest_token)')
         conn.commit()
 
 
@@ -429,6 +444,77 @@ def delete_screensaver_image_db(image_id):
         conn.execute('DELETE FROM screensaver_images WHERE id = ?', (image_id,))
         conn.commit()
     return img
+
+
+# ── Upload invités (partage depuis smartphone) ───────────────────────────────
+# Distinct des captures officielles de la borne (table captures) : les photos
+# envoyées par les invités rejoignent uniquement le pool /bestof (voir
+# api_bestof_slides dans app.py), jamais la gallery ni la table captures.
+# status : 'pending' (en attente de modération) ou 'approved' (publié dans
+# /bestof). Pas de statut "rejected" séparé : un refus supprime directement
+# la ligne et le fichier (voir admin_guest_upload_delete).
+
+def add_guest_upload(filename, thumb_filename, original_filename, guest_token,
+                      size_bytes, status, kind='photo'):
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            'INSERT INTO guest_uploads(filename, thumb_filename, original_filename, kind, '
+            'guest_token, status, size_bytes, created_at) VALUES(?,?,?,?,?,?,?,?)',
+            (filename, thumb_filename, original_filename, kind, guest_token, status,
+             size_bytes, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def list_guest_uploads(status=''):
+    with closing(db_conn()) as conn:
+        if status:
+            rows = conn.execute(
+                'SELECT * FROM guest_uploads WHERE status = ? ORDER BY created_at DESC', (status,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                'SELECT * FROM guest_uploads ORDER BY created_at DESC'
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_approved_guest_uploads():
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM guest_uploads WHERE status = 'approved' ORDER BY created_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def count_guest_uploads_by_token(guest_token):
+    with closing(db_conn()) as conn:
+        row = conn.execute(
+            'SELECT COUNT(*) FROM guest_uploads WHERE guest_token = ?', (guest_token,)
+        ).fetchone()
+    return row[0] if row else 0
+
+
+def set_guest_upload_status(upload_id, status):
+    with closing(db_conn()) as conn:
+        conn.execute('UPDATE guest_uploads SET status = ? WHERE id = ?', (status, upload_id))
+        conn.commit()
+        row = conn.execute('SELECT * FROM guest_uploads WHERE id = ?', (upload_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def delete_guest_upload_db(upload_id):
+    """Supprime de la DB et retourne le dict (l'appelant supprime fichier + thumb)."""
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM guest_uploads WHERE id = ?', (upload_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        conn.execute('DELETE FROM guest_uploads WHERE id = ?', (upload_id,))
+        conn.commit()
+    return item
 
 
 def export_emails_files():

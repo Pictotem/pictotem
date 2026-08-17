@@ -165,6 +165,11 @@
     <div class="gallery-title-block">
       <h1>{{ config.gallery.title }}</h1>
       {% if gallery_text %}<p class="gallery-intro">{{ gallery_text }}</p>{% endif %}
+      {% if guest_upload_url %}
+      <a class="action-btn small" href="{{ guest_upload_url }}" style="display:inline-flex;margin-top:6px">
+        ↑ Ajoutez vos photos
+      </a>
+      {% endif %}
     </div>
     <form class="email-form" method="post" action="{{ url_for('set_email') }}">
       <input type="email" name="email" placeholder="Votre e-mail" value="{{ email_cookie }}">

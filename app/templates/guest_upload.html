@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Partagez vos photos — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .share-wrap { max-width: 560px; margin: 0 auto; padding: 32px 20px 60px; }
+    .share-header { text-align: center; margin-bottom: 24px; }
+    .share-header h1 { font-size: 26px; font-weight: 700; margin: 0 0 8px; }
+    .share-header p { color: var(--muted); font-size: 14px; margin: 0; line-height: 1.5; }
+    .share-quota { font-size: 13px; color: var(--muted); text-align: center; margin-bottom: 20px; }
+
+    .drop-zone {
+      background: var(--surface); border: 2px dashed var(--border); border-radius: 18px;
+      padding: 36px 20px; text-align: center; transition: border-color .15s, background .15s;
+      margin-bottom: 20px;
+    }
+    .drop-zone.drag-over { border-color: var(--accent); background: var(--surface-2); }
+    .drop-zone input[type=file] { display: none; }
+    .drop-label {
+      display: inline-block; color: #fff; background: var(--accent); font-weight: 700;
+      border-radius: 999px; padding: 14px 28px; cursor: pointer; font-size: 15px;
+    }
+    .drop-hint { font-size: 12px; color: var(--muted); margin-top: 14px; }
+
+    .queue { display: flex; flex-direction: column; gap: 10px; }
+    .queue-item {
+      display: flex; align-items: center; gap: 12px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px;
+    }
+    .queue-thumb {
+      width: 56px; height: 56px; border-radius: 8px; object-fit: cover; flex-shrink: 0;
+      background: #000;
+    }
+    .queue-info { flex: 1; min-width: 0; }
+    .queue-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .queue-status { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .queue-status.ok  { color: #4ecca0; }
+    .queue-status.err { color: #e57373; }
+    .queue-spinner {
+      width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
+      border: 2px solid rgba(255,255,255,.16); border-top-color: var(--accent);
+      animation: spin .9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .share-disabled {
+      text-align: center; color: var(--muted); padding: 60px 20px; font-size: 15px;
+    }
+  </style>
+</head>
+<body class="gallery-body">
+<div class="share-wrap">
+
+  <div class="share-header">
+    <h1>Partagez vos photos</h1>
+    <p>
+      Envoyez vos photos prises sur votre téléphone : elles rejoindront le diaporama
+      {% if require_moderation %}après validation.{% else %}dans quelques instants.{% endif %}
+    </p>
+  </div>
+
+  <p class="share-quota" id="quotaText">
+    {{ remaining }} envoi(s) restant(s) sur {{ max_per_guest }} — {{ max_file_size_mb }} Mo max par photo (JPG, PNG, WEBP)
+  </p>
+
+  <form id="shareForm">
+    <div class="drop-zone" id="dropZone">
+      <label class="drop-label" for="fileInput">Choisir des photos…</label>
+      <input type="file" id="fileInput" name="photo" accept=".jpg,.jpeg,.png,.webp" multiple>
+      <p class="drop-hint">ou glissez-déposez ici</p>
+    </div>
+  </form>
+
+  <div class="queue" id="queue"></div>
+
+</div>
+
+<script>
+  const TOKEN = {{ token | tojson }};
+  const CSRF  = {{ csrf_token() | tojson }};
+  const UPLOAD_URL = '/share/' + encodeURIComponent(TOKEN) + '/upload';
+  let remaining = {{ remaining }};
+
+  const dropZone  = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+  const queue     = document.getElementById('queue');
+  const quotaText = document.getElementById('quotaText');
+
+  function updateQuota() {
+    quotaText.textContent = remaining > 0
+      ? `${remaining} envoi(s) restant(s) — {{ max_file_size_mb }} Mo max par photo (JPG, PNG, WEBP)`
+      : 'Limite atteinte pour cet appareil.';
+  }
+
+  function addQueueItem(file) {
+    const item = document.createElement('div');
+    item.className = 'queue-item';
+    const thumbUrl = URL.createObjectURL(file);
+    item.innerHTML = `
+      <img class="queue-thumb" src="${thumbUrl}" alt="">
+      <div class="queue-info">
+        <div class="queue-name">${file.name}</div>
+        <div class="queue-status">Envoi…</div>
+      </div>
+      <div class="queue-spinner"></div>
+    `;
+    queue.prepend(item);
+    return item;
+  }
+
+  async function uploadOne(file) {
+    if (remaining <= 0) return;
+    const item = addQueueItem(file);
+    const statusEl  = item.querySelector('.queue-status');
+    const spinnerEl = item.querySelector('.queue-spinner');
+
+    const fd = new FormData();
+    fd.append('photo', file);
+    fd.append('_csrf_token', CSRF);
+
+    try {
+      const res = await fetch(UPLOAD_URL, { method: 'POST', body: fd });
+      const data = await res.json();
+      spinnerEl.remove();
+      if (data.ok) {
+        statusEl.textContent = data.message;
+        statusEl.classList.add('ok');
+        remaining = data.remaining;
+        updateQuota();
+      } else {
+        statusEl.textContent = data.error || 'Échec de l\'envoi.';
+        statusEl.classList.add('err');
+      }
+    } catch (e) {
+      spinnerEl.remove();
+      statusEl.textContent = 'Erreur réseau.';
+      statusEl.classList.add('err');
+    }
+  }
+
+  function handleFiles(files) {
+    [...files].forEach(f => {
+      if (remaining <= 0) return;
+      uploadOne(f);
+      remaining--; // décrément optimiste, resynchronisé par la réponse serveur
+    });
+  }
+
+  fileInput.addEventListener('change', () => {
+    handleFiles(fileInput.files);
+    fileInput.value = '';
+  });
+
+  ['dragenter', 'dragover'].forEach(evt =>
+    dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.add('drag-over'); })
+  );
+  ['dragleave', 'drop'].forEach(evt =>
+    dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.remove('drag-over'); })
+  );
+  dropZone.addEventListener('drop', e => {
+    if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
+  });
+
+  updateQuota();
+</script>
+</body>
+</html>

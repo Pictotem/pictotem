@@ -66,8 +66,6 @@ enabled = true
 printer_name = ""
 copies = 1
 
-# IMPORTANT : changez ces mots de passe avant tout usage réel (valeurs
-# d'exemple ci-dessous, à ne jamais garder telles quelles).
 [auth]
 enabled = true
 trust_proxy = false
@@ -79,6 +77,20 @@ gallery_session_name = "pictotem_gallery_auth"
 
 [admin]
 password = "changeme"
+
+# Upload invités : permet aux visiteurs d'envoyer leurs propres photos
+# (smartphone) via un lien/QR séparé de la galerie, pour qu'elles rejoignent
+# le diaporama /bestof. Désactivé par défaut. Réglable aussi depuis le back
+# office (/admin/guest-uploads), qui a priorité sur ces valeurs.
+[guest_upload]
+enabled = false
+require_moderation = true
+max_file_size_mb = 15
+max_uploads_per_guest = 12
+# Segment secret de l'URL de partage (/share/<upload_token>) : à changer avant
+# toute utilisation réelle (régénérable aussi depuis le back office, ce qui
+# invalide immédiatement l'ancien lien/QR).
+upload_token = "changeme-upload-token"
 
 [ui]
 app_title = "Pictotem"

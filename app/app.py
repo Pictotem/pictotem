@@ -25,10 +25,11 @@ import cv2
 from flask import (Flask, Response, abort, jsonify, make_response, redirect,
                    render_template, request, send_file, send_from_directory,
                    session, url_for)
+from PIL import Image, ImageOps
 
 from auth import (auth_enabled, build_secret_key, check_admin_password,
-                  check_gallery_password, check_main_password, csrf_protect,
-                  gallery_session_key, generate_csrf_token,
+                  check_gallery_password, check_main_password, client_ip,
+                  csrf_protect, gallery_session_key, generate_csrf_token,
                   is_admin_authenticated, is_gallery_authenticated,
                   is_local_request, is_main_authenticated, main_session_key,
                   require_admin_auth, require_gallery_auth, require_main_auth,
@@ -49,7 +50,9 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 upsert_frame,
                 list_slideshow_images, add_slideshow_image, delete_slideshow_image_db,
                 list_screensaver_images, add_screensaver_image, delete_screensaver_image_db,
-                cast_vote, admin_adjust_vote, get_voter_votes)
+                cast_vote, admin_adjust_vote, get_voter_votes,
+                add_guest_upload, list_guest_uploads, list_approved_guest_uploads,
+                count_guest_uploads_by_token, set_guest_upload_status, delete_guest_upload_db)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, is_autostart_enabled,
                    make_thumb, message_text, print_photo, validate_printer)
@@ -507,11 +510,19 @@ def gallery():
     vote_enabled = get_setting('vote.enabled', '1') == '1'
     vote_cfg = _vote_cfg()
 
+    # Lien vers l'upload invité (voir section "Upload invités" plus bas),
+    # affiché dans la galerie uniquement si la fonctionnalité est activée
+    # depuis /admin/guest-uploads — sans quoi la galerie reste inchangée.
+    guest_cfg = _guest_upload_settings()
+    guest_upload_url = (url_for('guest_upload_page', token=guest_cfg['token'])
+                        if guest_cfg['enabled'] and guest_cfg['token'] else None)
+
     resp = make_response(render_template(
         'gallery.html', captures=captures, sort=sort, kind=kind, config=CONFIG,
         email_cookie=email_cookie, gallery_text=get_setting('gallery_text', ''),
         page=page, total_pages=total_pages, total=total,
         vote_enabled=vote_enabled, voter_votes=voter_votes, vote_cfg=vote_cfg,
+        guest_upload_url=guest_upload_url,
     ))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
@@ -1142,6 +1153,16 @@ def api_bestof_slides():
         for img in list_slideshow_images()
     ]
 
+    # Photos envoyées par les invités (voir section "Upload invités"
+    # ci-dessous), une fois approuvées — mélangées aux images intermédiaires,
+    # sans distinction côté client (même format {type, url}).
+    guest_cfg = _guest_upload_settings()
+    if guest_cfg['enabled'] and guest_cfg['include_in_bestof']:
+        slideshow_imgs += [
+            {'type': 'image', 'url': url_for('media_guest', filename=g['filename'])}
+            for g in list_approved_guest_uploads()
+        ]
+
     return jsonify({
         'captures':         captures,
         'slideshow_images': slideshow_imgs,
@@ -1251,6 +1272,243 @@ def api_screensaver_slides():
         'screensaver_images': screensaver_imgs,
         'delay':              s['delay'],
     })
+
+
+# ── Upload invités (partage depuis smartphone) ───────────────────────────────
+# Interface publique, distincte de la galerie et des captures officielles de
+# la borne : les invités envoient leurs propres photos (prises sur leur
+# téléphone) via un lien/QR séparé (/share/<token>). Le token est un secret
+# régénérable depuis le back office — seule barrière d'accès, pensée pour un
+# scan QR rapide en évènement plutôt qu'un mot de passe. Les photos envoyées
+# ne rejoignent jamais la table captures ni la galerie admin : elles
+# alimentent uniquement le diaporama /bestof, et seulement une fois
+# approuvées (modération activable/désactivable). Toute la fonctionnalité
+# s'active/se désactive en un clic (/admin/guest-uploads) sans jamais
+# impacter la galerie ni le best-of existants.
+
+GUEST_UPLOAD_DIR = BASE_DIR / 'data' / 'guest_uploads'
+_GUEST_UPLOAD_ALLOWED_EXT = {'.jpg', '.jpeg', '.png', '.webp'}
+_GUEST_TOKEN_COOKIE = 'guest_upload_token'
+
+# Anti-abus léger, en mémoire (process unique, pas de dépendance externe) :
+# limite le nombre d'envois par adresse IP sur une fenêtre glissante d'une
+# minute, en complément du quota persistant par invité (guest_token,
+# ci-dessous) qui protège lui contre un simple changement de cookie.
+_GUEST_RATE_LIMIT: dict[str, list[float]] = {}
+_GUEST_RATE_LOCK = threading.Lock()
+_GUEST_RATE_MAX_PER_MINUTE = 10
+
+
+def _guest_rate_limited(ip: str) -> bool:
+    now = time.time()
+    with _GUEST_RATE_LOCK:
+        hist = [t for t in _GUEST_RATE_LIMIT.get(ip, []) if now - t < 60]
+        if len(hist) >= _GUEST_RATE_MAX_PER_MINUTE:
+            _GUEST_RATE_LIMIT[ip] = hist
+            return True
+        hist.append(now)
+        _GUEST_RATE_LIMIT[ip] = hist
+        return False
+
+
+def _guest_bool(key: str, default: bool) -> bool:
+    raw = get_setting(f'guest_upload.{key}', '')
+    return (raw == '1') if raw in ('0', '1') else bool(default)
+
+
+def _guest_upload_settings():
+    _cfg = CONFIG.get('guest_upload', {})
+    raw_size  = get_setting('guest_upload.max_file_size_mb', '')
+    raw_quota = get_setting('guest_upload.max_uploads_per_guest', '')
+    return {
+        'enabled':            _guest_bool('enabled', _cfg.get('enabled', False)),
+        'require_moderation': _guest_bool('require_moderation', _cfg.get('require_moderation', True)),
+        'include_in_bestof':  _guest_bool('include_in_bestof', True),
+        'max_file_size_mb':   int(raw_size)  if raw_size.isdigit()  else int(_cfg.get('max_file_size_mb', 15)),
+        'max_per_guest':      int(raw_quota) if raw_quota.isdigit() else int(_cfg.get('max_uploads_per_guest', 12)),
+        'token':              get_setting('guest_upload.token', '') or _cfg.get('upload_token', ''),
+    }
+
+
+def _process_guest_image(file_storage, max_bytes: int, max_side: int = 2400):
+    """Lit, valide et normalise une image envoyée par un invité.
+    Retourne (image_pillow, taille_octets_lue) — image_pillow est None si le
+    fichier dépasse max_bytes ou n'est pas une image valide.
+
+    Sécurité/vie privée :
+    - lecture bornée à max_bytes+1, indépendante du header Content-Length
+      (potentiellement falsifié par le client) ;
+    - Image.verify() rejette tout fichier renommé avec une extension image
+      mais qui n'en est pas une ;
+    - ré-encodage systématique en JPEG, ce qui supprime au passage toutes
+      les métadonnées EXIF (dont la géolocalisation GPS, parfois présente
+      dans les photos de smartphone) avant stockage/diffusion publique.
+    """
+    raw = file_storage.stream.read(max_bytes + 1)
+    if not raw or len(raw) > max_bytes:
+        return None, len(raw)
+    try:
+        probe = Image.open(io.BytesIO(raw))
+        probe.verify()
+        img = Image.open(io.BytesIO(raw))
+        img = ImageOps.exif_transpose(img)
+        img = img.convert('RGB')
+    except Exception:
+        return None, len(raw)
+    if max(img.size) > max_side:
+        img.thumbnail((max_side, max_side), Image.LANCZOS)
+    return img, len(raw)
+
+
+@app.route('/share/<token>')
+def guest_upload_page(token):
+    s = _guest_upload_settings()
+    if not s['enabled'] or not s['token'] or token != s['token']:
+        abort(404)
+    guest_token = request.cookies.get(_GUEST_TOKEN_COOKIE, '')
+    new_cookie = False
+    if not guest_token:
+        guest_token = secrets.token_hex(16)
+        new_cookie = True
+    used = count_guest_uploads_by_token(guest_token)
+    resp = make_response(render_template(
+        'guest_upload.html', config=CONFIG, token=token,
+        max_file_size_mb=s['max_file_size_mb'],
+        max_per_guest=s['max_per_guest'],
+        used=used, remaining=max(0, s['max_per_guest'] - used),
+        require_moderation=s['require_moderation'],
+    ))
+    if new_cookie:
+        resp.set_cookie(_GUEST_TOKEN_COOKIE, guest_token, max_age=365 * 24 * 3600,
+                        samesite='Lax', httponly=True)
+    return resp
+
+
+@app.route('/share/<token>/upload', methods=['POST'])
+@csrf_protect
+def guest_upload_submit(token):
+    s = _guest_upload_settings()
+    if not s['enabled'] or not s['token'] or token != s['token']:
+        abort(404)
+
+    guest_token = request.cookies.get(_GUEST_TOKEN_COOKIE, '')
+    if not guest_token:
+        return jsonify({'ok': False, 'error': 'Session expirée, rechargez la page.'}), 400
+
+    if _guest_rate_limited(client_ip()):
+        return jsonify({'ok': False, 'error': "Trop d'envois, patientez une minute."}), 429
+
+    used = count_guest_uploads_by_token(guest_token)
+    if used >= s['max_per_guest']:
+        return jsonify({'ok': False,
+                        'error': f"Limite de {s['max_per_guest']} photo(s) par invité atteinte."}), 403
+
+    file = request.files.get('photo')
+    if not file or not file.filename:
+        return jsonify({'ok': False, 'error': 'Aucun fichier reçu.'}), 400
+    ext = Path(file.filename).suffix.lower()
+    if ext not in _GUEST_UPLOAD_ALLOWED_EXT:
+        return jsonify({'ok': False, 'error': 'Format non supporté (JPG, PNG, WEBP).'}), 400
+
+    max_bytes = s['max_file_size_mb'] * 1024 * 1024
+    img, size_read = _process_guest_image(file, max_bytes)
+    if img is None:
+        if size_read > max_bytes:
+            return jsonify({'ok': False,
+                            'error': f"Fichier trop volumineux (max {s['max_file_size_mb']} Mo)."}), 413
+        return jsonify({'ok': False, 'error': 'Fichier image invalide ou corrompu.'}), 400
+
+    GUEST_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = current_stamp()
+    unique = secrets.token_hex(4)
+    filename = f'guest-{stamp}-{unique}.jpg'
+    filepath = GUEST_UPLOAD_DIR / filename
+    img.save(filepath, format='JPEG', quality=88)
+
+    thumb_name = f'guest-thumb-{stamp}-{unique}.jpg'
+    make_thumb(filepath, THUMBS_DIR / thumb_name)
+
+    status = 'pending' if s['require_moderation'] else 'approved'
+    original_name = Path(file.filename).name[:180]
+    upload_id = add_guest_upload(filename, thumb_name, original_name, guest_token,
+                                 filepath.stat().st_size, status)
+    logger.info('Upload invité #%s reçu (%s, statut=%s)', upload_id, filename, status)
+
+    return jsonify({
+        'ok': True,
+        'status': status,
+        'remaining': max(0, s['max_per_guest'] - (used + 1)),
+        'message': ('Merci ! Votre photo est en attente de validation.' if status == 'pending'
+                    else 'Merci ! Votre photo a été ajoutée au diaporama.'),
+    })
+
+
+@app.route('/media/guest/<path:filename>')
+@require_media_auth
+def media_guest(filename):
+    return send_from_directory(GUEST_UPLOAD_DIR, filename)
+
+
+@app.route('/admin/guest-uploads', methods=['GET', 'POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_uploads():
+    if request.method == 'POST':
+        action = request.form.get('action', 'settings')
+
+        if action == 'settings':
+            set_setting('guest_upload.enabled', '1' if request.form.get('enabled') else '0')
+            set_setting('guest_upload.require_moderation',
+                       '1' if request.form.get('require_moderation') else '0')
+            set_setting('guest_upload.include_in_bestof',
+                       '1' if request.form.get('include_in_bestof') else '0')
+            raw_size = (request.form.get('max_file_size_mb') or '').strip()
+            if raw_size.isdigit() and int(raw_size) > 0:
+                set_setting('guest_upload.max_file_size_mb', raw_size)
+            raw_quota = (request.form.get('max_per_guest') or '').strip()
+            if raw_quota.isdigit() and int(raw_quota) > 0:
+                set_setting('guest_upload.max_uploads_per_guest', raw_quota)
+            return redirect(url_for('admin_guest_uploads', ok='Paramètres mis à jour.'))
+
+        if action == 'regenerate_token':
+            set_setting('guest_upload.token', secrets.token_urlsafe(6))
+            return redirect(url_for('admin_guest_uploads',
+                                    ok="Nouveau lien généré — l'ancien lien/QR ne fonctionne plus."))
+
+        if action == 'approve':
+            item = set_guest_upload_status(int(request.form.get('upload_id', 0)), 'approved')
+            if item:
+                return redirect(url_for('admin_guest_uploads', ok='Photo approuvée, visible dans /bestof.'))
+            return redirect(url_for('admin_guest_uploads', err='Photo introuvable.'))
+
+        if action == 'delete':
+            item = delete_guest_upload_db(int(request.form.get('upload_id', 0)))
+            if item:
+                (GUEST_UPLOAD_DIR / item['filename']).unlink(missing_ok=True)
+                if item.get('thumb_filename'):
+                    (THUMBS_DIR / item['thumb_filename']).unlink(missing_ok=True)
+                return redirect(url_for('admin_guest_uploads', ok='Photo supprimée.'))
+            return redirect(url_for('admin_guest_uploads', err='Photo introuvable.'))
+
+    s = _guest_upload_settings()
+    share_url = (request.host_url.rstrip('/') + url_for('guest_upload_page', token=s['token'])
+                if s['token'] else None)
+    return render_template(
+        'admin_guest_uploads.html', config=CONFIG, settings=s, share_url=share_url,
+        pending=list_guest_uploads('pending'), approved=list_guest_uploads('approved'),
+        alert_success=request.args.get('ok'),
+        alert_error=request.args.get('err'),
+    )
+
+
+@app.route('/admin/guest-uploads/qr.png')
+@require_admin_auth
+def admin_guest_upload_qr():
+    s = _guest_upload_settings()
+    if not s['token']:
+        abort(404)
+    share_url = request.host_url.rstrip('/') + url_for('guest_upload_page', token=s['token'])
+    return send_file(generate_qr_png(share_url), mimetype='image/png', download_name='partage-qr.png')
 
 
 @app.route('/admin/screensaver', methods=['GET', 'POST'])

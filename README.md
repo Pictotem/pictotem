@@ -38,11 +38,23 @@ L'accès au back office (`/admin`) est protégé par un mot de passe défini dan
 [admin]
 password = "changeme"
 ```
-La valeur par défaut `changeme` **doit être changée avant tout usage réel** — n'importe qui connaissant cette valeur par défaut pourrait accéder à l'administration. Éditez simplement `password` dans `config/config.toml` (section `[admin]`) et relancez `run.bat`.
+La valeur par défaut **doit être changée avant tout usage réel** — n'importe qui la connaissant pourrait accéder à l'administration. Éditez `password` dans la section `[admin]` et relancez `run.bat`.
 
-Le même principe s'applique aux deux autres accès protégés par mot de passe, dans la section `[auth]` du même fichier : `main_password` (interface principale, si activée en accès distant) et `gallery_password` (galerie). Les trois sont indépendants et à changer séparément.
+Le même principe s'applique aux deux autres accès protégés par mot de passe, dans la section `[auth]` : `main_password` (interface principale, si activée en accès distant) et `gallery_password` (galerie). Les trois sont indépendants et à changer séparément.
 
-Alternative sans toucher au fichier : définir les variables d'environnement `PICTOTEM_ADMIN_PASSWORD`, `PICTOTEM_MAIN_PASSWORD` ou `PICTOTEM_GALLERY_PASSWORD`, qui sont prioritaires sur `config.toml`.
+Alternative sans toucher au fichier : variables d'environnement `PICTOTEM_ADMIN_PASSWORD`, `PICTOTEM_MAIN_PASSWORD` ou `PICTOTEM_GALLERY_PASSWORD`, prioritaires sur `config.toml`.
+
+## Upload invités (partage depuis smartphone)
+Permet aux invités d'envoyer leurs propres photos (prises sur leur téléphone) pour qu'elles rejoignent le diaporama `/bestof` — sans jamais apparaître dans la galerie ni dans la table des captures officielles de la borne. Désactivé par défaut, à activer depuis `/admin/guest-uploads`.
+
+Fonctionnement :
+- Un lien de partage `/share/<token>` (avec QR code imprimable) donne accès à une page d'envoi simple depuis un téléphone — glisser-déposer ou sélection de fichiers, plusieurs photos à la fois.
+- Le `token` est un secret régénérable en un clic depuis le back office : c'est la seule barrière d'accès (pas de mot de passe, pensé pour un scan QR rapide en évènement). Régénérer le lien invalide immédiatement l'ancien.
+- Quand l'upload est activé, un bouton « Ajoutez vos photos » apparaît automatiquement dans la galerie (`/gallery`) — sans autre impact sur la galerie ni le best-of existants.
+- **Modération** : activable/désactivable. Activée par défaut, les photos envoyées restent « en attente » jusqu'à validation dans `/admin/guest-uploads` avant de rejoindre `/bestof`.
+- **Quota** : nombre maximum de photos par invité (identifié par cookie, indépendant de la modération), configurable.
+- **Sécurité/vie privée** : chaque photo est revalidée côté serveur (rejet des fichiers qui ne sont pas de vraies images, quelle que soit leur extension), limitée en taille, et systématiquement ré-encodée — ce qui supprime au passage toutes les métadonnées EXIF (dont la géolocalisation GPS parfois présente dans les photos de smartphone) avant stockage et diffusion publique. Un anti-abus limite aussi le nombre d'envois par adresse IP par minute.
+- Formats acceptés : JPG, PNG, WEBP (les iPhone récents envoient du HEIC par défaut, mais Safari le convertit automatiquement en JPEG lors d'un envoi via un formulaire web classique).
 
 ## Pack de démarrage (cadres, accueil)
 Pour préparer le thème d'un événement sans repasser par l'admin à chaque fois : déposez un dossier `pack\` à la racine (à côté de `run.bat`), contenant un `pack.json` et les images qu'il référence. À **chaque lancement**, l'application le recharge automatiquement (avant l'ouverture du navigateur) — modifiable/remplaçable à tout moment, il suffit de relancer `run.bat`.
