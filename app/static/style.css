@@ -8,7 +8,7 @@
   --accent-2: #145b5e;
   --border: rgba(255,255,255,.14);
   --shadow: 0 12px 40px rgba(0,0,0,.35);
-  --capture-gap: 320px;
+  --capture-gap: 24px;
   --capture-font-size: 38px;
   --photo-btn-bg: #0d8b8f;
   --photo-btn-text: #ffffff;
@@ -597,6 +597,7 @@ button, input, a { font: inherit; }
 
 .bottom-bar-center {
   justify-self: center;
+  max-width: min(52vw, 720px);
 }
 
 .bottom-bar-buttons {
