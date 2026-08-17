@@ -21,12 +21,23 @@
       align-items: center; justify-content: center;
       color: #555; font-family: sans-serif; font-size: 18px;
     }
+    /* Picto "Invité" : signale une photo envoyée par un visiteur (non
+       officielle), coin bas-gauche, ne recouvre jamais le média. */
+    #slideBadge {
+      position: absolute; bottom: 24px; left: 24px; z-index: 5;
+      background: rgba(0,0,0,.6); color: #fff; font-family: sans-serif;
+      font-size: 13px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .05em; padding: 6px 14px; border-radius: 999px;
+      backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,.15);
+    }
+    #slideBadge.hidden { display: none; }
   </style>
 </head>
 <body>
 <div id="slideshow">
   <div id="slideA" class="slide"></div>
   <div id="slideB" class="slide"></div>
+  <div id="slideBadge" class="hidden">Invité</div>
   <div id="empty" style="display:none">Aucun média à afficher.</div>
 </div>
 
@@ -115,6 +126,9 @@
       setTimeout(() => curEl.classList.remove('active'), 800);
     });
     current = next;
+
+    const badge = document.getElementById('slideBadge');
+    if (badge) badge.classList.toggle('hidden', slide.source !== 'guest');
   }
 
   async function fetchSlides() {

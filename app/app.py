@@ -19,9 +19,10 @@ import subprocess
 import threading
 import time
 from contextlib import closing
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import cv2
+import numpy as np
 from flask import (Flask, Response, abort, jsonify, make_response, redirect,
                    render_template, request, send_file, send_from_directory,
                    session, url_for)
@@ -52,7 +53,8 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_screensaver_images, add_screensaver_image, delete_screensaver_image_db,
                 cast_vote, admin_adjust_vote, get_voter_votes,
                 add_guest_upload, list_guest_uploads, list_approved_guest_uploads,
-                count_guest_uploads_by_token, set_guest_upload_status, delete_guest_upload_db)
+                count_guest_uploads_by_token, set_guest_upload_status, delete_guest_upload_db,
+                list_gallery_combined)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, is_autostart_enabled,
                    make_thumb, message_text, print_photo, validate_printer)
@@ -110,6 +112,8 @@ TEXT_DEFAULTS: dict[str, str] = {
     'btn_retour':         'Retour',
     'btn_appliquer':      'Appliquer',
     'btn_imprimer':       'Imprimer',
+    'btn_recommencer':    'Recommencer',
+    'btn_photo_strip':    'Photo strip',
     'processing_title':   'Traitement',
     'processing_text':    'Veuillez patienter quelques instants.',
     'replay_badge':       'REPLAY',
@@ -276,6 +280,7 @@ def index():
         hide_print_button=get_setting('ui.hide_print_button', '0') == '1',
         bottom_bar_sizes=get_bottom_bar_sizes(),
         top_bar=get_top_bar_settings(),
+        photo_strip=CONFIG.get('capture', {}).get('photo_strip', {}),
     )
 
 
@@ -466,6 +471,101 @@ def capture_video():
                     'url': f'/media/video/{final_filename}', 'message': message_text()})
 
 
+@app.route('/api/capture/<int:capture_id>/retake', methods=['POST'])
+@require_main_auth
+def capture_retake(capture_id):
+    """Supprime la capture tout juste prise si le visiteur préfère
+    recommencer avant impression — évite d'accumuler des essais ratés dans
+    la galerie. Déclenchable depuis la borne sans mot de passe admin, comme
+    les routes de capture elles-mêmes (même niveau de confiance implicite).
+    Pas de @csrf_protect, cohérent avec /api/capture/photo et .../video."""
+    cap = delete_capture(capture_id)
+    if not cap:
+        return jsonify({'ok': False, 'error': 'Capture introuvable'}), 404
+    media_dir = PHOTO_DIR if cap['kind'] == 'photo' else VIDEO_DIR
+    try:
+        (media_dir / cap['filename']).unlink(missing_ok=True)
+    except Exception:
+        logger.warning('Recommencer : suppression fichier échouée : %s', cap['filename'])
+    if cap.get('thumb_filename'):
+        try:
+            (THUMBS_DIR / cap['thumb_filename']).unlink(missing_ok=True)
+        except Exception:
+            pass
+    logger.info('Capture #%d supprimée (recommencer)', capture_id)
+    return jsonify({'ok': True})
+
+
+def _compose_photo_strip(frames, ps_cfg):
+    """Empile verticalement les prises d'un photo strip sur un fond uni,
+    avec une marge régulière (gap_px) autour et entre chaque prise —
+    résultat classique de bande photobooth. Toutes les frames proviennent
+    de la même caméra/résolution (aucun redimensionnement nécessaire)."""
+    gap = max(0, int(ps_cfg.get('gap_px', 16)))
+    bg_hex = str(ps_cfg.get('background_color', '#ffffff')).lstrip('#')
+    try:
+        bg_bgr = (int(bg_hex[4:6], 16), int(bg_hex[2:4], 16), int(bg_hex[0:2], 16))
+    except (ValueError, IndexError):
+        bg_bgr = (255, 255, 255)
+
+    h, w = frames[0].shape[:2]
+    n = len(frames)
+    total_h = gap + n * (h + gap)
+    total_w = w + 2 * gap
+    canvas = np.full((total_h, total_w, 3), bg_bgr, dtype=np.uint8)
+    y = gap
+    for f in frames:
+        fh, fw = f.shape[:2]
+        canvas[y:y + fh, gap:gap + fw] = f
+        y += fh + gap
+    return canvas
+
+
+@app.route('/api/capture/photostrip', methods=['POST'])
+@require_main_auth
+def capture_photostrip():
+    ps_cfg = CONFIG.get('capture', {}).get('photo_strip', {})
+    if not ps_cfg.get('enabled', True):
+        return jsonify({'ok': False, 'error': 'Photo strip désactivé'}), 403
+    req = request.get_json(silent=True) or {}
+    frame_id = req.get('frame', 'none')
+    shots = max(2, min(int(ps_cfg.get('shots', 3)), 6))
+    interval = max(0.3, float(ps_cfg.get('interval_sec', 1.2)))
+
+    overlay_path = get_frame_overlay_path(frame_id)
+    has_overlay = bool(overlay_path and overlay_path.exists())
+
+    frames = []
+    for i in range(shots):
+        raw = read_frame()
+        display = raw
+        if has_overlay:
+            h, w = raw.shape[:2]
+            overlay = get_overlay_bgra(overlay_path, w, h)
+            if overlay is not None:
+                display = composite_frame_overlay(raw, overlay)
+        frames.append(display)
+        if i < shots - 1:
+            time.sleep(interval)
+
+    strip_img = _compose_photo_strip(frames, ps_cfg)
+    stamp = current_stamp()
+    filename = f'strip-{stamp}.jpg'
+    filepath = PHOTO_DIR / filename
+    quality = int(CONFIG['camera'].get('jpeg_quality', 92))
+    ok, buf = cv2.imencode('.jpg', strip_img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    if not ok:
+        return jsonify({'ok': False, 'error': 'Échec encodage du photo strip'}), 500
+    filepath.write_bytes(buf.tobytes())
+
+    thumb_name = f'thumb-{stamp}.jpg'
+    make_thumb(filepath, THUMBS_DIR / thumb_name)
+    capture_id = record_capture('photo', filename, thumb_name)
+    logger.info('Photo strip capturé %s (%d prises, cadre=%s)', filename, shots, frame_id)
+    return jsonify({'ok': True, 'id': capture_id, 'kind': 'photo', 'filename': filename,
+                    'url': f'/media/photo/{filename}', 'message': message_text()})
+
+
 @app.route('/api/print/<int:capture_id>', methods=['POST'])
 @require_main_auth
 def api_print(capture_id):
@@ -497,7 +597,18 @@ def gallery():
     page = max(1, int(request.args.get('page', 1)))
     email_cookie = request.cookies.get(CONFIG['emails']['cookie_name'], '')
 
-    captures, total = list_captures(sort, kind, page=page, page_size=page_size)
+    # Intégration des uploads invités dans la galerie officielle (voir
+    # section "Upload invités" plus bas) : paramétrable indépendamment de
+    # leur diffusion dans /bestof, désactivée par défaut — comportement de
+    # la galerie inchangé tant que ce n'est pas activé explicitement.
+    guest_cfg = _guest_upload_settings()
+    guest_in_gallery = guest_cfg['enabled'] and guest_cfg['include_in_gallery']
+    source = request.args.get('source', '') if guest_in_gallery else ''
+
+    if guest_in_gallery:
+        captures, total = list_gallery_combined(sort, kind, source, page=page, page_size=page_size)
+    else:
+        captures, total = list_captures(sort, kind, page=page, page_size=page_size)
     total_pages = max(1, (total + page_size - 1) // page_size)
 
     voter_token = request.cookies.get('voter_token', '')
@@ -513,7 +624,6 @@ def gallery():
     # Lien vers l'upload invité (voir section "Upload invités" plus bas),
     # affiché dans la galerie uniquement si la fonctionnalité est activée
     # depuis /admin/guest-uploads — sans quoi la galerie reste inchangée.
-    guest_cfg = _guest_upload_settings()
     guest_upload_url = (url_for('guest_upload_page', token=guest_cfg['token'])
                         if guest_cfg['enabled'] and guest_cfg['token'] else None)
 
@@ -523,6 +633,7 @@ def gallery():
         page=page, total_pages=total_pages, total=total,
         vote_enabled=vote_enabled, voter_votes=voter_votes, vote_cfg=vote_cfg,
         guest_upload_url=guest_upload_url,
+        guest_in_gallery=guest_in_gallery, source=source,
     ))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
@@ -582,12 +693,130 @@ def download_video(filename):
     return send_from_directory(VIDEO_DIR, filename, as_attachment=True)
 
 
-# ── Admin — général ───────────────────────────────────────────────────────────
+@app.route('/download/guest/<path:filename>')
+@require_media_auth
+def download_guest(filename):
+    return send_from_directory(GUEST_UPLOAD_DIR, filename, as_attachment=True)
+
+
+# ── Admin — général / tableau de bord ────────────────────────────────────────
+
+def _dir_size_bytes(path: Path) -> int:
+    if not path.is_dir():
+        return 0
+    total = 0
+    for p in path.rglob('*'):
+        if p.is_file():
+            try:
+                total += p.stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def _human_size(n: int) -> str:
+    size = float(n)
+    for unit in ('o', 'Ko', 'Mo', 'Go'):
+        if size < 1024:
+            return f'{size:.0f} {unit}' if unit == 'o' else f'{size:.1f} {unit}'
+        size /= 1024
+    return f'{size:.1f} To'
+
 
 @app.route('/admin')
 @require_admin_auth
 def admin_home():
-    return render_template('admin_home.html', config=CONFIG)
+    folders = [
+        ('Photos',            PHOTO_DIR),
+        ('Photos brutes',     RAW_PHOTO_DIR),
+        ('Vidéos',            VIDEO_DIR),
+        ('Vidéos brutes',     RAW_VIDEO_DIR),
+        ('Miniatures',        THUMBS_DIR),
+        ('Uploads invités',   GUEST_UPLOAD_DIR),
+        ('Exports',           EXPORTS_DIR),
+    ]
+    disk_rows = []
+    total_bytes = 0
+    for label, path in folders:
+        n = _dir_size_bytes(path)
+        total_bytes += n
+        disk_rows.append({'label': label, 'bytes': n, 'human': _human_size(n)})
+
+    try:
+        free_bytes = shutil.disk_usage(BASE_DIR).free
+    except Exception:
+        free_bytes = None
+
+    _, photo_total = list_captures(kind='photo', page_size=1)
+    _, video_total = list_captures(kind='video', page_size=1)
+    guest_pending  = len(list_guest_uploads('pending'))
+    guest_approved = len(list_guest_uploads('approved'))
+
+    return render_template(
+        'admin_home.html', config=CONFIG,
+        disk_rows=disk_rows,
+        total_human=_human_size(total_bytes),
+        free_human=_human_size(free_bytes) if free_bytes is not None else None,
+        photo_total=photo_total, video_total=video_total,
+        email_total=len(list_emails()),
+        guest_pending=guest_pending, guest_approved=guest_approved,
+        ffmpeg_ok=Path(FFMPEG_EXE).is_file() if FFMPEG_EXE.endswith('.exe') else True,
+        printer_configured=bool(CONFIG.get('print', {}).get('printer_name', '').strip()),
+        camera_device=get_setting('camera.device', '') or CONFIG.get('camera', {}).get('device', 0),
+        alert_success=request.args.get('ok'),
+        alert_error=request.args.get('err'),
+    )
+
+
+@app.route('/admin/dashboard/purge-raw', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_purge_raw():
+    """Supprime les photos/vidéos brutes (sauvegardes pré-overlay, voir
+    capture.photo.save_raw / capture.video.save_raw) — sans risque : ce sont
+    des doublons des versions déjà publiées (avec cadre appliqué), jamais
+    affichés dans la galerie."""
+    removed = 0
+    for d in (RAW_PHOTO_DIR, RAW_VIDEO_DIR):
+        if d.is_dir():
+            for f in d.iterdir():
+                if f.is_file():
+                    try:
+                        f.unlink()
+                        removed += 1
+                    except Exception:
+                        logger.warning('Purge brut : suppression échouée : %s', f)
+    logger.info('Purge admin : %d fichier(s) brut(s) supprimé(s).', removed)
+    return redirect(url_for('admin_home', ok=f'{removed} fichier(s) brut(s) supprimé(s).'))
+
+
+@app.route('/admin/dashboard/purge-old', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_purge_old():
+    """Supprime les captures officielles (photo + vidéo) plus anciennes que
+    N jours — irréversible, utilisé pour libérer de l'espace disque après un
+    événement. Les uploads invités ne sont pas concernés (voir modération
+    dédiée dans /admin/guest-uploads)."""
+    raw_days = (request.form.get('days') or '').strip()
+    if not raw_days.isdigit() or int(raw_days) < 1:
+        return redirect(url_for('admin_home', err='Nombre de jours invalide.'))
+    days = int(raw_days)
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        rows = conn.execute('SELECT id FROM captures WHERE created_at < ?', (cutoff,)).fetchall()
+    count = 0
+    for row in rows:
+        cap = delete_capture(row['id'])
+        if not cap:
+            continue
+        media_dir = PHOTO_DIR if cap['kind'] == 'photo' else VIDEO_DIR
+        (media_dir / cap['filename']).unlink(missing_ok=True)
+        if cap.get('thumb_filename'):
+            (THUMBS_DIR / cap['thumb_filename']).unlink(missing_ok=True)
+        count += 1
+    logger.info('Purge admin : %d capture(s) de plus de %d jour(s) supprimée(s).', count, days)
+    return redirect(url_for('admin_home', ok=f'{count} capture(s) supprimée(s) (plus de {days} jour(s)).'))
 
 
 # ── Admin — captures (Point 15) ───────────────────────────────────────────────
@@ -1159,7 +1388,7 @@ def api_bestof_slides():
     guest_cfg = _guest_upload_settings()
     if guest_cfg['enabled'] and guest_cfg['include_in_bestof']:
         slideshow_imgs += [
-            {'type': 'image', 'url': url_for('media_guest', filename=g['filename'])}
+            {'type': 'image', 'url': url_for('media_guest', filename=g['filename']), 'source': 'guest'}
             for g in list_approved_guest_uploads()
         ]
 
@@ -1324,6 +1553,7 @@ def _guest_upload_settings():
         'enabled':            _guest_bool('enabled', _cfg.get('enabled', False)),
         'require_moderation': _guest_bool('require_moderation', _cfg.get('require_moderation', True)),
         'include_in_bestof':  _guest_bool('include_in_bestof', True),
+        'include_in_gallery': _guest_bool('include_in_gallery', _cfg.get('include_in_gallery', False)),
         'max_file_size_mb':   int(raw_size)  if raw_size.isdigit()  else int(_cfg.get('max_file_size_mb', 15)),
         'max_per_guest':      int(raw_quota) if raw_quota.isdigit() else int(_cfg.get('max_uploads_per_guest', 12)),
         'token':              get_setting('guest_upload.token', '') or _cfg.get('upload_token', ''),
@@ -1462,6 +1692,8 @@ def admin_guest_uploads():
                        '1' if request.form.get('require_moderation') else '0')
             set_setting('guest_upload.include_in_bestof',
                        '1' if request.form.get('include_in_bestof') else '0')
+            set_setting('guest_upload.include_in_gallery',
+                       '1' if request.form.get('include_in_gallery') else '0')
             raw_size = (request.form.get('max_file_size_mb') or '').strip()
             if raw_size.isdigit() and int(raw_size) > 0:
                 set_setting('guest_upload.max_file_size_mb', raw_size)

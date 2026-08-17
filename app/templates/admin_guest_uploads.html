@@ -120,6 +120,14 @@
           </span>
         </label>
 
+        <label class="checkbox-row">
+          <input type="checkbox" name="include_in_gallery" {% if settings.include_in_gallery %}checked{% endif %}>
+          <span>
+            <span class="cb-label">Inclure dans la galerie officielle (/gallery)</span>
+            <span class="cb-desc">Ajoute un filtre Toutes/Officielles/Invités dans la galerie. Les photos invités y sont signalées par un badge « Invité » et ne sont pas votables.</span>
+          </span>
+        </label>
+
         <div class="field-row">
           <div class="field field-half">
             <label>Taille maximum par photo (Mo)</label>

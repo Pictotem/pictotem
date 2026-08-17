@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
     .admin-wrap { max-width: 860px; margin: 0 auto; padding: 40px 20px 60px; }
-    .admin-hero { margin-bottom: 40px; }
+    .admin-hero { margin-bottom: 32px; }
     .admin-hero h1 { font-size: 32px; font-weight: 700; margin: 0 0 6px; }
     .admin-hero p { color: var(--muted); margin: 0; }
     .admin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
@@ -23,6 +23,37 @@
     .admin-card.logout:hover { border-color: rgba(200,50,50,.7); }
     .section-label { font-size: 12px; font-weight: 700; text-transform: uppercase;
                      letter-spacing: .08em; color: var(--muted); margin: 28px 0 10px; }
+    .alert { padding: 12px 16px; border-radius: 10px; margin-bottom: 20px; font-size: 14px; }
+    .alert-ok  { background: rgba(50,200,100,.15); border:1px solid rgba(50,200,100,.3); color:#4ecca0; }
+    .alert-err { background: rgba(200,50,50,.15);  border:1px solid rgba(200,50,50,.3);  color:#e57373; }
+
+    /* ── Tableau de bord ─────────────────────────────── */
+    .dash-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .dash-stat { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+    .dash-stat-value { font-size: 24px; font-weight: 800; }
+    .dash-stat-label { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .dash-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+    .dash-disk-row { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+                     padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .dash-disk-row:last-of-type { border-bottom: none; }
+    .dash-disk-label { color: var(--muted); }
+    .dash-disk-value { font-weight: 600; }
+    .dash-disk-total { display: flex; justify-content: space-between; padding-top: 10px; margin-top: 6px;
+                       border-top: 1px solid var(--border); font-size: 14px; font-weight: 700; }
+    .dash-status-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 4px 0; }
+    .dash-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dash-dot.ok   { background: #4ecca0; }
+    .dash-dot.warn { background: #e5b95c; }
+    .dash-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px;
+                    padding-top: 14px; border-top: 1px solid var(--border); }
+    .dash-actions input[type=number] {
+      width: 70px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 8px; padding: 8px 10px; font-size: 14px;
+    }
+    .btn-ghost { background: rgba(255,255,255,.06); border: 1px solid var(--border); color: var(--text);
+                border-radius: 8px; padding: 8px 16px; font-size: 13px; cursor: pointer; }
+    .dash-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; margin-bottom: 8px; }
+    @media (max-width: 640px) { .dash-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body class="gallery-body">
@@ -31,6 +62,72 @@
   <div class="admin-hero">
     <h1>Administration</h1>
     <p>{{ config.get('ui', {}).get('app_title', 'Pictotem') }}</p>
+  </div>
+
+  {% if alert_success %}<div class="alert alert-ok">{{ alert_success }}</div>{% endif %}
+  {% if alert_error   %}<div class="alert alert-err">{{ alert_error }}</div>{% endif %}
+
+  <p class="section-label">Tableau de bord</p>
+  <div class="dash-stats">
+    <div class="dash-stat"><div class="dash-stat-value">{{ photo_total }}</div><div class="dash-stat-label">Photos</div></div>
+    <div class="dash-stat"><div class="dash-stat-value">{{ video_total }}</div><div class="dash-stat-label">Vidéos</div></div>
+    <div class="dash-stat"><div class="dash-stat-value">{{ email_total }}</div><div class="dash-stat-label">Emails collectés</div></div>
+    <div class="dash-stat"><div class="dash-stat-value">{{ guest_pending }}</div><div class="dash-stat-label">Uploads en attente</div></div>
+    <div class="dash-stat"><div class="dash-stat-value">{{ guest_approved }}</div><div class="dash-stat-label">Uploads publiés</div></div>
+  </div>
+
+  <div class="dash-grid">
+    <div class="dash-card">
+      <div class="admin-card-title" style="margin-bottom:10px">Espace disque</div>
+      {% for row in disk_rows %}
+      <div class="dash-disk-row">
+        <span class="dash-disk-label">{{ row.label }}</span>
+        <span class="dash-disk-value">{{ row.human }}</span>
+      </div>
+      {% endfor %}
+      <div class="dash-disk-total">
+        <span>Total (data\)</span>
+        <span>{{ total_human }}</span>
+      </div>
+      {% if free_human %}
+      <p style="font-size:12px;color:var(--muted);margin:10px 0 0">Espace libre sur le disque : {{ free_human }}</p>
+      {% endif %}
+
+      <div class="dash-actions">
+        <form method="post" action="{{ url_for('admin_purge_raw') }}"
+              onsubmit="return confirm('Supprimer toutes les photos/vidéos brutes (sauvegardes pré-cadre) ? Les versions publiées ne sont pas concernées.')">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button class="btn-ghost" type="submit">Vider les fichiers bruts</button>
+        </form>
+        <form method="post" action="{{ url_for('admin_purge_old') }}" style="display:flex;align-items:center;gap:8px"
+              onsubmit="return confirm('Supprimer définitivement les captures plus anciennes que ce nombre de jours ?')">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <label style="font-size:13px;color:var(--muted)">Supprimer captures &gt;</label>
+          <input type="number" name="days" min="1" max="3650" value="90">
+          <label style="font-size:13px;color:var(--muted)">jours</label>
+          <button class="btn-ghost" type="submit">Purger</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <div class="admin-card-title" style="margin-bottom:10px">Statuts</div>
+      <div class="dash-status-row">
+        <span class="dash-dot {{ 'ok' if ffmpeg_ok else 'warn' }}"></span>
+        ffmpeg {{ 'disponible' if ffmpeg_ok else 'introuvable (vidéo indisponible)' }}
+      </div>
+      <div class="dash-status-row">
+        <span class="dash-dot {{ 'ok' if printer_configured else 'warn' }}"></span>
+        Imprimante {{ 'configurée' if printer_configured else 'par défaut Windows' }}
+      </div>
+      <div class="dash-status-row">
+        <span class="dash-dot ok"></span>
+        Caméra (index {{ camera_device }})
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-top:10px">
+        Détail complet caméra : <a href="{{ url_for('healthz') }}" target="_blank" style="color:var(--accent)">/healthz</a>
+      </p>
+    </div>
   </div>
 
   <p class="section-label">Contenu</p>
@@ -61,6 +158,8 @@
     </a>
   </div>
 
+  <p class="section-label">Diaporamas &amp; interactions</p>
+  <div class="admin-cards">
     <a class="admin-card" href="{{ url_for('admin_slideshow') }}">
       <div class="admin-card-title">Slideshow Best Of</div>
       <div class="admin-card-desc">Diaporama public /bestof — type, délai, ordre, dates, images intermédiaires</div>
@@ -75,8 +174,9 @@
     </a>
     <a class="admin-card" href="{{ url_for('admin_guest_uploads') }}">
       <div class="admin-card-title">Upload invités</div>
-      <div class="admin-card-desc">Lien de partage /share, modération et quota — alimente le best-of</div>
+      <div class="admin-card-desc">Lien de partage /share, modération, quota — alimente le best-of et/ou la galerie</div>
     </a>
+  </div>
 
   <p class="section-label">Navigation</p>
   <div class="admin-cards">

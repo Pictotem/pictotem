@@ -56,6 +56,16 @@ Fonctionnement :
 - **Sécurité/vie privée** : chaque photo est revalidée côté serveur (rejet des fichiers qui ne sont pas de vraies images, quelle que soit leur extension), limitée en taille, et systématiquement ré-encodée — ce qui supprime au passage toutes les métadonnées EXIF (dont la géolocalisation GPS parfois présente dans les photos de smartphone) avant stockage et diffusion publique. Un anti-abus limite aussi le nombre d'envois par adresse IP par minute.
 - Formats acceptés : JPG, PNG, WEBP (les iPhone récents envoient du HEIC par défaut, mais Safari le convertit automatiquement en JPEG lors d'un envoi via un formulaire web classique).
 
+## Recommencer, Photo strip
+- **Recommencer** : sur l'écran de relecture (photo, vidéo ou photo strip), un bouton « Recommencer » supprime la capture qui vient d'être prise et relance immédiatement une nouvelle prise dans le même mode — évite d'accumuler des essais ratés dans la galerie.
+- **Photo strip** : mode de capture supplémentaire (bouton dédié sur l'accueil, activable/désactivable via `capture.photo_strip.enabled` dans `config.toml`) qui prend plusieurs photos à la suite (`shots`, 3 par défaut) et les assemble en une seule bande verticale (`background_color`, `gap_px`). Le résultat est une capture « photo » comme une autre : imprimable, votable, visible dans la galerie et le best-of, sans aucune configuration supplémentaire.
+
+## Galerie officielle + uploads invités
+Quand l'upload invités est activé **et** que « Inclure dans la galerie officielle » est coché dans `/admin/guest-uploads`, la galerie (`/gallery`) affiche aussi les photos invités approuvées, avec un filtre supplémentaire **Toutes / Officielles / Invités**. Les photos invités y sont signalées par un badge « Invité » (coin de la vignette, ne recouvre pas l'image) et ne sont pas votables. Ce comportement est entièrement désactivé par défaut : la galerie reste inchangée tant que ces deux réglages ne sont pas explicitement activés. Le même badge apparaît sur le diaporama `/bestof` pour les photos invités qui y sont diffusées.
+
+## Tableau de bord admin
+La page `/admin` affiche désormais un tableau de bord : compteurs (photos, vidéos, emails, uploads invités en attente/publiés), usage disque détaillé par dossier (`data/photos`, `data/photos_raw`, `data/videos`, etc.) avec l'espace libre restant sur le disque, et le statut de ffmpeg/imprimante/caméra. Deux actions de nettoyage y sont disponibles : vider les fichiers bruts (sauvegardes pré-cadre, sans risque) et purger les captures officielles plus anciennes qu'un nombre de jours donné (irréversible).
+
 ## Pack de démarrage (cadres, accueil)
 Pour préparer le thème d'un événement sans repasser par l'admin à chaque fois : déposez un dossier `pack\` à la racine (à côté de `run.bat`), contenant un `pack.json` et les images qu'il référence. À **chaque lancement**, l'application le recharge automatiquement (avant l'ouverture du navigateur) — modifiable/remplaçable à tout moment, il suffit de relancer `run.bat`.
 

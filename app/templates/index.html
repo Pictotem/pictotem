@@ -219,6 +219,9 @@
           <div class="bottom-bar-buttons" id="homeBtns">
             <button class="action-btn pri" id="btnTakePhoto">{{ texts.btn_photo }}</button>
             <button class="action-btn sec" id="btnTakeVideo">{{ texts.btn_video }}</button>
+            {% if photo_strip.get('enabled', True) %}
+            <button class="action-btn ter" id="btnTakeStrip">{{ texts.btn_photo_strip }}</button>
+            {% endif %}
           </div>
           <div class="bottom-bar-buttons hidden" id="frameStepBtns">
             <button class="action-btn sec" id="btnChooseFrame">{{ texts.btn_choose_frame }}</button>
@@ -226,12 +229,14 @@
           </div>
           <div class="bottom-bar-buttons hidden" id="replayPhotoBtns">
             <button class="action-btn pri" id="btnBackPhoto">{{ texts.btn_retour }}</button>
+            <button class="action-btn ghost" id="btnRetakePhoto">{{ texts.btn_recommencer }}</button>
             {% if not hide_print_button %}
             <button class="action-btn sec" id="btnPrintPhoto">{{ texts.btn_imprimer }}</button>
             {% endif %}
           </div>
           <div class="bottom-bar-buttons hidden" id="replayVideoBtns">
             <button class="action-btn pri" id="btnBackVideo">{{ texts.btn_retour }}</button>
+            <button class="action-btn ghost" id="btnRetakeVideo">{{ texts.btn_recommencer }}</button>
           </div>
         </div>
 
@@ -294,6 +299,9 @@
       idleTimerPaddingX:   {{ idle_timer_padding_x }},
       screensaverEnabled:        {{ 'true' if screensaver_enabled else 'false' }},
       screensaverTimeoutSeconds: {{ screensaver_timeout_seconds }},
+      showPhotoStrip:            {{ 'true' if photo_strip.get('enabled', True) else 'false' }},
+      photoStripShots:           {{ photo_strip.get('shots', 3) }},
+      photoStripIntervalSec:     {{ photo_strip.get('interval_sec', 1.2) }},
     };
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>

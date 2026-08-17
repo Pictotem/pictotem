@@ -35,6 +35,17 @@ save_dir = "data/videos"
 save_raw = true
 raw_dir = "data/videos_raw"
 
+# Photo strip : bande de plusieurs photos prises à la suite et assemblées en
+# une seule image verticale (classique du photobooth). Réutilise entièrement
+# le pipeline "photo" existant (impression, galerie, votes, best-of) — ce
+# n'est qu'un mode de capture supplémentaire, pas un nouveau type de média.
+[capture.photo_strip]
+enabled = true
+shots = 3
+interval_sec = 1.2
+background_color = "#ffffff"
+gap_px = 16
+
 [storage]
 root_dir = "data"
 db_path = "data/app.db"
@@ -87,6 +98,11 @@ enabled = false
 require_moderation = true
 max_file_size_mb = 15
 max_uploads_per_guest = 12
+# Intègre aussi les photos approuvées à la galerie officielle (/gallery),
+# avec un filtre Officielles/Invités/Toutes — indépendant de leur diffusion
+# dans /bestof (include_in_bestof, réglable côté back office). Désactivé
+# par défaut : aucun impact sur la galerie tant que ce n'est pas activé.
+include_in_gallery = false
 # Segment secret de l'URL de partage (/share/<upload_token>) : à changer avant
 # toute utilisation réelle (régénérable aussi depuis le back office, ce qui
 # invalide immédiatement l'ancien lien/QR).

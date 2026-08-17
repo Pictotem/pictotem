@@ -97,6 +97,11 @@
           <p class="field-default">Défaut : {{ defaults.btn_video }}</p>
         </div>
         <div class="text-field">
+          <label class="field-label" for="t_btn_photo_strip">Photo strip</label>
+          <input type="text" id="t_btn_photo_strip" name="text_btn_photo_strip" value="{{ texts.btn_photo_strip }}" placeholder="{{ defaults.btn_photo_strip }}">
+          <p class="field-default">Défaut : {{ defaults.btn_photo_strip }}</p>
+        </div>
+        <div class="text-field">
           <label class="field-label" for="t_btn_choose_frame">Choisir un cadre</label>
           <input type="text" id="t_btn_choose_frame" name="text_btn_choose_frame" value="{{ texts.btn_choose_frame }}" placeholder="{{ defaults.btn_choose_frame }}">
           <p class="field-default">Défaut : {{ defaults.btn_choose_frame }}</p>
@@ -121,6 +126,11 @@
                    style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;">
             Masquer ce bouton après une capture
           </label>
+        </div>
+        <div class="text-field">
+          <label class="field-label" for="t_btn_recommencer">Recommencer</label>
+          <input type="text" id="t_btn_recommencer" name="text_btn_recommencer" value="{{ texts.btn_recommencer }}" placeholder="{{ defaults.btn_recommencer }}">
+          <p class="field-default">Défaut : {{ defaults.btn_recommencer }}</p>
         </div>
         <div class="text-field">
           <label class="field-label" for="t_btn_retour">Retour</label>

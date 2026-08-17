@@ -90,6 +90,14 @@
       background: rgba(0,0,0,.45);
     }
 
+    /* ── Badge "Invité" (photo non officielle, coin — ne recouvre pas le média) ── */
+    .badge-guest {
+      position: absolute; top: 8px; left: 8px; z-index: 3; pointer-events: none;
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+      padding: 2px 7px; border-radius: 999px; backdrop-filter: blur(4px);
+      background: rgba(242,201,76,.88); color: #111;
+    }
+
     /* ── Votes ───────────────────────────────────────── */
     .lb-vote-wrap { display: flex; align-items: center; gap: 5px; margin: 0 8px; }
     .lb-vote-btn {
@@ -180,18 +188,25 @@
   <!-- Barre d'outils -->
   <div class="gallery-toolbar">
     <div class="tb-group">
-      <a class="tb-btn {% if kind == '' %}active{% endif %}"     href="{{ url_for('gallery', kind='',      sort=sort) }}">Tous</a>
-      <a class="tb-btn {% if kind == 'photo' %}active{% endif %}" href="{{ url_for('gallery', kind='photo', sort=sort) }}">Photos</a>
-      <a class="tb-btn {% if kind == 'video' %}active{% endif %}" href="{{ url_for('gallery', kind='video', sort=sort) }}">Vidéos</a>
+      <a class="tb-btn {% if kind == '' %}active{% endif %}"     href="{{ url_for('gallery', kind='',      sort=sort, source=source) }}">Tous</a>
+      <a class="tb-btn {% if kind == 'photo' %}active{% endif %}" href="{{ url_for('gallery', kind='photo', sort=sort, source=source) }}">Photos</a>
+      <a class="tb-btn {% if kind == 'video' %}active{% endif %}" href="{{ url_for('gallery', kind='video', sort=sort, source=source) }}">Vidéos</a>
     </div>
     <div class="tb-group">
-      <a class="tb-btn {% if sort == 'desc' %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='desc') }}">↓ Récent</a>
-      <a class="tb-btn {% if sort == 'asc'  %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='asc')  }}">↑ Ancien</a>
+      <a class="tb-btn {% if sort == 'desc' %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='desc', source=source) }}">↓ Récent</a>
+      <a class="tb-btn {% if sort == 'asc'  %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='asc',  source=source) }}">↑ Ancien</a>
     </div>
     {% if vote_enabled %}
     <div class="tb-group">
-      <a class="tb-btn {% if sort == 'votes_desc' %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='votes_desc') }}">↓ Votes</a>
-      <a class="tb-btn {% if sort == 'votes_asc'  %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='votes_asc')  }}">↑ Votes</a>
+      <a class="tb-btn {% if sort == 'votes_desc' %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='votes_desc', source=source) }}">↓ Votes</a>
+      <a class="tb-btn {% if sort == 'votes_asc'  %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='votes_asc',  source=source) }}">↑ Votes</a>
+    </div>
+    {% endif %}
+    {% if guest_in_gallery %}
+    <div class="tb-group">
+      <a class="tb-btn {% if source == '' %}active{% endif %}"         href="{{ url_for('gallery', kind=kind, sort=sort, source='') }}">Toutes</a>
+      <a class="tb-btn {% if source == 'official' %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort=sort, source='official') }}">Officielles</a>
+      <a class="tb-btn {% if source == 'guest' %}active{% endif %}"    href="{{ url_for('gallery', kind=kind, sort=sort, source='guest') }}">Invités</a>
     </div>
     {% endif %}
     <div class="tb-sep"></div>
@@ -206,9 +221,10 @@
   <!-- Grille -->
   <main class="gallery-grid size-md" id="galleryGrid">
     {% for item in captures %}
-    {% set thumb_url = url_for('media_thumb', filename=item.thumb_filename) if item.thumb_filename else (url_for('media_photo', filename=item.filename) if item.kind == 'photo' else '') %}
-    {% set media_url = url_for('media_photo', filename=item.filename) if item.kind == 'photo' else url_for('media_video', filename=item.filename) %}
-    {% set dl_url = url_for('download_photo', filename=item.filename) if item.kind == 'photo' else url_for('download_video', filename=item.filename) %}
+    {% set is_guest = item.source == 'guest' %}
+    {% set thumb_url = url_for('media_thumb', filename=item.thumb_filename) if item.thumb_filename else (url_for('media_guest', filename=item.filename) if is_guest else (url_for('media_photo', filename=item.filename) if item.kind == 'photo' else '')) %}
+    {% set media_url = url_for('media_guest', filename=item.filename) if is_guest else (url_for('media_photo', filename=item.filename) if item.kind == 'photo' else url_for('media_video', filename=item.filename)) %}
+    {% set dl_url = url_for('download_guest', filename=item.filename) if is_guest else (url_for('download_photo', filename=item.filename) if item.kind == 'photo' else url_for('download_video', filename=item.filename)) %}
     <article class="gallery-card"
              data-id="{{ item.id }}"
              data-kind="{{ item.kind }}"
@@ -224,11 +240,12 @@
         {% if item.kind == 'video' %}
         <div class="video-badge"><span>&#9654;</span></div>
         {% endif %}
+        {% if is_guest %}<span class="badge-guest" title="Photo envoyée par un invité">Invité</span>{% endif %}
         <span class="badge-kind">{{ item.kind }}</span>
       </div>
       <div class="card-footer">
         <span class="card-date">{{ item.created_at | format_dt }}</span>
-        {% if vote_enabled %}
+        {% if vote_enabled and not is_guest %}
         {% set my_vote = voter_votes.get(item.id, 0) %}
         <span class="vote-wrap" data-id="{{ item.id }}">
           <button class="vote-btn vote-up {% if my_vote == 1 %}active{% endif %}"
@@ -250,7 +267,7 @@
   {% if total_pages > 1 %}
   <nav style="display:flex;align-items:center;justify-content:center;gap:8px;padding:0 20px 24px;flex-wrap:wrap;">
     {% if page > 1 %}
-    <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, page=page-1) }}">← Précédent</a>
+    <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, source=source, page=page-1) }}">← Précédent</a>
     {% else %}
     <span class="tb-btn" style="opacity:.35;cursor:default;">← Précédent</span>
     {% endif %}
@@ -259,14 +276,14 @@
       {% if p == page %}
       <span class="tb-btn active">{{ p }}</span>
       {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
-      <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, page=p) }}">{{ p }}</a>
+      <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, source=source, page=p) }}">{{ p }}</a>
       {% elif p == page - 3 or p == page + 3 %}
       <span class="tb-btn" style="opacity:.4;cursor:default;">…</span>
       {% endif %}
     {% endfor %}
 
     {% if page < total_pages %}
-    <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, page=page+1) }}">Suivant →</a>
+    <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, source=source, page=page+1) }}">Suivant →</a>
     {% else %}
     <span class="tb-btn" style="opacity:.35;cursor:default;">Suivant →</span>
     {% endif %}

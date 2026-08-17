@@ -21,12 +21,16 @@ const pickerStrip      = document.getElementById('pickerStrip');
 const pickerDragHandle = document.getElementById('pickerDragHandle');
 const btnTakePhoto     = document.getElementById('btnTakePhoto');
 const btnTakeVideo     = document.getElementById('btnTakeVideo');
+const btnTakeStrip     = document.getElementById('btnTakeStrip');
 const btnChooseFrame   = document.getElementById('btnChooseFrame');
 const btnStartCapture  = document.getElementById('btnStartCapture');
 const btnFrameStepBack = document.getElementById('btnFrameStepBack');
 const btnBackPhoto     = document.getElementById('btnBackPhoto');
 const btnBackVideo     = document.getElementById('btnBackVideo');
+const btnRetakePhoto   = document.getElementById('btnRetakePhoto');
+const btnRetakeVideo   = document.getElementById('btnRetakeVideo');
 const btnPrintPhoto    = document.getElementById('btnPrintPhoto');
+const lookHereLabel    = document.getElementById('lookHereLabel');
 const btnFramePickerBack  = document.getElementById('btnFramePickerBack');
 const btnFramePickerApply = document.getElementById('btnFramePickerApply');
 const btnPickerLeft  = document.getElementById('btnPickerLeft');
@@ -492,7 +496,9 @@ function applyReplayUi(kind, capture) {
   replayCapture = capture;
   showBottomBar(true);
   showPicker(false);
-  setBottomCenterState(kind === 'photo' ? 'replay-photo' : 'replay-video');
+  // Le photo strip ('strip') produit une image statique comme 'photo' :
+  // même écran de relecture (imprimable), contrairement à 'video'.
+  setBottomCenterState((kind === 'photo' || kind === 'strip') ? 'replay-photo' : 'replay-video');
   showFrameStepBack(false);
   showResult(true);
   showReplayBadge(true);
@@ -599,6 +605,7 @@ async function startCountdownAndCapture(kind) {
     showLookHere(false);
 
     const payload = { frame: selectedFrame };
+    let stripTicker = null;
 
     if (kind === 'video') {
       // Phase 2 vidéo : overlay reste visible pendant l'enregistrement
@@ -607,6 +614,22 @@ async function startCountdownAndCapture(kind) {
       const dur = cfg.videoDurationSec || 5;
       payload.duration = dur;
       startRecordingCounter(dur);
+    } else if (kind === 'strip') {
+      // Photo strip : le serveur prend plusieurs clichés à la suite (voir
+      // capture.photo_strip dans config.toml) — indicateur visuel "Photo
+      // X/N" purement côté client, calé sur le même rythme (shots ×
+      // interval_sec) pour rester synchro avec la prise réelle côté serveur.
+      const shots = Number(cfg.photoStripShots || 3);
+      const intervalMs = Number(cfg.photoStripIntervalSec || 1.2) * 1000;
+      let shotN = 1;
+      showLookHere(true);
+      if (lookHereLabel) lookHereLabel.textContent = `Photo ${shotN}/${shots}`;
+      startTopBarCountdown(shots * intervalMs);
+      stripTicker = setInterval(() => {
+        shotN += 1;
+        if (shotN > shots) { clearInterval(stripTicker); return; }
+        if (lookHereLabel) lookHereLabel.textContent = `Photo ${shotN}/${shots}`;
+      }, intervalMs);
     } else {
       // Photo : on cache l'overlay et on montre le spinner (pas de durée
       // connue pendant le traitement serveur, donc pas de barre à ce stade)
@@ -615,14 +638,20 @@ async function startCountdownAndCapture(kind) {
       showProcessing(true);
     }
 
+    const apiPath = kind === 'photo' ? '/api/capture/photo'
+                  : kind === 'video' ? '/api/capture/video'
+                  : '/api/capture/photostrip';
+
     try {
-      const data = await api(
-        kind === 'photo' ? '/api/capture/photo' : '/api/capture/video',
-        payload
-      );
+      const data = await api(apiPath, payload);
       if (kind === 'video') {
         stopRecordingCounter();
         updateFrameOverlay(false);  // cache l'overlay maintenant que la vidéo est capturée
+      } else if (kind === 'strip') {
+        clearInterval(stripTicker);
+        stopTopBarCountdown();
+        showLookHere(false);
+        updateFrameOverlay(false);
       }
       showProcessing(false);
       renderResultMedia(data);
@@ -630,6 +659,7 @@ async function startCountdownAndCapture(kind) {
       applyReplayUi(kind, data);
     } catch (e) {
       if (kind === 'video') { stopRecordingCounter(); updateFrameOverlay(false); }
+      if (kind === 'strip') { clearInterval(stripTicker); showLookHere(false); updateFrameOverlay(false); }
       stopTopBarCountdown();
       showProcessing(false);
       applyHomeUi();
@@ -666,6 +696,7 @@ document.addEventListener('touchend',   pickerEndDrag);
 // — Handlers boutons —
 btnTakePhoto?.addEventListener('click', () => { captureMode = 'photo'; applyFrameStepUi('photo'); });
 btnTakeVideo?.addEventListener('click', () => { captureMode = 'video'; applyFrameStepUi('video'); });
+btnTakeStrip?.addEventListener('click', () => { captureMode = 'strip'; applyFrameStepUi('strip'); });
 
 btnChooseFrame?.addEventListener('click', applyFramePickerUi);
 
@@ -695,6 +726,23 @@ btnStartCapture?.addEventListener('click', () => {
 btnFrameStepBack?.addEventListener('click', applyHomeUi);
 btnBackPhoto?.addEventListener('click', applyHomeUi);
 btnBackVideo?.addEventListener('click', applyHomeUi);
+
+// — Recommencer : supprime la capture tout juste prise et relance une prise
+// de vue immédiatement (même mode, même cadre) — évite d'accumuler des
+// essais ratés dans la galerie. La suppression est best-effort : en cas
+// d'échec réseau on relance quand même la capture (ne jamais bloquer le
+// visiteur pour un souci de nettoyage).
+async function doRetake() {
+  const mode = captureMode;
+  const capId = replayCapture?.id;
+  if (capId) {
+    try { await api(`/api/capture/${capId}/retake`); }
+    catch (e) { console.warn('[recommencer] suppression échouée', e); }
+  }
+  applyFrameStepUi(mode || 'photo');
+}
+btnRetakePhoto?.addEventListener('click', doRetake);
+btnRetakeVideo?.addEventListener('click', doRetake);
 
 btnPrintPhoto?.addEventListener('click', async () => {
   if (!replayCapture) return;

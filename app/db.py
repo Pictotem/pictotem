@@ -505,6 +505,51 @@ def set_guest_upload_status(upload_id, status):
     return dict(row) if row else None
 
 
+def list_gallery_combined(sort='desc', kind='', source='', page=1, page_size=None):
+    """Fusionne captures officielles + uploads invités approuvés pour la
+    galerie, uniquement utilisée quand guest_upload.include_in_gallery est
+    activé (voir gallery() dans app.py — sinon list_captures() seule est
+    utilisée, comportement inchangé). Tri/pagination faits en Python : les
+    deux tables ont des schémas différents (pas d'UNION SQL simple), et les
+    volumes visés (un événement) ne posent pas de problème de performance.
+    Chaque item porte un champ 'source' ('official'|'guest') pour le badge
+    et le filtre côté galerie."""
+    items = []
+    if source in ('', 'official'):
+        with closing(db_conn()) as conn:
+            if kind in ('photo', 'video'):
+                rows = conn.execute('SELECT * FROM captures WHERE kind=?', (kind,)).fetchall()
+            else:
+                rows = conn.execute('SELECT * FROM captures').fetchall()
+        for r in rows:
+            d = dict(r)
+            d['source'] = 'official'
+            items.append(d)
+
+    # Les uploads invités sont toujours kind='photo' : sans effet si un
+    # filtre 'video' est actif.
+    if source in ('', 'guest') and kind in ('', 'photo'):
+        with closing(db_conn()) as conn:
+            rows = conn.execute("SELECT * FROM guest_uploads WHERE status = 'approved'").fetchall()
+        for r in rows:
+            d = dict(r)
+            d['source'] = 'guest'
+            d['vote_score'] = 0
+            d['printed'] = 0
+            items.append(d)
+
+    if sort in ('votes_desc', 'votes_asc'):
+        items.sort(key=lambda x: (x['vote_score'], x['created_at']), reverse=(sort == 'votes_desc'))
+    else:
+        items.sort(key=lambda x: x['created_at'], reverse=(sort != 'asc'))
+
+    total = len(items)
+    if page_size:
+        start = (page - 1) * page_size
+        items = items[start:start + page_size]
+    return items, total
+
+
 def delete_guest_upload_db(upload_id):
     """Supprime de la DB et retourne le dict (l'appelant supprime fichier + thumb)."""
     with closing(db_conn()) as conn:
