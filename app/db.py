@@ -69,14 +69,52 @@ def init_db():
         conn.execute("""
         CREATE TABLE IF NOT EXISTS votes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL DEFAULT 'official',
             capture_id INTEGER NOT NULL,
             voter_token TEXT NOT NULL,
             value INTEGER NOT NULL,
             created_at TEXT NOT NULL,
-            UNIQUE(capture_id, voter_token)
+            UNIQUE(source, capture_id, voter_token)
         )
         """)
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_votes_capture_id ON votes(capture_id)')
+
+        # Migration : vote sur les uploads invités. Les IDs de captures et de
+        # guest_uploads sont indépendants (deux AUTOINCREMENT séparés) et
+        # peuvent donc coïncider — la colonne 'source' ci-dessus lève
+        # l'ambiguïté. Sur une base déjà existante (créée avant cette
+        # fonctionnalité), la table votes n'a pas cette colonne ni la bonne
+        # contrainte UNIQUE : on la reconstruit (toutes les lignes existantes
+        # sont forcément des votes 'official', aucune perte de données).
+        votes_cols = [r['name'] for r in conn.execute('PRAGMA table_info(votes)').fetchall()]
+        if 'source' not in votes_cols:
+            conn.execute('ALTER TABLE votes RENAME TO votes_old')
+            conn.execute("""
+            CREATE TABLE votes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL DEFAULT 'official',
+                capture_id INTEGER NOT NULL,
+                voter_token TEXT NOT NULL,
+                value INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(source, capture_id, voter_token)
+            )
+            """)
+            conn.execute("""
+                INSERT INTO votes (id, source, capture_id, voter_token, value, created_at)
+                SELECT id, 'official', capture_id, voter_token, value, created_at FROM votes_old
+            """)
+            conn.execute('DROP TABLE votes_old')
+            conn.commit()
+            logger.info('Migration votes : colonne source ajoutée (%d vote(s) conservé(s), source=official).',
+                        conn.execute('SELECT COUNT(*) FROM votes').fetchone()[0])
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_votes_capture_id ON votes(source, capture_id)')
+
+        # Migration : ajout colonne vote_score sur guest_uploads
+        try:
+            conn.execute('ALTER TABLE guest_uploads ADD COLUMN vote_score INTEGER NOT NULL DEFAULT 0')
+            conn.commit()
+        except Exception:
+            pass  # colonne déjà présente
 
         conn.execute(
             'INSERT OR IGNORE INTO frames(id, label, preview_filename, overlay_filename, sort_order) VALUES(?,?,?,?,?)',
@@ -129,6 +167,7 @@ def init_db():
             guest_token TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
             size_bytes INTEGER NOT NULL DEFAULT 0,
+            vote_score INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL
         )
         """)
@@ -321,65 +360,78 @@ def update_email_by_id(email_id, new_email):
 
 
 # ── Votes ─────────────────────────────────────────────────────────────────────
+# source='official' (table captures) ou 'guest' (table guest_uploads, photos
+# invités approuvées et visibles dans la galerie). Les deux tables ont chacune
+# leur propre AUTOINCREMENT, donc un même id peut désigner deux médias
+# différents selon la source — d'où la colonne source sur votes et son
+# inclusion dans la contrainte UNIQUE (voir migration dans init_db()).
 
-def cast_vote(capture_id, voter_token, value):
-    """Vote +1 ou -1. Si même valeur déjà votée : annule le vote (toggle).
+_VOTE_TABLES = {'official': 'captures', 'guest': 'guest_uploads'}
+
+
+def cast_vote(item_id, voter_token, value, source='official'):
+    """Vote +1 ou -1 sur une capture officielle ou un upload invité.
+    Si même valeur déjà votée : annule le vote (toggle).
     Retourne (new_score, your_vote) avec your_vote=0 si annulé."""
     if value not in (1, -1):
         raise ValueError('value must be +1 or -1')
+    table = _VOTE_TABLES.get(source)
+    if table is None:
+        raise ValueError('source must be "official" or "guest"')
     created_at = datetime.now().isoformat(timespec='seconds')
     with closing(db_conn()) as conn:
         existing = conn.execute(
-            'SELECT value FROM votes WHERE capture_id=? AND voter_token=?',
-            (capture_id, voter_token)
+            'SELECT value FROM votes WHERE source=? AND capture_id=? AND voter_token=?',
+            (source, item_id, voter_token)
         ).fetchone()
         if existing is None:
             conn.execute(
-                'INSERT INTO votes(capture_id, voter_token, value, created_at) VALUES(?,?,?,?)',
-                (capture_id, voter_token, value, created_at)
+                'INSERT INTO votes(source, capture_id, voter_token, value, created_at) VALUES(?,?,?,?,?)',
+                (source, item_id, voter_token, value, created_at)
             )
-            conn.execute('UPDATE captures SET vote_score = vote_score + ? WHERE id = ?',
-                         (value, capture_id))
+            conn.execute(f'UPDATE {table} SET vote_score = vote_score + ? WHERE id = ?',
+                         (value, item_id))
             your_vote = value
         elif existing['value'] == value:
-            conn.execute('DELETE FROM votes WHERE capture_id=? AND voter_token=?',
-                         (capture_id, voter_token))
-            conn.execute('UPDATE captures SET vote_score = vote_score - ? WHERE id = ?',
-                         (value, capture_id))
+            conn.execute('DELETE FROM votes WHERE source=? AND capture_id=? AND voter_token=?',
+                         (source, item_id, voter_token))
+            conn.execute(f'UPDATE {table} SET vote_score = vote_score - ? WHERE id = ?',
+                         (value, item_id))
             your_vote = 0
         else:
             delta = value - existing['value']
-            conn.execute('UPDATE votes SET value=? WHERE capture_id=? AND voter_token=?',
-                         (value, capture_id, voter_token))
-            conn.execute('UPDATE captures SET vote_score = vote_score + ? WHERE id = ?',
-                         (delta, capture_id))
+            conn.execute('UPDATE votes SET value=? WHERE source=? AND capture_id=? AND voter_token=?',
+                         (value, source, item_id, voter_token))
+            conn.execute(f'UPDATE {table} SET vote_score = vote_score + ? WHERE id = ?',
+                         (delta, item_id))
             your_vote = value
         conn.commit()
-        new_score = conn.execute(
-            'SELECT vote_score FROM captures WHERE id=?', (capture_id,)
-        ).fetchone()['vote_score']
+        row = conn.execute(f'SELECT vote_score FROM {table} WHERE id=?', (item_id,)).fetchone()
+        new_score = row['vote_score'] if row else 0
     return new_score, your_vote
 
 
-def admin_adjust_vote(capture_id, delta):
+def admin_adjust_vote(item_id, delta, source='official'):
     """Ajuste directement vote_score de delta (admin uniquement)."""
+    table = _VOTE_TABLES.get(source, 'captures')
     with closing(db_conn()) as conn:
-        conn.execute('UPDATE captures SET vote_score = vote_score + ? WHERE id = ?',
-                     (delta, capture_id))
+        conn.execute(f'UPDATE {table} SET vote_score = vote_score + ? WHERE id = ?',
+                     (delta, item_id))
         conn.commit()
-        row = conn.execute('SELECT vote_score FROM captures WHERE id=?', (capture_id,)).fetchone()
+        row = conn.execute(f'SELECT vote_score FROM {table} WHERE id=?', (item_id,)).fetchone()
     return row['vote_score'] if row else 0
 
 
 def get_voter_votes(voter_token):
-    """Retourne {capture_id: value} pour ce voter_token."""
+    """Retourne {"source:capture_id": value} pour ce voter_token — clé
+    composite car les ids ne sont uniques qu'au sein d'une même source."""
     if not voter_token:
         return {}
     with closing(db_conn()) as conn:
         rows = conn.execute(
-            'SELECT capture_id, value FROM votes WHERE voter_token=?', (voter_token,)
+            'SELECT source, capture_id, value FROM votes WHERE voter_token=?', (voter_token,)
         ).fetchall()
-    return {r['capture_id']: r['value'] for r in rows}
+    return {f'{r["source"]}:{r["capture_id"]}': r['value'] for r in rows}
 
 
 # ── Slideshow ─────────────────────────────────────────────────────────────────
@@ -534,7 +586,6 @@ def list_gallery_combined(sort='desc', kind='', source='', page=1, page_size=Non
         for r in rows:
             d = dict(r)
             d['source'] = 'guest'
-            d['vote_score'] = 0
             d['printed'] = 0
             items.append(d)
 

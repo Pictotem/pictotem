@@ -222,11 +222,13 @@
   <main class="gallery-grid size-md" id="galleryGrid">
     {% for item in captures %}
     {% set is_guest = item.source == 'guest' %}
+    {% set item_source = item.source or 'official' %}
     {% set thumb_url = url_for('media_thumb', filename=item.thumb_filename) if item.thumb_filename else (url_for('media_guest', filename=item.filename) if is_guest else (url_for('media_photo', filename=item.filename) if item.kind == 'photo' else '')) %}
     {% set media_url = url_for('media_guest', filename=item.filename) if is_guest else (url_for('media_photo', filename=item.filename) if item.kind == 'photo' else url_for('media_video', filename=item.filename)) %}
     {% set dl_url = url_for('download_guest', filename=item.filename) if is_guest else (url_for('download_photo', filename=item.filename) if item.kind == 'photo' else url_for('download_video', filename=item.filename)) %}
     <article class="gallery-card"
              data-id="{{ item.id }}"
+             data-source="{{ item_source }}"
              data-kind="{{ item.kind }}"
              data-url="{{ media_url }}"
              data-download="{{ dl_url }}"
@@ -245,14 +247,14 @@
       </div>
       <div class="card-footer">
         <span class="card-date">{{ item.created_at | format_dt }}</span>
-        {% if vote_enabled and not is_guest %}
-        {% set my_vote = voter_votes.get(item.id, 0) %}
-        <span class="vote-wrap" data-id="{{ item.id }}">
+        {% if vote_enabled %}
+        {% set my_vote = voter_votes.get(item_source ~ ':' ~ item.id, 0) %}
+        <span class="vote-wrap" data-id="{{ item.id }}" data-source="{{ item_source }}">
           <button class="vote-btn vote-up {% if my_vote == 1 %}active{% endif %}"
-                  onclick="doVote({{ item.id }}, 1, this)">+</button>
+                  onclick="doVote({{ item.id }}, 1, this, '{{ item_source }}')">+</button>
           <span class="vote-score" data-score="{{ item.vote_score }}">{{ item.vote_score }}</span>
           <button class="vote-btn vote-dn {% if my_vote == -1 %}active{% endif %}"
-                  onclick="doVote({{ item.id }}, -1, this)">−</button>
+                  onclick="doVote({{ item.id }}, -1, this, '{{ item_source }}')">−</button>
         </span>
         {% endif %}
         <a class="dl-btn" href="{{ dl_url }}" download>↓</a>
@@ -456,14 +458,15 @@
     );
 
     // Sync vote état dans les cards depuis les données de la page
-    async function doVote(captureId, value, btn) {
+    async function doVote(captureId, value, btn, source) {
+      source = source || 'official';
       const wrap = btn.closest('.vote-wrap');
       if (!wrap) return;
       try {
         const res = await fetch('/api/vote', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ capture_id: captureId, value })
+          body: JSON.stringify({ capture_id: captureId, value, source })
         });
         const data = await res.json();
         if (!data.ok) return;
@@ -474,7 +477,7 @@
         wrap.querySelector('.vote-up').classList.toggle('active', data.your_vote === 1);
         wrap.querySelector('.vote-dn').classList.toggle('active', data.your_vote === -1);
         // Mettre à jour la lightbox si elle affiche cette capture
-        if (document.getElementById('lbVoteWrap') && _lbCaptureId === captureId) {
+        if (document.getElementById('lbVoteWrap') && _lbCaptureId === captureId && _lbCaptureSource === source) {
           _syncLbVote(data.score, data.your_vote);
         }
       } catch (e) { console.error('vote', e); }
@@ -482,6 +485,7 @@
 
     // Vote depuis la lightbox
     let _lbCaptureId = null;
+    let _lbCaptureSource = 'official';
     function _syncLbVote(score, yourVote) {
       const sc = document.getElementById('lbVoteScore');
       if (!sc) return;
@@ -491,6 +495,7 @@
     }
     function _lbLoadVote(card) {
       _lbCaptureId = parseInt(card.dataset.id || '0');
+      _lbCaptureSource = card.dataset.source || 'official';
       const wrap = card.querySelector('.vote-wrap');
       const score = wrap ? parseInt(wrap.querySelector('.vote-score')?.dataset.score || '0') : 0;
       const yourVote = wrap?.querySelector('.vote-up.active') ? 1 : wrap?.querySelector('.vote-dn.active') ? -1 : 0;
@@ -501,13 +506,13 @@
       const res = await fetch('/api/vote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ capture_id: _lbCaptureId, value })
+        body: JSON.stringify({ capture_id: _lbCaptureId, value, source: _lbCaptureSource })
       });
       const data = await res.json();
       if (!data.ok) return;
       _syncLbVote(data.score, data.your_vote);
       // Mettre à jour la miniature correspondante
-      const wrap = document.querySelector(`.vote-wrap[data-id="${_lbCaptureId}"]`);
+      const wrap = document.querySelector(`.vote-wrap[data-id="${_lbCaptureId}"][data-source="${_lbCaptureSource}"]`);
       if (wrap) {
         const scoreEl = wrap.querySelector('.vote-score');
         applyScore(scoreEl, data.score);

@@ -1266,13 +1266,16 @@ def api_vote():
     data = request.get_json(silent=True) or {}
     capture_id = data.get('capture_id')
     value = data.get('value')
+    source = data.get('source', 'official')
+    if source not in ('official', 'guest'):
+        return jsonify({'ok': False, 'error': 'source invalide'}), 400
     if not capture_id or value not in (1, -1):
         return jsonify({'ok': False, 'error': 'Paramètres invalides'}), 400
     try:
-        new_score, your_vote = cast_vote(int(capture_id), voter_token, int(value))
+        new_score, your_vote = cast_vote(int(capture_id), voter_token, int(value), source=source)
         return jsonify({'ok': True, 'score': new_score, 'your_vote': your_vote})
     except Exception:
-        logger.exception('Erreur vote capture #%s', capture_id)
+        logger.exception('Erreur vote %s #%s', source, capture_id)
         return jsonify({'ok': False, 'error': 'Erreur serveur'}), 500
 
 
