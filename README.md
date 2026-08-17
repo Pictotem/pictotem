@@ -87,7 +87,9 @@ Format `pack.json` :
 - `frames` : liste des cadres — chaque `filename` doit être un PNG avec transparence, présent dans le même dossier que `pack.json` (ou un sous-dossier).
 - `screensaver` (optionnel) : liste d'images pour l'écran de veille (JPG/PNG/WEBP/GIF), présentes dans le même dossier que `pack.json` (ou un sous-dossier).
 
-**Sans éditer `pack.json`** : toute image placée dans un sous-dossier `pack\screensaver\` est automatiquement ajoutée à l'écran de veille — pratique pour ne gérer que ce dossier sans toucher au JSON. Les deux méthodes (clé `screensaver` et sous-dossier) peuvent être combinées ; les doublons de nom de fichier sont ignorés. Les images déjà importées lors d'un lancement précédent ne sont pas dupliquées en base au relancement — seul le fichier est mis à jour si son contenu a changé.
+**Sans éditer `pack.json`** : toute image PNG placée dans un sous-dossier `pack\frames\` est automatiquement ajoutée comme cadre (id/label déduits du nom de fichier), et toute image placée dans `pack\screensaver\` est automatiquement ajoutée à l'écran de veille — pratique pour ne gérer que ces dossiers sans toucher au JSON. Les deux méthodes (liste explicite dans `pack.json` et sous-dossier) peuvent être combinées ; les doublons de nom de fichier sont ignorés. Les images déjà importées lors d'un lancement précédent ne sont pas dupliquées en base au relancement — seul le fichier est mis à jour si son contenu a changé.
+
+Un **pack par défaut** (3 cadres génériques + 3 écrans de veille, `pack\frames\` et `pack\screensaver\`) est fourni avec le dépôt — personnalisez-le simplement en remplaçant son contenu, ou en éditant/supprimant `pack.json`.
 
 C'est le même format que l'import ZIP de l'admin (`/admin/frames` → « Importer un pack ») — un ZIP de pack peut d'ailleurs simplement être décompressé tel quel dans `pack\`.
 
