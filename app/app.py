@@ -1316,6 +1316,42 @@ def admin_votes():
 SLIDESHOW_DIR = BASE_DIR / 'app' / 'static' / 'slideshow'
 _SLIDESHOW_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp', '.gif'}
 
+# ── Slide promo (info QR) ────────────────────────────────────────────────────
+# Slide auto-générée (fond + QR code galerie + texte), insérée périodiquement
+# dans le diaporama /bestof pour informer les invités : présence du photobox,
+# galerie en ligne avec vote, upload de photos depuis smartphone. Rendue
+# côté client (bestof.html) à partir des réglages ci-dessous — pas d'image
+# à régénérer côté serveur, tout est piloté par CSS/JS.
+
+PROMO_DIR = BASE_DIR / 'app' / 'static' / 'promo'
+_PROMO_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp'}
+_PROMO_FONTS = [
+    ('system-ui, "Segoe UI", sans-serif', 'Par défaut (Segoe UI)'),
+    ('Georgia, "Times New Roman", serif', 'Georgia (serif)'),
+    ('"Trebuchet MS", sans-serif',        'Trebuchet MS'),
+    ('Impact, "Arial Narrow", sans-serif', 'Impact'),
+    ('"Courier New", monospace',          'Courier New'),
+    ('"Comic Sans MS", cursive',          'Comic Sans MS'),
+]
+_PROMO_DEFAULT_TEXT = (
+    "Un photobox est à votre disposition !\n"
+    "Retrouvez toutes les photos sur la galerie en ligne et votez pour vos favorites.\n"
+    "Vous pouvez aussi envoyer vos propres photos depuis votre smartphone."
+)
+
+
+def _promo_settings():
+    return {
+        'enabled':    get_setting('slideshow.promo_enabled', '0') == '1',
+        'frequency':  max(1, int(get_setting('slideshow.promo_frequency', '6') or '6')),
+        'background': get_setting('slideshow.promo_background_filename', ''),
+        'qr_size':    max(60, int(get_setting('slideshow.promo_qr_size', '220') or '220')),
+        'text':       get_setting('slideshow.promo_text', '') or _PROMO_DEFAULT_TEXT,
+        'text_size':  max(10, int(get_setting('slideshow.promo_text_size', '28') or '28')),
+        'text_font':  get_setting('slideshow.promo_text_font', _PROMO_FONTS[0][0]),
+        'text_color': get_setting('slideshow.promo_text_color', '#ffffff'),
+    }
+
 
 def _slideshow_settings():
     return {
@@ -1392,12 +1428,27 @@ def api_bestof_slides():
             for g in list_approved_guest_uploads()
         ]
 
+    p = _promo_settings()
+    promo_data = {
+        'enabled':        p['enabled'],
+        'frequency':      p['frequency'],
+        'background_url': (url_for('static', filename=f'promo/{p["background"]}')
+                            if p['background'] else ''),
+        'qr_url':         url_for('qr_png'),
+        'qr_size':        p['qr_size'],
+        'text':           p['text'],
+        'text_size':      p['text_size'],
+        'text_font':      p['text_font'],
+        'text_color':     p['text_color'],
+    }
+
     return jsonify({
         'captures':         captures,
         'slideshow_images': slideshow_imgs,
         'delay':            s['delay'],
         'order':            s['order'],
         'refresh_interval': s['refresh_interval'],
+        'promo':            promo_data,
     })
 
 
@@ -1419,6 +1470,51 @@ def admin_slideshow():
             set_setting('slideshow.refresh_interval',
                         str(max(0, int(request.form.get('refresh_interval', '300') or '300'))))
             return redirect(url_for('admin_slideshow', ok='Paramètres mis à jour.'))
+
+        if action == 'promo_settings':
+            set_setting('slideshow.promo_enabled', '1' if request.form.get('promo_enabled') else '0')
+            raw_freq = (request.form.get('promo_frequency') or '').strip()
+            if raw_freq.isdigit() and int(raw_freq) > 0:
+                set_setting('slideshow.promo_frequency', raw_freq)
+            raw_qr = (request.form.get('promo_qr_size') or '').strip()
+            if raw_qr.isdigit() and int(raw_qr) >= 60:
+                set_setting('slideshow.promo_qr_size', raw_qr)
+            set_setting('slideshow.promo_text', request.form.get('promo_text', '').strip())
+            raw_tsize = (request.form.get('promo_text_size') or '').strip()
+            if raw_tsize.isdigit() and int(raw_tsize) >= 10:
+                set_setting('slideshow.promo_text_size', raw_tsize)
+            font_value = request.form.get('promo_text_font', '')
+            if font_value in dict(_PROMO_FONTS):
+                set_setting('slideshow.promo_text_font', font_value)
+            color_value = request.form.get('promo_text_color', '').strip()
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', color_value):
+                set_setting('slideshow.promo_text_color', color_value)
+            return redirect(url_for('admin_slideshow', ok='Réglages de la page promo mis à jour.'))
+
+        if action == 'promo_upload':
+            file = request.files.get('background')
+            if not file or not file.filename:
+                return redirect(url_for('admin_slideshow', err='Aucun fichier sélectionné.'))
+            ext = Path(file.filename).suffix.lower()
+            if ext not in _PROMO_ALLOWED_EXT:
+                return redirect(url_for('admin_slideshow', err='Format non supporté (PNG, JPG, WEBP).'))
+            PROMO_DIR.mkdir(parents=True, exist_ok=True)
+            # Un seul fond actif à la fois : on retire l'ancien fichier avant d'enregistrer le nouveau.
+            old = get_setting('slideshow.promo_background_filename', '')
+            if old:
+                (PROMO_DIR / old).unlink(missing_ok=True)
+            safe = f'promo-bg-{int(datetime.now().timestamp())}{ext}'
+            file.save(str(PROMO_DIR / safe))
+            set_setting('slideshow.promo_background_filename', safe)
+            return redirect(url_for('admin_slideshow', ok='Fond mis à jour.'))
+
+        if action == 'promo_bg_delete':
+            old = get_setting('slideshow.promo_background_filename', '')
+            if old:
+                (PROMO_DIR / old).unlink(missing_ok=True)
+                set_setting('slideshow.promo_background_filename', '')
+                return redirect(url_for('admin_slideshow', ok='Fond supprimé.'))
+            return redirect(url_for('admin_slideshow', err='Aucun fond à supprimer.'))
 
         if action == 'upload':
             file = request.files.get('image')
@@ -1451,6 +1547,7 @@ def admin_slideshow():
     return render_template(
         'admin_slideshow.html', config=CONFIG,
         settings=s, images=images,
+        promo=_promo_settings(), promo_fonts=_PROMO_FONTS,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )

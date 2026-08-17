@@ -60,6 +60,25 @@
     .upload-label { color: var(--accent); font-size: 14px; cursor: pointer; display: block; margin-bottom: 6px; }
     .upload-hint  { font-size: 12px; color: var(--muted); }
     #upload-name  { margin-top: 4px; font-size: 13px; color: var(--text); }
+
+    .field textarea {
+      width: 100%; background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px;
+      font-family: inherit; resize: vertical;
+    }
+    .field input[type=color] {
+      width: 56px; height: 38px; padding: 2px; background: var(--surface-2);
+      border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+    }
+    .checkbox-field { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+    .checkbox-field label { font-size: 14px; color: var(--text); font-weight: 600; cursor: pointer; }
+    .promo-bg-preview {
+      display: flex; align-items: center; gap: 16px; margin-bottom: 18px;
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px;
+    }
+    .promo-bg-preview img {
+      width: 140px; height: 79px; object-fit: cover; border-radius: 8px; flex-shrink: 0;
+    }
   </style>
 </head>
 <body class="gallery-body">
@@ -207,6 +226,106 @@
         <p class="upload-hint">PNG, JPG, WEBP, GIF — résolution recommandée : 1920×1080</p>
         <div style="margin-top:14px">
           <button class="btn-primary" type="submit">Ajouter</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- Page promo (fond + QR + texte) -->
+  <div class="section">
+    <p class="section-title">Page promo
+      <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
+        Slide auto-générée (fond + QR code de la galerie + texte), insérée régulièrement dans le diaporama
+        pour informer les invités du photobox, de la galerie en ligne (vote) et de l'upload depuis smartphone.
+      </span>
+    </p>
+    <div class="form-card">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="promo_settings">
+
+        <div class="checkbox-field">
+          <input type="checkbox" id="promo_enabled" name="promo_enabled" {% if promo.enabled %}checked{% endif %}>
+          <label for="promo_enabled">Activer la page promo dans le diaporama</label>
+        </div>
+
+        <div class="field">
+          <label>Fréquence d'apparition (1 fois toutes les N slides)</label>
+          <input type="number" name="promo_frequency" min="1" max="200"
+                 value="{{ promo.frequency }}" style="max-width:140px">
+        </div>
+
+        <div class="field">
+          <label>Texte affiché (une ligne = un paragraphe)</label>
+          <textarea name="promo_text" rows="4">{{ promo.text }}</textarea>
+        </div>
+
+        <div class="field-row">
+          <div class="field field-half">
+            <label>Taille du texte (px)</label>
+            <input type="number" name="promo_text_size" min="10" max="120"
+                   value="{{ promo.text_size }}" style="max-width:140px">
+          </div>
+          <div class="field field-half">
+            <label>Police</label>
+            <select name="promo_text_font">
+              {% for value, label in promo_fonts %}
+              <option value="{{ value }}" {% if promo.text_font == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field field-half">
+            <label>Couleur du texte</label>
+            <input type="color" name="promo_text_color" value="{{ promo.text_color }}">
+          </div>
+          <div class="field field-half">
+            <label>Taille du QR code (px)</label>
+            <input type="number" name="promo_qr_size" min="60" max="800"
+                   value="{{ promo.qr_size }}" style="max-width:140px">
+          </div>
+        </div>
+
+        <button class="btn-primary" type="submit">Enregistrer</button>
+        <a class="preview-link" href="{{ url_for('bestof') }}" target="_blank">↗ Voir le slideshow</a>
+      </form>
+    </div>
+  </div>
+
+  <!-- Fond de la page promo -->
+  <div class="section">
+    <p class="section-title">Fond de la page promo</p>
+
+    {% if promo.background %}
+    <div class="promo-bg-preview">
+      <img src="{{ url_for('static', filename='promo/' + promo.background) }}" alt="Fond actuel">
+      <div>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Fond actuel — un dégradé par défaut est utilisé si aucun fond n'est défini.</p>
+        <form method="post" onsubmit="return confirm('Supprimer le fond actuel ?')">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="promo_bg_delete">
+          <button class="btn-danger" type="submit">Supprimer le fond</button>
+        </form>
+      </div>
+    </div>
+    {% else %}
+    <p style="color:var(--muted);font-size:14px;margin-bottom:20px">Aucun fond défini — un dégradé par défaut est utilisé.</p>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="promo_upload">
+      <div class="upload-zone">
+        <label class="upload-label" for="promo-bg-input">Choisir une image de fond…</label>
+        <input type="file" id="promo-bg-input" name="background"
+               accept=".png,.jpg,.jpeg,.webp"
+               onchange="document.getElementById('promo-bg-name').textContent = this.files[0]?.name || ''">
+        <span id="promo-bg-name"></span>
+        <p class="upload-hint">PNG, JPG, WEBP — résolution recommandée : 1920×1080 (remplace le fond actuel)</p>
+        <div style="margin-top:14px">
+          <button class="btn-primary" type="submit">Enregistrer comme fond</button>
         </div>
       </div>
     </form>

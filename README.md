@@ -63,6 +63,9 @@ Fonctionnement :
 ## Galerie officielle + uploads invités
 Quand l'upload invités est activé **et** que « Inclure dans la galerie officielle » est coché dans `/admin/guest-uploads`, la galerie (`/gallery`) affiche aussi les photos invités approuvées, avec un filtre supplémentaire **Toutes / Officielles / Invités**. Les photos invités y sont signalées par un badge « Invité » (coin de la vignette, ne recouvre pas l'image) et ne sont pas votables. Ce comportement est entièrement désactivé par défaut : la galerie reste inchangée tant que ces deux réglages ne sont pas explicitement activés. Le même badge apparaît sur le diaporama `/bestof` pour les photos invités qui y sont diffusées.
 
+## Page promo (diaporama /bestof)
+Depuis `/admin/slideshow`, une slide auto-générée peut être insérée régulièrement dans le diaporama `/bestof` pour informer les invités : présence du photobox, galerie en ligne avec vote, upload de photos depuis smartphone. Elle combine un fond d'image (à uploader dans l'admin — un dégradé par défaut est utilisé sinon), le QR code de la galerie (taille réglable) et un texte libre (contenu, taille, police et couleur réglables). Fréquence d'apparition paramétrable (« 1 fois toutes les N slides »). Désactivée par défaut.
+
 ## Tableau de bord admin
 La page `/admin` affiche désormais un tableau de bord : compteurs (photos, vidéos, emails, uploads invités en attente/publiés), usage disque détaillé par dossier (`data/photos`, `data/photos_raw`, `data/videos`, etc.) avec l'espace libre restant sur le disque, et le statut de ffmpeg/imprimante/caméra. Deux actions de nettoyage y sont disponibles : vider les fichiers bruts (sauvegardes pré-cadre, sans risque) et purger les captures officielles plus anciennes qu'un nombre de jours donné (irréversible).
 
