@@ -14,8 +14,12 @@
       opacity: 0; transition: opacity 0.8s ease;
     }
     .slide.active { opacity: 1; }
-    .slide img  { width: 100%; height: 100%; object-fit: contain; display: block; }
-    .slide video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+    /* Classe explicite (plutôt qu'un sélecteur .slide img/video global) pour
+       ne cibler que les vraies photos/vidéos — sinon cette règle, plus
+       spécifique que .promo-bg/.promo-qr-card img, les écrase aussi et casse
+       la mise en page de la slide promo (voir buildPromoContent ci-dessous). */
+    .slide-media { width: 100%; height: 100%; object-fit: contain; display: block; }
+    video.slide-media { background: #000; }
     #empty {
       position: absolute; inset: 0; display: flex;
       align-items: center; justify-content: center;
@@ -192,6 +196,7 @@
     } else if (slide.type === 'video') {
       nextEl.innerHTML = '';
       const v = document.createElement('video');
+      v.className = 'slide-media';
       v.src = slide.url;
       v.muted = true;
       v.autoplay = true;
@@ -204,6 +209,7 @@
     } else {
       nextEl.innerHTML = '';
       const el = document.createElement('img');
+      el.className = 'slide-media';
       el.src = slide.url;
       el.onerror = advance;
       nextEl.appendChild(el);
