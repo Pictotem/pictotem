@@ -1806,6 +1806,10 @@ def admin_screensaver():
 #   ],
 #   "screensaver": ["Fond1.jpg", "Fond2.png", ...]   (optionnel) images d'écran de veille
 # }
+# "frames" est optionnel : tout PNG déposé dans un sous-dossier "frames/" est
+# importé comme cadre (id/label auto-générés depuis le nom de fichier) même
+# sans être listé dans pack.json — comme "screensaver/" pour les images de
+# veille. Les deux méthodes (liste explicite + sous-dossier) sont combinables.
 # Sans pack.json (mode "vrac") : les PNG à la racine sont traités comme cadres
 # (ou accueil si le nom contient "accueil"/"welcome"), et tout fichier image
 # placé dans un sous-dossier "screensaver/" est importé comme image de veille —
@@ -1826,28 +1830,54 @@ def _import_pack_from_dir(base_dir: Path) -> dict:
     default_id = None
     screensaver_specs = []
 
+    # Dossiers de convention (frames/, screensaver/) — calculés en amont pour
+    # pouvoir les exclure du scan "en vrac" ci-dessous (sinon une image posée
+    # dans screensaver/ serait aussi importée comme cadre, et vice-versa).
+    screensaver_dir_candidates = [p for p in root.rglob('*') if p.is_dir() and p.name.lower() == 'screensaver']
+    frames_dir_candidates = [p for p in root.rglob('*') if p.is_dir() and p.name.lower() == 'frames']
+    convention_dirs = screensaver_dir_candidates + frames_dir_candidates
+
+    def _in_convention_dir(p: Path) -> bool:
+        return any(d in p.parents for d in convention_dirs)
+
     if pack_json_candidates:
         pack_data = json.loads(pack_json_candidates[0].read_text(encoding='utf-8'))
-        specs = pack_data['frames']
+        specs = list(pack_data.get('frames', []))
         welcome_filename = pack_data.get('welcome')
         default_id = pack_data.get('default')
         screensaver_specs = list(pack_data.get('screensaver', []))
     else:
-        pngs = sorted(p for p in root.rglob('*.png'))
+        pngs = sorted(p for p in root.rglob('*.png') if not _in_convention_dir(p))
         specs = []
         for i, p in enumerate(pngs):
             if 'accueil' in p.stem.lower() or 'welcome' in p.stem.lower():
                 welcome_filename = p.name
             else:
                 specs.append({
-                    'filename': p.name,
+                    'filename': str(p.relative_to(root)),
                     'id': re.sub(r'[^a-z0-9]+', '-', p.stem.lower()).strip('-'),
                     'label': p.stem.replace('_', ' '),
                     'sort_order': (i + 1) * 10,
                 })
 
+    # Sous-dossier frames/ (convention indépendante de pack.json, comme screensaver/) :
+    # tout PNG déposé là est ajouté comme cadre, avec id/label auto-générés à
+    # partir du nom de fichier s'il n'est pas déjà référencé explicitement.
+    already_referenced = {(root / spec['filename']).resolve() for spec in specs}
+    next_sort = (max((int(s.get('sort_order', 0)) for s in specs), default=0) // 10 + 1) * 10
+    for fr_dir in frames_dir_candidates:
+        for f in sorted(fr_dir.iterdir()):
+            if f.is_file() and f.suffix.lower() == '.png' and f.resolve() not in already_referenced:
+                specs.append({
+                    'filename': str(f.relative_to(root)),
+                    'id': re.sub(r'[^a-z0-9]+', '-', f.stem.lower()).strip('-'),
+                    'label': f.stem.replace('_', ' '),
+                    'sort_order': next_sort,
+                })
+                already_referenced.add(f.resolve())
+                next_sort += 10
+
     # Sous-dossier screensaver/ (convention indépendante de pack.json)
-    screensaver_dir_candidates = [p for p in root.rglob('*') if p.is_dir() and p.name.lower() == 'screensaver']
     screensaver_paths = {(root / fn).resolve(): fn for fn in screensaver_specs}
     for ss_dir in screensaver_dir_candidates:
         for f in sorted(ss_dir.iterdir()):
@@ -1947,13 +1977,13 @@ def _auto_import_startup_pack():
     + images de veille) posé dans le dossier pack/ à la racine — pratique
     pour préparer le thème d'un événement sans repasser par l'admin. Ne fait
     rien si pack/ est absent, ou s'il ne contient ni pack.json ni sous-dossier
-    screensaver/."""
+    frames/ ou screensaver/."""
     pack_dir = BASE_DIR / 'pack'
     if not pack_dir.is_dir():
         return
     has_pack_json = any(pack_dir.rglob('pack.json'))
-    has_screensaver_dir = any(p.is_dir() and p.name.lower() == 'screensaver' for p in pack_dir.rglob('*'))
-    if not has_pack_json and not has_screensaver_dir:
+    subdirs = {p.name.lower() for p in pack_dir.rglob('*') if p.is_dir()}
+    if not has_pack_json and 'frames' not in subdirs and 'screensaver' not in subdirs:
         return
     try:
         counts = _import_pack_from_dir(pack_dir)

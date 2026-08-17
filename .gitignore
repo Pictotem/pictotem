@@ -4,8 +4,6 @@ ffmpeg/
 data/
 logs/
 
-# Pack de démarrage optionnel (contenu propre à chaque événement/utilisateur).
-pack/
 
 # Python
 __pycache__/

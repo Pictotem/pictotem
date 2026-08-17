@@ -1,0 +1,9 @@
+{
+  "name": "Pack par défaut",
+  "default": "classic",
+  "frames": [
+    { "filename": "frames/cadre_classique.png", "id": "classic",  "label": "Classique", "sort_order": 10 },
+    { "filename": "frames/cadre_polaroid.png",  "id": "polaroid", "label": "Polaroid",  "sort_order": 20 },
+    { "filename": "frames/cadre_neon.png",      "id": "neon",     "label": "Néon",      "sort_order": 30 }
+  ]
+}
