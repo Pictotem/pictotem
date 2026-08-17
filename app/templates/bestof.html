@@ -155,9 +155,10 @@
       .join('');
     const textStyle = `font-family:${promoCfg.text_font || 'system-ui, sans-serif'};`
       + `font-size:${promoCfg.text_size || 28}px;color:${promoCfg.text_color || '#ffffff'};`;
+    const overlay = promoCfg.overlay_enabled !== false ? `<div class="promo-overlay"></div>` : '';
     el.innerHTML = `
       ${bg}
-      <div class="promo-overlay"></div>
+      ${overlay}
       <div class="promo-content">
         <div class="promo-text" style='${textStyle}'>${textHtml}</div>
         <div class="promo-qr-wrap">

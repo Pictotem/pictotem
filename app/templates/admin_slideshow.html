@@ -249,6 +249,11 @@
           <label for="promo_enabled">Activer la page promo dans le diaporama</label>
         </div>
 
+        <div class="checkbox-field">
+          <input type="checkbox" id="promo_overlay_enabled" name="promo_overlay_enabled" {% if promo.overlay_enabled %}checked{% endif %}>
+          <label for="promo_overlay_enabled">Assombrir le fond (recommandé pour la lisibilité du texte et du QR code)</label>
+        </div>
+
         <div class="field">
           <label>Fréquence d'apparition (1 fois toutes les N slides)</label>
           <input type="number" name="promo_frequency" min="1" max="200"

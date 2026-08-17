@@ -1342,14 +1342,15 @@ _PROMO_DEFAULT_TEXT = (
 
 def _promo_settings():
     return {
-        'enabled':    get_setting('slideshow.promo_enabled', '0') == '1',
-        'frequency':  max(1, int(get_setting('slideshow.promo_frequency', '6') or '6')),
-        'background': get_setting('slideshow.promo_background_filename', ''),
-        'qr_size':    max(60, int(get_setting('slideshow.promo_qr_size', '220') or '220')),
-        'text':       get_setting('slideshow.promo_text', '') or _PROMO_DEFAULT_TEXT,
-        'text_size':  max(10, int(get_setting('slideshow.promo_text_size', '28') or '28')),
-        'text_font':  get_setting('slideshow.promo_text_font', _PROMO_FONTS[0][0]),
-        'text_color': get_setting('slideshow.promo_text_color', '#ffffff'),
+        'enabled':         get_setting('slideshow.promo_enabled', '0') == '1',
+        'frequency':       max(1, int(get_setting('slideshow.promo_frequency', '6') or '6')),
+        'background':      get_setting('slideshow.promo_background_filename', ''),
+        'overlay_enabled': get_setting('slideshow.promo_overlay_enabled', '1') == '1',
+        'qr_size':         max(60, int(get_setting('slideshow.promo_qr_size', '220') or '220')),
+        'text':            get_setting('slideshow.promo_text', '') or _PROMO_DEFAULT_TEXT,
+        'text_size':       max(10, int(get_setting('slideshow.promo_text_size', '28') or '28')),
+        'text_font':       get_setting('slideshow.promo_text_font', _PROMO_FONTS[0][0]),
+        'text_color':      get_setting('slideshow.promo_text_color', '#ffffff'),
     }
 
 
@@ -1361,15 +1362,16 @@ def _promo_public_data():
     attendre — voir bestof.html)."""
     p = _promo_settings()
     return {
-        'enabled':        p['enabled'],
-        'frequency':      p['frequency'],
-        'background_url': (url_for('static', filename=f'promo/{p["background"]}')
-                            if p['background'] else ''),
-        'qr_url':         url_for('qr_png'),
-        'qr_size':        p['qr_size'],
-        'text':           p['text'],
-        'text_size':      p['text_size'],
-        'text_font':      p['text_font'],
+        'enabled':         p['enabled'],
+        'frequency':       p['frequency'],
+        'background_url':  (url_for('static', filename=f'promo/{p["background"]}')
+                             if p['background'] else ''),
+        'overlay_enabled': p['overlay_enabled'],
+        'qr_url':          url_for('qr_png'),
+        'qr_size':         p['qr_size'],
+        'text':            p['text'],
+        'text_size':       p['text_size'],
+        'text_font':       p['text_font'],
         'text_color':     p['text_color'],
     }
 
@@ -1499,6 +1501,8 @@ def admin_slideshow():
 
         if action == 'promo_settings':
             set_setting('slideshow.promo_enabled', '1' if request.form.get('promo_enabled') else '0')
+            set_setting('slideshow.promo_overlay_enabled',
+                        '1' if request.form.get('promo_overlay_enabled') else '0')
             raw_freq = (request.form.get('promo_frequency') or '').strip()
             if raw_freq.isdigit() and int(raw_freq) > 0:
                 set_setting('slideshow.promo_frequency', raw_freq)
