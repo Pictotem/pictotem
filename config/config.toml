@@ -190,7 +190,7 @@ column_gap_px = 20
 border_top_color = "rgba(255,255,255,0.12)"
 
 [ui.frame_gallery]
-default_frame = "none"
+default_frame = "boom"
 none_label = "Aucun cadre"
 card_background = "rgba(20,22,26,0.92)"
 card_border = "rgba(255,255,255,0.12)"
@@ -204,13 +204,31 @@ preview = ""
 overlay = ""
 
 [[ui.frame_gallery.frames]]
-id = "gold"
-label = "Cadre Or"
-preview = "/static/frames/gold-preview.jpg"
-overlay = "/static/frames/gold-overlay.png"
+id = "anniv"
+label = "Anniv"
+preview = "/static/frames/anniv-preview.jpg"
+overlay = "/static/frames/anniv-overlay.png"
 
 [[ui.frame_gallery.frames]]
-id = "party"
-label = "Party"
-preview = "/static/frames/party-preview.jpg"
-overlay = "/static/frames/party-overlay.png"
+id = "bling"
+label = "Bling"
+preview = "/static/frames/bling-preview.jpg"
+overlay = "/static/frames/bling-overlay.png"
+
+[[ui.frame_gallery.frames]]
+id = "boom"
+label = "Boom"
+preview = "/static/frames/boom-preview.jpg"
+overlay = "/static/frames/boom-overlay.png"
+
+[[ui.frame_gallery.frames]]
+id = "disco"
+label = "Disco"
+preview = "/static/frames/disco-preview.jpg"
+overlay = "/static/frames/disco-overlay.png"
+
+[[ui.frame_gallery.frames]]
+id = "futurist"
+label = "Futurist"
+preview = "/static/frames/futurist-preview.jpg"
+overlay = "/static/frames/futurist-overlay.png"
