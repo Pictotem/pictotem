@@ -25,7 +25,7 @@ Application pour borne pictotem : caméra USB/webcam, interface plein écran loc
   - `logs\app.log` : log applicatif Flask (routes, caméra, impression...), une fois l'application effectivement démarrée
 
 ## Utilisation (poste final)
-1. Copier tout le dossier `Dev\` (ou son contenu déployé) sur le PC cible — pas besoin d'installer Python ni ffmpeg au préalable.
+1. Copier le contenu sur le PC cible — pas besoin d'installer Python ni ffmpeg au préalable.
 2. Double-cliquer sur `run.bat`.
    - Au tout premier lancement : téléchargement et configuration de Python portable + installation des dépendances (Flask, OpenCV...) dans `python-embed\`, puis téléchargement de ffmpeg portable dans `ffmpeg\` (nécessaire uniquement pour la capture vidéo — si ce téléchargement échoue, l'application démarre quand même, seule la vidéo sera indisponible). **Connexion internet requise une seule fois.**
    - Les lancements suivants démarrent directement, entièrement hors-ligne.
