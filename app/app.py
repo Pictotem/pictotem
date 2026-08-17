@@ -1389,7 +1389,15 @@ def _slideshow_settings():
 
 @app.route('/bestof')
 def bestof():
-    return render_template('bestof.html', config=CONFIG)
+    resp = make_response(render_template('bestof.html', config=CONFIG))
+    # /bestof est typiquement ouvert une fois et laissé tourner en continu sur
+    # un écran dédié (JS interne pour rafraîchir les données) : sans ceci, le
+    # navigateur peut mettre en cache le HTML/CSS/JS de la page et ignorer
+    # silencieusement les mises à jour de l'application tant que la page n'est
+    # pas explicitement rechargée.
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
 
 
 @app.route('/api/bestof/slides')
