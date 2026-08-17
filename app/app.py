@@ -1353,6 +1353,27 @@ def _promo_settings():
     }
 
 
+def _promo_public_data():
+    """Représentation JSON de la page promo, partagée par /api/bestof/slides
+    (rafraîchissement complet, cadencé par slideshow.refresh_interval) et
+    /api/bestof/promo-settings (interrogée à cadence fixe et rapide par le
+    kiosque déjà ouvert, pour appliquer les changements du back office sans
+    attendre — voir bestof.html)."""
+    p = _promo_settings()
+    return {
+        'enabled':        p['enabled'],
+        'frequency':      p['frequency'],
+        'background_url': (url_for('static', filename=f'promo/{p["background"]}')
+                            if p['background'] else ''),
+        'qr_url':         url_for('qr_png'),
+        'qr_size':        p['qr_size'],
+        'text':           p['text'],
+        'text_size':      p['text_size'],
+        'text_font':      p['text_font'],
+        'text_color':     p['text_color'],
+    }
+
+
 def _slideshow_settings():
     return {
         'type':            get_setting('slideshow.type',           'both'),
@@ -1428,28 +1449,25 @@ def api_bestof_slides():
             for g in list_approved_guest_uploads()
         ]
 
-    p = _promo_settings()
-    promo_data = {
-        'enabled':        p['enabled'],
-        'frequency':      p['frequency'],
-        'background_url': (url_for('static', filename=f'promo/{p["background"]}')
-                            if p['background'] else ''),
-        'qr_url':         url_for('qr_png'),
-        'qr_size':        p['qr_size'],
-        'text':           p['text'],
-        'text_size':      p['text_size'],
-        'text_font':      p['text_font'],
-        'text_color':     p['text_color'],
-    }
-
     return jsonify({
         'captures':         captures,
         'slideshow_images': slideshow_imgs,
         'delay':            s['delay'],
         'order':            s['order'],
         'refresh_interval': s['refresh_interval'],
-        'promo':            promo_data,
+        'promo':            _promo_public_data(),
     })
+
+
+@app.route('/api/bestof/promo-settings')
+def api_bestof_promo_settings():
+    """Réglages légers de la page promo, interrogés à cadence fixe par le
+    kiosque déjà ouvert (voir bestof.html) — indépendant de
+    slideshow.refresh_interval, qui ne cadence que le rafraîchissement complet
+    (captures, images intermédiaires) et peut être réglé sur une valeur lente,
+    voire désactivée, sans que ça ralentisse l'application des changements
+    faits dans /admin/slideshow → Page promo."""
+    return jsonify(_promo_public_data())
 
 
 @app.route('/admin/slideshow', methods=['GET', 'POST'])

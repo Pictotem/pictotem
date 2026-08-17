@@ -222,29 +222,56 @@
     if (badge) badge.classList.toggle('hidden', slide.source !== 'guest');
   }
 
+  let lastData = null; // dernières captures/images reçues, réutilisées pour reconstruire
+                        // la liste sans re-fetch quand seule la promo est rafraîchie
+
   async function fetchSlides() {
     const res = await fetch('/api/bestof/slides');
     return res.json();
   }
 
+  // Applique une nouvelle liste de slides sans interrompre le slide en cours.
+  function applySlides(newSlides) {
+    if (!newSlides.length) return; // garder la liste actuelle si vide
+    slides = newSlides;
+    idx = idx % slides.length;
+    if (document.getElementById('empty').style.display !== 'none') {
+      document.getElementById('empty').style.display = 'none';
+      showNext();
+    }
+  }
+
   async function refreshSlides() {
     try {
       const data = await fetchSlides();
+      lastData = data;
       promoCfg = data.promo || promoCfg;
-      const newSlides = buildSlides(data);
-      if (newSlides.length === 0) return; // garder la liste actuelle si vide
-      slides = newSlides;
-      // Ramener idx dans les bornes sans interrompre le slide courant
-      idx = idx % slides.length;
       settings.delay = data.delay || 5;
       settings.order = data.order || settings.order;
+      applySlides(buildSlides(data));
     } catch (e) {
       console.warn('slideshow refresh échoué', e);
     }
   }
 
+  // La page promo (fond/texte/QR/fréquence) est interrogée à cadence fixe et
+  // rapide, indépendamment de slideshow.refresh_interval (qui ne cadence que
+  // le rafraîchissement complet — captures, images intermédiaires — et peut
+  // être lent, voire désactivé) : un changement dans /admin/slideshow →
+  // Page promo s'applique donc toujours en quelques secondes, sans devoir
+  // recharger la page ni attendre le refresh complet.
+  async function refreshPromoSettings() {
+    try {
+      const res = await fetch('/api/bestof/promo-settings');
+      promoCfg = await res.json();
+      if (lastData) applySlides(buildSlides(lastData));
+    } catch (e) { /* on garde les réglages actuels */ }
+  }
+  setInterval(refreshPromoSettings, 15000);
+
   try {
     const data = await fetchSlides();
+    lastData = data;
     settings = {
       delay:           data.delay || 5,
       order:           data.order || 'chrono',
