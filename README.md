@@ -66,8 +66,8 @@ Quand l'upload invités est activé **et** que « Inclure dans la galerie offici
 ## Tableau de bord admin
 La page `/admin` affiche désormais un tableau de bord : compteurs (photos, vidéos, emails, uploads invités en attente/publiés), usage disque détaillé par dossier (`data/photos`, `data/photos_raw`, `data/videos`, etc.) avec l'espace libre restant sur le disque, et le statut de ffmpeg/imprimante/caméra. Deux actions de nettoyage y sont disponibles : vider les fichiers bruts (sauvegardes pré-cadre, sans risque) et purger les captures officielles plus anciennes qu'un nombre de jours donné (irréversible).
 
-## Pack de démarrage (cadres, accueil)
-Pour préparer le thème d'un événement sans repasser par l'admin à chaque fois : déposez un dossier `pack\` à la racine (à côté de `run.bat`), contenant un `pack.json` et les images qu'il référence. À **chaque lancement**, l'application le recharge automatiquement (avant l'ouverture du navigateur) — modifiable/remplaçable à tout moment, il suffit de relancer `run.bat`.
+## Pack de démarrage (cadres, accueil, écran de veille)
+Pour préparer le thème d'un événement sans repasser par l'admin à chaque fois : déposez un dossier `pack\` à la racine (à côté de `run.bat`), contenant un `pack.json` et/ou un sous-dossier `screensaver\`, plus les images référencées. À **chaque lancement**, l'application le recharge automatiquement (avant l'ouverture du navigateur) — modifiable/remplaçable à tout moment, il suffit de relancer `run.bat`.
 
 Format `pack.json` :
 ```json
@@ -78,12 +78,16 @@ Format `pack.json` :
   "frames": [
     { "filename": "Cadre_1.png", "id": "cadre-1", "label": "Cadre 1", "sort_order": 10 },
     { "filename": "Cadre_2.png", "id": "cadre-2", "label": "Cadre 2", "sort_order": 20 }
-  ]
+  ],
+  "screensaver": ["Fond1.jpg", "Fond2.png"]
 }
 ```
 - `welcome` (optionnel) : cadre affiché en overlay sur l'écran d'accueil — PNG avec transparence.
 - `default` (optionnel) : identifiant du cadre sélectionné par défaut.
 - `frames` : liste des cadres — chaque `filename` doit être un PNG avec transparence, présent dans le même dossier que `pack.json` (ou un sous-dossier).
+- `screensaver` (optionnel) : liste d'images pour l'écran de veille (JPG/PNG/WEBP/GIF), présentes dans le même dossier que `pack.json` (ou un sous-dossier).
+
+**Sans éditer `pack.json`** : toute image placée dans un sous-dossier `pack\screensaver\` est automatiquement ajoutée à l'écran de veille — pratique pour ne gérer que ce dossier sans toucher au JSON. Les deux méthodes (clé `screensaver` et sous-dossier) peuvent être combinées ; les doublons de nom de fichier sont ignorés. Les images déjà importées lors d'un lancement précédent ne sont pas dupliquées en base au relancement — seul le fichier est mis à jour si son contenu a changé.
 
 C'est le même format que l'import ZIP de l'admin (`/admin/frames` → « Importer un pack ») — un ZIP de pack peut d'ailleurs simplement être décompressé tel quel dans `pack\`.
 

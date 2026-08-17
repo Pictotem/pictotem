@@ -1803,15 +1803,20 @@ def admin_screensaver():
 #   "frames": [
 #     { "filename": "Cadre_X.png", "id": "x", "label": "Cadre X", "sort_order": 10 },
 #     ...
-#   ]
+#   ],
+#   "screensaver": ["Fond1.jpg", "Fond2.png", ...]   (optionnel) images d'écran de veille
 # }
+# Sans pack.json (mode "vrac") : les PNG à la racine sont traités comme cadres
+# (ou accueil si le nom contient "accueil"/"welcome"), et tout fichier image
+# placé dans un sous-dossier "screensaver/" est importé comme image de veille —
+# que pack.json soit présent ou non.
 # Utilisé à la fois par l'import ZIP admin (ci-dessous) et par le chargement
 # automatique au démarrage depuis le dossier pack/ (voir _auto_import_startup_pack).
 
-def _import_pack_from_dir(base_dir: Path) -> tuple[int, int]:
-    """Importe cadres + accueil depuis un dossier déjà
+def _import_pack_from_dir(base_dir: Path) -> dict:
+    """Importe cadres + accueil + images de veille depuis un dossier déjà
     extrait (contenant pack.json, cherché n'importe où dans l'arbre — ou à
-    défaut les PNG en vrac). Renvoie (importés, ignorés)."""
+    défaut les PNG en vrac). Renvoie un dict de compteurs."""
     from PIL import Image
 
     pack_json_candidates = list(base_dir.rglob('pack.json'))
@@ -1819,12 +1824,14 @@ def _import_pack_from_dir(base_dir: Path) -> tuple[int, int]:
 
     welcome_filename = None
     default_id = None
+    screensaver_specs = []
 
     if pack_json_candidates:
         pack_data = json.loads(pack_json_candidates[0].read_text(encoding='utf-8'))
         specs = pack_data['frames']
         welcome_filename = pack_data.get('welcome')
         default_id = pack_data.get('default')
+        screensaver_specs = list(pack_data.get('screensaver', []))
     else:
         pngs = sorted(p for p in root.rglob('*.png'))
         specs = []
@@ -1839,9 +1846,17 @@ def _import_pack_from_dir(base_dir: Path) -> tuple[int, int]:
                     'sort_order': (i + 1) * 10,
                 })
 
+    # Sous-dossier screensaver/ (convention indépendante de pack.json)
+    screensaver_dir_candidates = [p for p in root.rglob('*') if p.is_dir() and p.name.lower() == 'screensaver']
+    screensaver_paths = {(root / fn).resolve(): fn for fn in screensaver_specs}
+    for ss_dir in screensaver_dir_candidates:
+        for f in sorted(ss_dir.iterdir()):
+            if f.is_file() and f.suffix.lower() in _SCREENSAVER_ALLOWED_EXT:
+                screensaver_paths.setdefault(f.resolve(), str(f.relative_to(root)))
+
     imported = skipped = 0
-    logger.info('Pack import : base_dir=%s, %d spec(s), welcome=%s, default=%s',
-                root, len(specs), welcome_filename, default_id)
+    logger.info('Pack import : base_dir=%s, %d spec(s), welcome=%s, default=%s, %d image(s) de veille',
+                root, len(specs), welcome_filename, default_id, len(screensaver_paths))
     FRAMES_DIR.mkdir(parents=True, exist_ok=True)
 
     # Cadre d'accueil
@@ -1896,20 +1911,58 @@ def _import_pack_from_dir(base_dir: Path) -> tuple[int, int]:
                 conn.commit()
                 logger.info('Pack import : cadre par défaut → %s', default_id)
 
-    return imported, skipped
+    # Images d'écran de veille
+    ss_imported = ss_skipped = 0
+    if screensaver_paths:
+        existing_filenames = {img['filename'] for img in list_screensaver_images()}
+        SCREENSAVER_DIR.mkdir(parents=True, exist_ok=True)
+        for src_path, rel_name in screensaver_paths.items():
+            try:
+                if not src_path.exists() or src_path.suffix.lower() not in _SCREENSAVER_ALLOWED_EXT:
+                    logger.warning('Pack import : image de veille introuvable ou format non supporté : %s', rel_name)
+                    ss_skipped += 1
+                    continue
+                ext = src_path.suffix.lower()
+                safe = re.sub(r'[^a-zA-Z0-9_-]', '_', src_path.stem) + ext
+                dest = SCREENSAVER_DIR / safe
+                shutil.copy2(src_path, dest)
+                if safe not in existing_filenames:
+                    add_screensaver_image(safe)
+                    existing_filenames.add(safe)
+                ss_imported += 1
+            except Exception:
+                logger.exception('Pack import : erreur sur image de veille %s', rel_name)
+                ss_skipped += 1
+
+    return {
+        'frames_imported': imported,
+        'frames_skipped': skipped,
+        'screensaver_imported': ss_imported,
+        'screensaver_skipped': ss_skipped,
+    }
 
 
 def _auto_import_startup_pack():
     """Charge automatiquement, à chaque démarrage, le pack (cadres + accueil
-    + image de démarrage) posé dans le dossier pack/ à la racine — pratique
+    + images de veille) posé dans le dossier pack/ à la racine — pratique
     pour préparer le thème d'un événement sans repasser par l'admin. Ne fait
-    rien si pack/ est absent ou ne contient pas de pack.json."""
+    rien si pack/ est absent, ou s'il ne contient ni pack.json ni sous-dossier
+    screensaver/."""
     pack_dir = BASE_DIR / 'pack'
-    if not pack_dir.is_dir() or not any(pack_dir.rglob('pack.json')):
+    if not pack_dir.is_dir():
+        return
+    has_pack_json = any(pack_dir.rglob('pack.json'))
+    has_screensaver_dir = any(p.is_dir() and p.name.lower() == 'screensaver' for p in pack_dir.rglob('*'))
+    if not has_pack_json and not has_screensaver_dir:
         return
     try:
-        imported, skipped = _import_pack_from_dir(pack_dir)
-        logger.info('Pack de démarrage chargé (pack/) : %d cadre(s), %d ignoré(s).', imported, skipped)
+        counts = _import_pack_from_dir(pack_dir)
+        logger.info(
+            'Pack de démarrage chargé (pack/) : %d cadre(s) importé(s) (%d ignoré(s)), '
+            '%d image(s) de veille importée(s) (%d ignorée(s)).',
+            counts['frames_imported'], counts['frames_skipped'],
+            counts['screensaver_imported'], counts['screensaver_skipped'],
+        )
     except Exception:
         logger.exception('Échec du chargement du pack de démarrage (pack/).')
 
@@ -1928,7 +1981,7 @@ def admin_frames_import():
         return _admin_redirect(error='Le fichier doit être un ZIP.')
 
     tmpdir = tempfile.mkdtemp()
-    imported = skipped = 0
+    counts = None
     try:
         with zipfile.ZipFile(file.stream) as zf:
             if zf.testzip() is not None:
@@ -1938,15 +1991,18 @@ def admin_frames_import():
                 if name.startswith('/') or '..' in name:
                     return _admin_redirect(error='ZIP non autorisé (chemin invalide).')
             zf.extractall(tmpdir)
-        imported, skipped = _import_pack_from_dir(Path(tmpdir))
+        counts = _import_pack_from_dir(Path(tmpdir))
     except zipfile.BadZipFile:
         return _admin_redirect(error='Fichier ZIP invalide.')
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
-    msg = f'{imported} cadre(s) importé(s)'
-    if skipped:
-        msg += f', {skipped} ignoré(s) (voir logs)'
+    msg = f"{counts['frames_imported']} cadre(s) importé(s)"
+    if counts['screensaver_imported']:
+        msg += f", {counts['screensaver_imported']} image(s) de veille importée(s)"
+    skipped_total = counts['frames_skipped'] + counts['screensaver_skipped']
+    if skipped_total:
+        msg += f', {skipped_total} ignoré(s) (voir logs)'
     return _admin_redirect(success=msg)
 
 
