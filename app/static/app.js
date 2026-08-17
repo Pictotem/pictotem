@@ -320,17 +320,40 @@ function ssNoteActivity(e) {
 }
 
 function ssCheck() {
+  if (!cfg.screensaverEnabled || !cfg.screensaverTimeoutSeconds) return;
   if (ssActive) return;
   if (state !== 'home') { ssLastActivity = Date.now(); return; } // jamais couper une capture en cours
   if ((Date.now() - ssLastActivity) / 1000 >= cfg.screensaverTimeoutSeconds) ssStart();
 }
 
-if (cfg.screensaverEnabled && cfg.screensaverTimeoutSeconds > 0) {
-  ['mousemove', 'mousedown', 'touchstart', 'keydown', 'click'].forEach((evt) => {
-    document.addEventListener(evt, ssNoteActivity, { capture: true, passive: true });
-  });
-  setInterval(ssCheck, 2000);
+// Écouteurs + boucle de vérification toujours actifs (même si la veille est
+// désactivée au chargement) : startVeilleTopBar()/ssCheck() relisent
+// cfg.screensaverEnabled à chaque appel, donc un changement fait dans
+// /admin/screensaver s'applique sans recharger la page — voir ssRefreshSettings.
+['mousemove', 'mousedown', 'touchstart', 'keydown', 'click'].forEach((evt) => {
+  document.addEventListener(evt, ssNoteActivity, { capture: true, passive: true });
+});
+setInterval(ssCheck, 2000);
+
+// Relit périodiquement l'état réel (activé/délai) depuis le serveur pour
+// appliquer un changement fait dans le back office sans reload de page.
+async function ssRefreshSettings() {
+  try {
+    const res = await fetch('/api/screensaver/settings');
+    const data = await res.json();
+    const wasEnabled = cfg.screensaverEnabled;
+    cfg.screensaverEnabled = !!data.enabled;
+    cfg.screensaverTimeoutSeconds = data.timeout_seconds || 0;
+    if (!cfg.screensaverEnabled) {
+      if (ssActive) ssStop();
+      stopTopBarCountdown();
+    } else if (!wasEnabled) {
+      ssLastActivity = Date.now();
+      startVeilleTopBar();
+    }
+  } catch (e) { /* on garde les valeurs actuelles */ }
 }
+setInterval(ssRefreshSettings, 30000);
 
 // — Masquage automatique de la barre inférieure sur l'écran d'accueil —
 const HOME_BAR_HIDE_MS = 10000;

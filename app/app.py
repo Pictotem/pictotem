@@ -1475,6 +1475,18 @@ def _screensaver_settings():
     }
 
 
+@app.route('/api/screensaver/settings')
+def api_screensaver_settings():
+    """Réglages légers (activé/délai), interrogés périodiquement par le
+    kiosque déjà ouvert pour appliquer sans rechargement de page un
+    changement fait dans /admin/screensaver."""
+    s = _screensaver_settings()
+    return jsonify({
+        'enabled':         s['enabled'],
+        'timeout_seconds': s['timeout_min'] * 60,
+    })
+
+
 @app.route('/api/screensaver/slides')
 def api_screensaver_slides():
     s = _screensaver_settings()
