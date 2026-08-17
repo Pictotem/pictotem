@@ -1,9 +1,11 @@
 {
   "name": "Pack par défaut",
-  "default": "classic",
+  "default": "boom",
   "frames": [
-    { "filename": "frames/cadre_classique.png", "id": "classic",  "label": "Classique", "sort_order": 10 },
-    { "filename": "frames/cadre_polaroid.png",  "id": "polaroid", "label": "Polaroid",  "sort_order": 20 },
-    { "filename": "frames/cadre_neon.png",      "id": "neon",     "label": "Néon",      "sort_order": 30 }
+    { "filename": "frames/cadre_anniv.png", "id": "Anniv",  "label": "Anniv", "sort_order": 10 },
+    { "filename": "frames/cadre_bling.png", "id": "Bling", "label": "Bling", "sort_order": 20 },
+    { "filename": "frames/cadre_boom.png", "id": "Boom", "label": "Boom", "sort_order": 30 },
+    { "filename": "frames/cadre_disco.png", "id": "Disco", "label": "Disco", "sort_order": 40 },
+    { "filename": "frames/cadre_futurist.png", "id": "Futurist", "label": "Futurist", "sort_order": 50 }
   ]
 }
