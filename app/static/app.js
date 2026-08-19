@@ -51,12 +51,18 @@ const topCountdownBarFill = document.getElementById('topCountdownBarFill');
 // pas par un setInterval qui recalcule une largeur toutes les secondes.
 function startTopBarCountdown(durationMs) {
   if (!topCountdownBar || !topCountdownBarFill || !(durationMs > 0)) return;
+  // Rendre la barre visible AVANT de manipuler sa largeur/transition : tant
+  // que le conteneur a display:none (classe .hidden), l'élément n'est pas
+  // dans l'arbre de rendu et le reflow forcé ci-dessous ne capture aucun
+  // état de départ valide pour la transition CSS — résultat : la barre
+  // restait invisible jusqu'au prochain repaint externe (ex. un clic sur
+  // l'écran), alors que le décompte texte, purement JS, s'affichait bien.
+  setVisible(topCountdownBar, true);
   topCountdownBarFill.style.transition = 'none';
   topCountdownBarFill.style.width = '100%';
   void topCountdownBarFill.offsetWidth; // force le reflow avant de relancer la transition
   topCountdownBarFill.style.transition = `width ${durationMs / 1000}s linear`;
   topCountdownBarFill.style.width = '0%';
-  setVisible(topCountdownBar, true);
 }
 
 function stopTopBarCountdown() {
