@@ -54,7 +54,10 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 cast_vote, admin_adjust_vote, get_voter_votes,
                 add_guest_upload, list_guest_uploads, list_approved_guest_uploads,
                 count_guest_uploads_by_token, set_guest_upload_status, delete_guest_upload_db,
-                list_gallery_combined)
+                list_gallery_combined,
+                list_tags, get_tag_by_id, create_tag, update_tag, delete_tag_db,
+                list_capture_tags, count_capture_tags, add_capture_tag, delete_capture_tag,
+                get_media_by_uid)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, is_autostart_enabled,
                    make_thumb, message_text, print_photo, validate_printer)
@@ -114,6 +117,7 @@ TEXT_DEFAULTS: dict[str, str] = {
     'btn_imprimer':       'Imprimer',
     'btn_recommencer':    'Recommencer',
     'btn_photo_strip':    'Photo strip',
+    'btn_tags':           'Tags',
     'processing_title':   'Traitement',
     'processing_text':    'Veuillez patienter quelques instants.',
     'replay_badge':       'REPLAY',
@@ -281,6 +285,7 @@ def index():
         bottom_bar_sizes=get_bottom_bar_sizes(),
         top_bar=get_top_bar_settings(),
         photo_strip=CONFIG.get('capture', {}).get('photo_strip', {}),
+        tags_enabled=get_setting('tags.enabled', '0') == '1',
     )
 
 
@@ -340,9 +345,10 @@ def capture_photo():
     filepath.write_bytes(encode_jpeg(display_frame))
     thumb_name = f'thumb-{stamp}.jpg'
     make_thumb(filepath, THUMBS_DIR / thumb_name)
-    capture_id = record_capture('photo', filename, thumb_name)
+    capture_id, media_uid = record_capture('photo', filename, thumb_name)
     logger.info('Photo capturée %s (cadre=%s)', filename, frame_id)
-    return jsonify({'ok': True, 'id': capture_id, 'kind': 'photo', 'filename': filename,
+    return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
+                    'filename': filename,
                     'url': f'/media/photo/{filename}', 'message': message_text()})
 
 
@@ -465,9 +471,10 @@ def capture_video():
     else:
         raw_mp4_path.rename(final_path)
 
-    capture_id = record_capture('video', final_filename, thumb_name)
+    capture_id, media_uid = record_capture('video', final_filename, thumb_name)
     logger.info('Vidéo capturée %s', final_filename)
-    return jsonify({'ok': True, 'id': capture_id, 'kind': 'video', 'filename': final_filename,
+    return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'video',
+                    'filename': final_filename,
                     'url': f'/media/video/{final_filename}', 'message': message_text()})
 
 
@@ -494,6 +501,82 @@ def capture_retake(capture_id):
             pass
     logger.info('Capture #%d supprimée (recommencer)', capture_id)
     return jsonify({'ok': True})
+
+
+# ── Tags sur médias ───────────────────────────────────────────────────────────
+# Activable depuis /admin/tags. Tags prédéfinis (CRUD admin) + tag "libre"
+# saisi par l'invité via clavier virtuel côté kiosque (voir static/app.js,
+# bouton "Tags" sur l'écran replay). Portée aux captures officielles
+# uniquement (pas aux uploads invités).
+
+def _tags_settings():
+    return {
+        'enabled':          get_setting('tags.enabled', '0') == '1',
+        'free_enabled':      get_setting('tags.free_enabled', '1') == '1',
+        'free_min_length':   int(get_setting('tags.free_min_length', '') or '2'),
+        'free_max_length':   int(get_setting('tags.free_max_length', '') or '24'),
+        'max_per_capture':   int(get_setting('tags.max_per_capture', '') or '5'),
+    }
+
+
+def _media_id_settings():
+    return {
+        'length':         int(get_setting('media_id.length', '') or '6'),
+        'show_on_bestof': get_setting('media_id.show_on_bestof', '0') == '1',
+    }
+
+
+@app.route('/api/capture/<int:capture_id>/tags', methods=['GET', 'POST'])
+@require_main_auth
+def api_capture_tags(capture_id):
+    """Consultation/assignation des tags d'une capture, appelée par le
+    modal "Tags" du kiosque juste après la prise de vue (voir applyReplayUi
+    dans static/app.js). Pas de @csrf_protect, cohérent avec les autres
+    routes du flux de capture (retake, capture/photo, ...)."""
+    s = _tags_settings()
+    if request.method == 'GET':
+        return jsonify({
+            'ok': True,
+            'settings': s,
+            'available_tags': list_tags(),
+            'assigned': list_capture_tags(capture_id),
+        })
+
+    if not s['enabled']:
+        return jsonify({'ok': False, 'error': 'Fonction tags désactivée'}), 403
+
+    data = request.get_json(silent=True) or {}
+    if count_capture_tags(capture_id) >= s['max_per_capture']:
+        return jsonify({'ok': False, 'error': f"Maximum {s['max_per_capture']} tag(s) par média"}), 400
+
+    tag_id = data.get('tag_id')
+    if tag_id is not None:
+        tag = get_tag_by_id(int(tag_id))
+        if not tag:
+            return jsonify({'ok': False, 'error': 'Tag introuvable'}), 404
+        assignment_id = add_capture_tag(capture_id, tag_id=tag['id'], label=tag['label'])
+    else:
+        if not s['free_enabled']:
+            return jsonify({'ok': False, 'error': 'Tag libre désactivé'}), 403
+        free_text = (data.get('free_text') or '').strip()
+        if len(free_text) < s['free_min_length'] or len(free_text) > s['free_max_length']:
+            return jsonify({
+                'ok': False,
+                'error': f"Le texte doit contenir entre {s['free_min_length']} et "
+                         f"{s['free_max_length']} caractères",
+            }), 400
+        assignment_id = add_capture_tag(capture_id, tag_id=None, label=free_text)
+
+    return jsonify({'ok': True, 'assigned': list_capture_tags(capture_id), 'assignment_id': assignment_id})
+
+
+@app.route('/api/capture/<int:capture_id>/tags/<int:assignment_id>/delete', methods=['POST'])
+@require_main_auth
+def api_capture_tag_delete(capture_id, assignment_id):
+    row = delete_capture_tag(assignment_id)
+    if not row or row['capture_id'] != capture_id:
+        return jsonify({'ok': False, 'error': 'Assignation introuvable'}), 404
+    return jsonify({'ok': True, 'assigned': list_capture_tags(capture_id)})
 
 
 def _compose_photo_strip(frames, ps_cfg):
@@ -560,9 +643,10 @@ def capture_photostrip():
 
     thumb_name = f'thumb-{stamp}.jpg'
     make_thumb(filepath, THUMBS_DIR / thumb_name)
-    capture_id = record_capture('photo', filename, thumb_name)
+    capture_id, media_uid = record_capture('photo', filename, thumb_name)
     logger.info('Photo strip capturé %s (%d prises, cadre=%s)', filename, shots, frame_id)
-    return jsonify({'ok': True, 'id': capture_id, 'kind': 'photo', 'filename': filename,
+    return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
+                    'filename': filename,
                     'url': f'/media/photo/{filename}', 'message': message_text()})
 
 
@@ -596,6 +680,7 @@ def gallery():
     page_size = int(CONFIG['gallery'].get('page_size', 60))
     page = max(1, int(request.args.get('page', 1)))
     email_cookie = request.cookies.get(CONFIG['emails']['cookie_name'], '')
+    media_id_query = request.args.get('q', '').strip()
 
     # Intégration des uploads invités dans la galerie officielle (voir
     # section "Upload invités" plus bas) : paramétrable indépendamment de
@@ -606,9 +691,11 @@ def gallery():
     source = request.args.get('source', '') if guest_in_gallery else ''
 
     if guest_in_gallery:
-        captures, total = list_gallery_combined(sort, kind, source, page=page, page_size=page_size)
+        captures, total = list_gallery_combined(sort, kind, source, page=page, page_size=page_size,
+                                                media_uid=media_id_query)
     else:
-        captures, total = list_captures(sort, kind, page=page, page_size=page_size)
+        captures, total = list_captures(sort, kind, page=page, page_size=page_size,
+                                        media_uid=media_id_query)
     total_pages = max(1, (total + page_size - 1) // page_size)
 
     voter_token = request.cookies.get('voter_token', '')
@@ -634,6 +721,7 @@ def gallery():
         vote_enabled=vote_enabled, voter_votes=voter_votes, vote_cfg=vote_cfg,
         guest_upload_url=guest_upload_url,
         guest_in_gallery=guest_in_gallery, source=source,
+        media_id_query=media_id_query,
     ))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
@@ -1314,6 +1402,70 @@ def admin_votes():
     )
 
 
+# ── Admin — tags & ID média ───────────────────────────────────────────────────
+
+@app.route('/admin/tags', methods=['GET', 'POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tags():
+    if request.method == 'POST':
+        action = request.form.get('action', 'settings')
+
+        if action == 'settings':
+            set_setting('tags.enabled',      '1' if request.form.get('enabled') else '0')
+            set_setting('tags.free_enabled', '1' if request.form.get('free_enabled') else '0')
+            raw_min = (request.form.get('free_min_length') or '').strip()
+            raw_max = (request.form.get('free_max_length') or '').strip()
+            if raw_min.isdigit() and int(raw_min) >= 1:
+                set_setting('tags.free_min_length', raw_min)
+            if raw_max.isdigit() and int(raw_max) >= 1:
+                set_setting('tags.free_max_length', raw_max)
+            raw_max_tags = (request.form.get('max_per_capture') or '').strip()
+            if raw_max_tags.isdigit() and int(raw_max_tags) >= 1:
+                set_setting('tags.max_per_capture', raw_max_tags)
+            return redirect(url_for('admin_tags', ok='Paramètres mis à jour.'))
+
+        if action == 'media_id_settings':
+            raw_len = (request.form.get('media_id_length') or '').strip()
+            if raw_len.isdigit() and 3 <= int(raw_len) <= 12:
+                set_setting('media_id.length', raw_len)
+            set_setting('media_id.show_on_bestof', '1' if request.form.get('show_on_bestof') else '0')
+            return redirect(url_for('admin_tags', ok='Réglages ID média mis à jour.'))
+
+        if action == 'tag_new':
+            label = (request.form.get('label') or '').strip()
+            sort_order = int(request.form.get('sort_order') or 0)
+            if not label:
+                return redirect(url_for('admin_tags', err='Le libellé est obligatoire.'))
+            create_tag(label, sort_order)
+            return redirect(url_for('admin_tags', ok=f'Tag « {label} » ajouté.'))
+
+        if action == 'tag_edit':
+            tag_id = int(request.form.get('tag_id', 0))
+            if not get_tag_by_id(tag_id):
+                abort(404)
+            label = (request.form.get('label') or '').strip()
+            sort_order = int(request.form.get('sort_order') or 0)
+            if not label:
+                return redirect(url_for('admin_tags', err='Le libellé est obligatoire.'))
+            update_tag(tag_id, label, sort_order)
+            return redirect(url_for('admin_tags', ok='Tag mis à jour.'))
+
+        if action == 'tag_delete':
+            tag_id = int(request.form.get('tag_id', 0))
+            tag = delete_tag_db(tag_id)
+            if tag:
+                return redirect(url_for('admin_tags', ok=f"Tag « {tag['label']} » supprimé."))
+            return redirect(url_for('admin_tags', err='Tag introuvable.'))
+
+    return render_template(
+        'admin_tags.html', config=CONFIG,
+        settings=_tags_settings(), media_id=_media_id_settings(), tags=list_tags(),
+        alert_success=request.args.get('ok'),
+        alert_error=request.args.get('err'),
+    )
+
+
 # ── Slideshow /bestof ─────────────────────────────────────────────────────────
 
 SLIDESHOW_DIR = BASE_DIR / 'app' / 'static' / 'slideshow'
@@ -1433,7 +1585,8 @@ def api_bestof_slides():
         'random':     'created_at ASC, id ASC',   # client shuffles
     }.get(s['order'], 'created_at ASC, id ASC')   # chrono par défaut
 
-    sql = f"SELECT kind, filename, vote_score FROM captures WHERE {' AND '.join(conditions)} ORDER BY {order_clause}"
+    sql = (f"SELECT kind, filename, vote_score, media_uid FROM captures "
+           f"WHERE {' AND '.join(conditions)} ORDER BY {order_clause}")
     with closing(db_conn()) as conn:
         rows = conn.execute(sql, params).fetchall()
 
@@ -1443,6 +1596,7 @@ def api_bestof_slides():
             'url':   url_for('media_photo' if r['kind'] == 'photo' else 'media_video',
                              filename=r['filename']),
             'score': r['vote_score'],
+            'media_uid': r['media_uid'],
         }
         for r in rows
     ]
@@ -1469,6 +1623,7 @@ def api_bestof_slides():
         'order':            s['order'],
         'refresh_interval': s['refresh_interval'],
         'promo':            _promo_public_data(),
+        'show_media_id':    _media_id_settings()['show_on_bestof'],
     })
 
 

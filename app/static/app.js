@@ -534,6 +534,7 @@ function applyReplayUi(kind, capture) {
 function applyCountdownUi() {
   _clearHomeBarHide();
   stopIdleTimer();
+  closeTagsModal();
   showBottomBar(false);
   showPicker(false);
   setBottomCenterState('none');
@@ -777,6 +778,255 @@ btnPrintPhoto?.addEventListener('click', async () => {
   } finally {
     btnPrintPhoto.disabled = false;
   }
+});
+
+// — Tags (écran de relecture) — bouton "Tags" activable via /admin/tags.
+// Modal listant les tags prédéfinis (assignation en un tap) + saisie d'un
+// tag "libre" via clavier virtuel tactile (pas de clavier matériel sur le
+// kiosque). S'appuie sur replayCapture.id, déjà disponible à ce stade du
+// flux (voir applyReplayUi).
+const tagsModalOverlay   = document.getElementById('tagsModalOverlay');
+const btnTagsClose       = document.getElementById('btnTagsClose');
+const tagsAssignedList   = document.getElementById('tagsAssignedList');
+const tagsErrorBox       = document.getElementById('tagsErrorBox');
+const tagsPredefinedList = document.getElementById('tagsPredefinedList');
+const tagsFreeSection    = document.getElementById('tagsFreeSection');
+const tagsFreeInput      = document.getElementById('tagsFreeInput');
+const btnTagsFreeSubmit  = document.getElementById('btnTagsFreeSubmit');
+const tagsFreeHint       = document.getElementById('tagsFreeHint');
+const tagsKeyboard       = document.getElementById('tagsKeyboard');
+const btnTagsPhoto       = document.getElementById('btnTagsPhoto');
+const btnTagsVideo       = document.getElementById('btnTagsVideo');
+
+let tagsData     = { settings: {}, available: [], assigned: [] };
+let tagsFreeText = '';
+let tagsShift    = false;
+
+async function openTagsModal() {
+  if (!replayCapture?.id || !tagsModalOverlay) return;
+  tagsFreeText = '';
+  tagsShift = false;
+  showTagsError('');
+  try {
+    const res = await fetch(`/api/capture/${replayCapture.id}/tags`);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Erreur');
+    tagsData = { settings: data.settings, available: data.available_tags, assigned: data.assigned };
+  } catch (e) {
+    console.warn('[tags] chargement échoué', e);
+    tagsData = { settings: {}, available: [], assigned: [] };
+  }
+  renderTagsPredefined();
+  renderTagsAssigned();
+  renderTagsFreeSection();
+  buildVirtualKeyboard();
+  tagsModalOverlay.classList.remove('hidden');
+}
+
+function closeTagsModal() {
+  tagsModalOverlay?.classList.add('hidden');
+}
+
+function showTagsError(msg) {
+  if (tagsErrorBox) tagsErrorBox.innerHTML = msg ? `<div class="tags-error">${msg}</div>` : '';
+}
+
+function renderTagsAssigned() {
+  if (!tagsAssignedList) return;
+  tagsAssignedList.innerHTML = '';
+  if (!tagsData.assigned.length) {
+    tagsAssignedList.innerHTML = '<span class="tags-empty">Aucun tag pour le moment.</span>';
+    return;
+  }
+  tagsData.assigned.forEach((a) => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip';
+    const label = document.createElement('span');
+    label.textContent = a.label;
+    const rm = document.createElement('button');
+    rm.setAttribute('aria-label', 'Retirer');
+    rm.innerHTML = '&#10005;';
+    rm.addEventListener('click', () => removeAssignedTag(a.id));
+    chip.appendChild(label);
+    chip.appendChild(rm);
+    tagsAssignedList.appendChild(chip);
+  });
+}
+
+function renderTagsPredefined() {
+  if (!tagsPredefinedList) return;
+  tagsPredefinedList.innerHTML = '';
+  if (!tagsData.available.length) {
+    tagsPredefinedList.innerHTML = '<span class="tags-empty">Aucun tag prédéfini.</span>';
+    return;
+  }
+  const assignedTagIds = new Set(
+    tagsData.assigned.filter((a) => a.tag_id != null).map((a) => a.tag_id)
+  );
+  tagsData.available.forEach((t) => {
+    const btn = document.createElement('button');
+    const already = assignedTagIds.has(t.id);
+    btn.className = 'tag-chip-btn' + (already ? ' active' : '');
+    btn.textContent = t.label;
+    btn.disabled = already;
+    btn.addEventListener('click', () => addPredefinedTag(t.id));
+    tagsPredefinedList.appendChild(btn);
+  });
+}
+
+function renderTagsFreeSection() {
+  if (!tagsFreeSection) return;
+  setVisible(tagsFreeSection, !!tagsData.settings.free_enabled);
+  if (tagsData.settings.free_enabled && tagsFreeHint) {
+    tagsFreeHint.textContent =
+      `Entre ${tagsData.settings.free_min_length} et ${tagsData.settings.free_max_length} caractères.`;
+  }
+  renderTagsFreeInput();
+}
+
+function renderTagsFreeInput() {
+  if (!tagsFreeInput) return;
+  if (tagsFreeText) {
+    tagsFreeInput.textContent = tagsFreeText;
+    tagsFreeInput.style.opacity = '1';
+  } else {
+    tagsFreeInput.textContent = 'Touchez le clavier ci-dessous…';
+    tagsFreeInput.style.opacity = '.45';
+  }
+}
+
+async function addPredefinedTag(tagId) {
+  if (!replayCapture?.id) return;
+  showTagsError('');
+  try {
+    const data = await api(`/api/capture/${replayCapture.id}/tags`, { tag_id: tagId });
+    tagsData.assigned = data.assigned;
+    renderTagsAssigned();
+    renderTagsPredefined();
+  } catch (e) {
+    showTagsError(e.message || 'Erreur');
+  }
+}
+
+async function removeAssignedTag(assignmentId) {
+  if (!replayCapture?.id) return;
+  try {
+    const data = await api(`/api/capture/${replayCapture.id}/tags/${assignmentId}/delete`);
+    tagsData.assigned = data.assigned;
+    renderTagsAssigned();
+    renderTagsPredefined();
+  } catch (e) {
+    console.warn('[tags] suppression échouée', e);
+  }
+}
+
+async function submitFreeTag() {
+  if (!replayCapture?.id) return;
+  const text = tagsFreeText.trim();
+  showTagsError('');
+  if (!text) return;
+  try {
+    const data = await api(`/api/capture/${replayCapture.id}/tags`, { free_text: text });
+    tagsData.assigned = data.assigned;
+    tagsFreeText = '';
+    renderTagsFreeInput();
+    renderTagsAssigned();
+  } catch (e) {
+    showTagsError(e.message || 'Erreur');
+  }
+}
+
+// — Clavier virtuel AZERTY (saisie tactile du tag libre, aucun clavier
+// matériel sur le kiosque) — rangées lettres + rangée accents français
+// courants + espace/effacer/valider.
+const VKBD_ROWS = [
+  ['a', 'z', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+  ['q', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'm'],
+  ['w', 'x', 'c', 'v', 'b', 'n'],
+];
+const VKBD_ACCENTS = ['é', 'è', 'à', 'ç', 'ù', 'ê', 'î', 'ô', 'û', 'ï'];
+
+function vkbdInsert(ch) {
+  const maxLen = tagsData.settings.free_max_length || 24;
+  if (tagsFreeText.length >= maxLen) return;
+  tagsFreeText += tagsShift ? ch.toUpperCase() : ch;
+  renderTagsFreeInput();
+}
+
+function buildVirtualKeyboard() {
+  if (!tagsKeyboard) return;
+  tagsKeyboard.innerHTML = '';
+
+  VKBD_ROWS.forEach((row, i) => {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'vkbd-row';
+    const isLast = i === VKBD_ROWS.length - 1;
+
+    if (isLast) {
+      const shiftKey = document.createElement('button');
+      shiftKey.className = 'vkbd-key func';
+      shiftKey.textContent = '⇧';
+      shiftKey.addEventListener('click', () => {
+        tagsShift = !tagsShift;
+        shiftKey.classList.toggle('active', tagsShift);
+      });
+      rowEl.appendChild(shiftKey);
+    }
+
+    row.forEach((ch) => {
+      const key = document.createElement('button');
+      key.className = 'vkbd-key';
+      key.textContent = ch;
+      key.addEventListener('click', () => vkbdInsert(ch));
+      rowEl.appendChild(key);
+    });
+
+    if (isLast) {
+      const back = document.createElement('button');
+      back.className = 'vkbd-key func';
+      back.textContent = '⌫';
+      back.addEventListener('click', () => {
+        tagsFreeText = tagsFreeText.slice(0, -1);
+        renderTagsFreeInput();
+      });
+      rowEl.appendChild(back);
+    }
+
+    tagsKeyboard.appendChild(rowEl);
+  });
+
+  const accentRow = document.createElement('div');
+  accentRow.className = 'vkbd-row vkbd-accents';
+  VKBD_ACCENTS.forEach((ch) => {
+    const key = document.createElement('button');
+    key.className = 'vkbd-key';
+    key.textContent = ch;
+    key.addEventListener('click', () => vkbdInsert(ch));
+    accentRow.appendChild(key);
+  });
+  tagsKeyboard.appendChild(accentRow);
+
+  const lastRow = document.createElement('div');
+  lastRow.className = 'vkbd-row';
+  const spaceKey = document.createElement('button');
+  spaceKey.className = 'vkbd-key space';
+  spaceKey.textContent = 'Espace';
+  spaceKey.addEventListener('click', () => vkbdInsert(' '));
+  const enterKey = document.createElement('button');
+  enterKey.className = 'vkbd-key enter';
+  enterKey.textContent = 'Ajouter';
+  enterKey.addEventListener('click', submitFreeTag);
+  lastRow.appendChild(spaceKey);
+  lastRow.appendChild(enterKey);
+  tagsKeyboard.appendChild(lastRow);
+}
+
+btnTagsPhoto?.addEventListener('click', openTagsModal);
+btnTagsVideo?.addEventListener('click', openTagsModal);
+btnTagsClose?.addEventListener('click', closeTagsModal);
+btnTagsFreeSubmit?.addEventListener('click', submitFreeTag);
+tagsModalOverlay?.addEventListener('click', (e) => {
+  if (e.target === tagsModalOverlay) closeTagsModal();
 });
 
 // — Plein écran (fenêtre native) : sortie/entrée protégée par mot de passe —

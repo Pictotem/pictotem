@@ -188,27 +188,40 @@
   <!-- Barre d'outils -->
   <div class="gallery-toolbar">
     <div class="tb-group">
-      <a class="tb-btn {% if kind == '' %}active{% endif %}"     href="{{ url_for('gallery', kind='',      sort=sort, source=source) }}">Tous</a>
-      <a class="tb-btn {% if kind == 'photo' %}active{% endif %}" href="{{ url_for('gallery', kind='photo', sort=sort, source=source) }}">Photos</a>
-      <a class="tb-btn {% if kind == 'video' %}active{% endif %}" href="{{ url_for('gallery', kind='video', sort=sort, source=source) }}">Vidéos</a>
+      <a class="tb-btn {% if kind == '' %}active{% endif %}"     href="{{ url_for('gallery', kind='',      sort=sort, source=source, q=media_id_query) }}">Tous</a>
+      <a class="tb-btn {% if kind == 'photo' %}active{% endif %}" href="{{ url_for('gallery', kind='photo', sort=sort, source=source, q=media_id_query) }}">Photos</a>
+      <a class="tb-btn {% if kind == 'video' %}active{% endif %}" href="{{ url_for('gallery', kind='video', sort=sort, source=source, q=media_id_query) }}">Vidéos</a>
     </div>
     <div class="tb-group">
-      <a class="tb-btn {% if sort == 'desc' %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='desc', source=source) }}">↓ Récent</a>
-      <a class="tb-btn {% if sort == 'asc'  %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='asc',  source=source) }}">↑ Ancien</a>
+      <a class="tb-btn {% if sort == 'desc' %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='desc', source=source, q=media_id_query) }}">↓ Récent</a>
+      <a class="tb-btn {% if sort == 'asc'  %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='asc',  source=source, q=media_id_query) }}">↑ Ancien</a>
     </div>
     {% if vote_enabled %}
     <div class="tb-group">
-      <a class="tb-btn {% if sort == 'votes_desc' %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='votes_desc', source=source) }}">↓ Votes</a>
-      <a class="tb-btn {% if sort == 'votes_asc'  %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='votes_asc',  source=source) }}">↑ Votes</a>
+      <a class="tb-btn {% if sort == 'votes_desc' %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='votes_desc', source=source, q=media_id_query) }}">↓ Votes</a>
+      <a class="tb-btn {% if sort == 'votes_asc'  %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort='votes_asc',  source=source, q=media_id_query) }}">↑ Votes</a>
     </div>
     {% endif %}
     {% if guest_in_gallery %}
     <div class="tb-group">
-      <a class="tb-btn {% if source == '' %}active{% endif %}"         href="{{ url_for('gallery', kind=kind, sort=sort, source='') }}">Toutes</a>
-      <a class="tb-btn {% if source == 'official' %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort=sort, source='official') }}">Officielles</a>
-      <a class="tb-btn {% if source == 'guest' %}active{% endif %}"    href="{{ url_for('gallery', kind=kind, sort=sort, source='guest') }}">Invités</a>
+      <a class="tb-btn {% if source == '' %}active{% endif %}"         href="{{ url_for('gallery', kind=kind, sort=sort, source='', q=media_id_query) }}">Toutes</a>
+      <a class="tb-btn {% if source == 'official' %}active{% endif %}" href="{{ url_for('gallery', kind=kind, sort=sort, source='official', q=media_id_query) }}">Officielles</a>
+      <a class="tb-btn {% if source == 'guest' %}active{% endif %}"    href="{{ url_for('gallery', kind=kind, sort=sort, source='guest', q=media_id_query) }}">Invités</a>
     </div>
     {% endif %}
+    <form class="tb-group" method="get" action="{{ url_for('gallery') }}" style="align-items:center">
+      <input type="hidden" name="kind" value="{{ kind }}">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="hidden" name="source" value="{{ source }}">
+      <input type="text" name="q" value="{{ media_id_query }}" placeholder="Rechercher par ID…"
+             inputmode="numeric"
+             style="background:var(--surface-2);border:1px solid var(--border);color:var(--text);
+                    border-radius:999px;padding:7px 14px;font-size:13px;width:150px;">
+      <button class="tb-btn" type="submit">🔍</button>
+      {% if media_id_query %}
+      <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, source=source) }}">✕</a>
+      {% endif %}
+    </form>
     <div class="tb-sep"></div>
     <div class="tb-group">
       <button class="tb-btn" data-size="sm" onclick="setSize('sm')">S</button>
@@ -247,6 +260,7 @@
       </div>
       <div class="card-footer">
         <span class="card-date">{{ item.created_at | format_dt }}</span>
+        {% if item.media_uid %}<span class="card-date" style="opacity:.7">#{{ item.media_uid }}</span>{% endif %}
         {% if vote_enabled %}
         {% set my_vote = voter_votes.get(item_source ~ ':' ~ item.id, 0) %}
         <span class="vote-wrap" data-id="{{ item.id }}" data-source="{{ item_source }}">
@@ -269,7 +283,7 @@
   {% if total_pages > 1 %}
   <nav style="display:flex;align-items:center;justify-content:center;gap:8px;padding:0 20px 24px;flex-wrap:wrap;">
     {% if page > 1 %}
-    <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, source=source, page=page-1) }}">← Précédent</a>
+    <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, source=source, q=media_id_query, page=page-1) }}">← Précédent</a>
     {% else %}
     <span class="tb-btn" style="opacity:.35;cursor:default;">← Précédent</span>
     {% endif %}
@@ -278,14 +292,14 @@
       {% if p == page %}
       <span class="tb-btn active">{{ p }}</span>
       {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
-      <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, source=source, page=p) }}">{{ p }}</a>
+      <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, source=source, q=media_id_query, page=p) }}">{{ p }}</a>
       {% elif p == page - 3 or p == page + 3 %}
       <span class="tb-btn" style="opacity:.4;cursor:default;">…</span>
       {% endif %}
     {% endfor %}
 
     {% if page < total_pages %}
-    <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, source=source, page=page+1) }}">Suivant →</a>
+    <a class="tb-btn" href="{{ url_for('gallery', kind=kind, sort=sort, source=source, q=media_id_query, page=page+1) }}">Suivant →</a>
     {% else %}
     <span class="tb-btn" style="opacity:.35;cursor:default;">Suivant →</span>
     {% endif %}

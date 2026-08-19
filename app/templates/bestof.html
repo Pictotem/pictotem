@@ -35,6 +35,16 @@
       backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,.15);
     }
     #slideBadge.hidden { display: none; }
+    /* Badge ID média (voir /admin/tags → media_id.show_on_bestof), coin
+       bas-droit — ne recouvre jamais le média, ne gêne pas #slideBadge. */
+    #slideMediaId {
+      position: absolute; bottom: 24px; right: 24px; z-index: 5;
+      background: rgba(0,0,0,.6); color: #fff; font-family: monospace;
+      font-size: 14px; font-weight: 700; letter-spacing: .04em;
+      padding: 6px 14px; border-radius: 999px;
+      backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,.15);
+    }
+    #slideMediaId.hidden { display: none; }
 
     /* Slide promo (fond + QR + texte) — voir /admin/slideshow */
     .slide.slide-promo { display: block; }
@@ -76,6 +86,7 @@
   <div id="slideA" class="slide"></div>
   <div id="slideB" class="slide"></div>
   <div id="slideBadge" class="hidden">Invité</div>
+  <div id="slideMediaId" class="hidden"></div>
   <div id="empty" style="display:none">Aucun média à afficher.</div>
 </div>
 
@@ -86,6 +97,7 @@
   let current = 'A';
   let settings = { delay: 5, order: 'chrono', refreshInterval: 300 };
   let promoCfg = { enabled: false, frequency: 6 };
+  let showMediaId = false;
   let cleanup = null;
 
   function shuffle(arr) {
@@ -228,6 +240,16 @@
 
     const badge = document.getElementById('slideBadge');
     if (badge) badge.classList.toggle('hidden', slide.source !== 'guest');
+
+    const idBadge = document.getElementById('slideMediaId');
+    if (idBadge) {
+      if (showMediaId && slide.media_uid) {
+        idBadge.textContent = '#' + slide.media_uid;
+        idBadge.classList.remove('hidden');
+      } else {
+        idBadge.classList.add('hidden');
+      }
+    }
   }
 
   let lastData = null; // dernières captures/images reçues, réutilisées pour reconstruire
@@ -254,6 +276,7 @@
       const data = await fetchSlides();
       lastData = data;
       promoCfg = data.promo || promoCfg;
+      showMediaId = !!data.show_media_id;
       settings.delay = data.delay || 5;
       settings.order = data.order || settings.order;
       applySlides(buildSlides(data));
@@ -286,6 +309,7 @@
       refreshInterval: data.refresh_interval ?? 300,
     };
     promoCfg = data.promo || promoCfg;
+    showMediaId = !!data.show_media_id;
     slides = buildSlides(data);
     if (!slides.length) {
       document.getElementById('empty').style.display = 'flex';

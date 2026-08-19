@@ -230,6 +230,9 @@
           <div class="bottom-bar-buttons hidden" id="replayPhotoBtns">
             <button class="action-btn pri" id="btnBackPhoto">{{ texts.btn_retour }}</button>
             <button class="action-btn ghost" id="btnRetakePhoto">{{ texts.btn_recommencer }}</button>
+            {% if tags_enabled %}
+            <button class="action-btn ghost" id="btnTagsPhoto">{{ texts.btn_tags }}</button>
+            {% endif %}
             {% if not hide_print_button %}
             <button class="action-btn sec" id="btnPrintPhoto">{{ texts.btn_imprimer }}</button>
             {% endif %}
@@ -237,6 +240,9 @@
           <div class="bottom-bar-buttons hidden" id="replayVideoBtns">
             <button class="action-btn pri" id="btnBackVideo">{{ texts.btn_retour }}</button>
             <button class="action-btn ghost" id="btnRetakeVideo">{{ texts.btn_recommencer }}</button>
+            {% if tags_enabled %}
+            <button class="action-btn ghost" id="btnTagsVideo">{{ texts.btn_tags }}</button>
+            {% endif %}
           </div>
         </div>
 
@@ -273,6 +279,41 @@
     </div>
   </div>
 
+  {% if tags_enabled %}
+  <!-- Modal "Tags" (écran de relecture) : tags prédéfinis + tag libre via
+       clavier virtuel tactile — voir openTagsModal() dans static/app.js. -->
+  <div id="tagsModalOverlay" class="tags-modal-overlay hidden">
+    <div class="tags-modal">
+      <div class="tags-modal-header">
+        <p class="tags-modal-title">Tags</p>
+        <button class="tags-modal-close" id="btnTagsClose" aria-label="Fermer">&#10005;</button>
+      </div>
+
+      <p class="tags-section-title">Tags sur ce média</p>
+      <div class="tags-assigned-list" id="tagsAssignedList">
+        <span class="tags-empty">Aucun tag pour le moment.</span>
+      </div>
+      <div id="tagsErrorBox"></div>
+
+      <p class="tags-section-title">Tags prédéfinis</p>
+      <div class="tags-list" id="tagsPredefinedList">
+        <span class="tags-empty">Aucun tag prédéfini.</span>
+      </div>
+
+      <div id="tagsFreeSection">
+        <p class="tags-section-title">Tag libre</p>
+        <div class="tags-free-row">
+          <div class="tags-free-input" id="tagsFreeInput"></div>
+          <button class="action-btn pri small" id="btnTagsFreeSubmit">Ajouter</button>
+        </div>
+        <p class="tags-free-hint" id="tagsFreeHint"></p>
+
+        <div class="vkbd" id="tagsKeyboard"></div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <script>
     window.PICTOTEM = {
       countdownSeconds: {{ config.get('ui', {}).get('countdown_seconds', 3) }},
@@ -302,6 +343,7 @@
       showPhotoStrip:            {{ 'true' if photo_strip.get('enabled', True) else 'false' }},
       photoStripShots:           {{ photo_strip.get('shots', 3) }},
       photoStripIntervalSec:     {{ photo_strip.get('interval_sec', 1.2) }},
+      tagsEnabled:               {{ 'true' if tags_enabled else 'false' }},
     };
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>

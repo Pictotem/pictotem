@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import logging
+import random
 import sqlite3
 from contextlib import closing
 from datetime import datetime
@@ -173,6 +174,47 @@ def init_db():
         """)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_guest_uploads_status ON guest_uploads(status)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_guest_uploads_token  ON guest_uploads(guest_token)')
+
+        # Migration : ID unique par média (captures + uploads invités), voir
+        # generate_media_uid() plus bas — chaîne de chiffres, longueur
+        # paramétrable via /admin/tags (settings media_id.*). Placée après la
+        # création de guest_uploads ci-dessus : sur une install fraîche, la
+        # table n'existe pas encore plus haut dans cette fonction.
+        try:
+            conn.execute('ALTER TABLE captures ADD COLUMN media_uid TEXT')
+            conn.commit()
+        except Exception:
+            pass  # colonne déjà présente
+        try:
+            conn.execute('ALTER TABLE guest_uploads ADD COLUMN media_uid TEXT')
+            conn.commit()
+        except Exception:
+            pass  # colonne déjà présente
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_captures_media_uid ON captures(media_uid)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_guest_uploads_media_uid ON guest_uploads(media_uid)')
+
+        # Tags sur médias (voir /admin/tags) : liste de tags prédéfinis +
+        # assignations sur les captures officielles. tag_id NULL = tag
+        # "libre" (saisi via clavier virtuel côté kiosque) — label stocké
+        # tel quel dans capture_tags.label dans les deux cas (dénormalisé,
+        # résiste à la suppression ultérieure d'un tag prédéfini).
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS capture_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            capture_id INTEGER NOT NULL,
+            tag_id INTEGER,
+            label TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_capture_tags_capture_id ON capture_tags(capture_id)')
         conn.commit()
 
 
@@ -198,18 +240,22 @@ def set_setting(key, value):
 
 def record_capture(kind, filename, thumb_filename=None):
     created_at = datetime.now().isoformat(timespec='seconds')
+    media_uid = generate_media_uid(get_setting('media_id.length', '6'))
     with closing(db_conn()) as conn:
         cur = conn.execute(
-            'INSERT INTO captures(kind, filename, thumb_filename, created_at, printed) VALUES(?,?,?,?,0)',
-            (kind, filename, thumb_filename, created_at)
+            'INSERT INTO captures(kind, filename, thumb_filename, created_at, printed, media_uid) '
+            'VALUES(?,?,?,?,0,?)',
+            (kind, filename, thumb_filename, created_at, media_uid)
         )
         conn.commit()
-        return cur.lastrowid
+        return cur.lastrowid, media_uid
 
 
-def list_captures(sort='desc', kind='', page=1, page_size=None):
+def list_captures(sort='desc', kind='', page=1, page_size=None, media_uid=''):
     """Retourne (liste, total). page_size=None charge tout (usage interne).
-    sort: 'desc'|'asc' (par date) ou 'votes_desc'|'votes_asc' (par score)."""
+    sort: 'desc'|'asc' (par date) ou 'votes_desc'|'votes_asc' (par score).
+    media_uid : filtre optionnel (recherche partielle) sur l'ID média —
+    voir champ de recherche de la galerie."""
     if sort in ('votes_desc', 'votes_asc'):
         col = 'vote_score'
         order = 'DESC' if sort == 'votes_desc' else 'ASC'
@@ -217,29 +263,26 @@ def list_captures(sort='desc', kind='', page=1, page_size=None):
         col = 'created_at'
         order = 'DESC' if sort.lower() == 'desc' else 'ASC'
 
+    conditions, params = [], []
+    if kind in ('photo', 'video'):
+        conditions.append('kind=?')
+        params.append(kind)
+    if media_uid:
+        conditions.append('media_uid LIKE ?')
+        params.append(f'%{media_uid}%')
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+
     with closing(db_conn()) as conn:
-        if kind in ('photo', 'video'):
-            total = conn.execute('SELECT COUNT(*) FROM captures WHERE kind=?', (kind,)).fetchone()[0]
-            if page_size:
-                rows = conn.execute(
-                    f'SELECT * FROM captures WHERE kind=? ORDER BY {col} {order}, id {order} LIMIT ? OFFSET ?',
-                    (kind, page_size, (page - 1) * page_size)
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    f'SELECT * FROM captures WHERE kind=? ORDER BY {col} {order}, id {order}', (kind,)
-                ).fetchall()
+        total = conn.execute(f'SELECT COUNT(*) FROM captures {where}', params).fetchone()[0]
+        if page_size:
+            rows = conn.execute(
+                f'SELECT * FROM captures {where} ORDER BY {col} {order}, id {order} LIMIT ? OFFSET ?',
+                params + [page_size, (page - 1) * page_size]
+            ).fetchall()
         else:
-            total = conn.execute('SELECT COUNT(*) FROM captures').fetchone()[0]
-            if page_size:
-                rows = conn.execute(
-                    f'SELECT * FROM captures ORDER BY {col} {order}, id {order} LIMIT ? OFFSET ?',
-                    (page_size, (page - 1) * page_size)
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    f'SELECT * FROM captures ORDER BY {col} {order}, id {order}'
-                ).fetchall()
+            rows = conn.execute(
+                f'SELECT * FROM captures {where} ORDER BY {col} {order}, id {order}', params
+            ).fetchall()
     return [dict(r) for r in rows], total
 
 
@@ -251,6 +294,7 @@ def delete_capture(capture_id):
             return None
         cap = dict(row)
         conn.execute('DELETE FROM captures WHERE id = ?', (capture_id,))
+        conn.execute('DELETE FROM capture_tags WHERE capture_id = ?', (capture_id,))
         conn.commit()
     return cap
 
@@ -509,12 +553,13 @@ def delete_screensaver_image_db(image_id):
 def add_guest_upload(filename, thumb_filename, original_filename, guest_token,
                       size_bytes, status, kind='photo'):
     created_at = datetime.now().isoformat(timespec='seconds')
+    media_uid = generate_media_uid(get_setting('media_id.length', '6'))
     with closing(db_conn()) as conn:
         cur = conn.execute(
             'INSERT INTO guest_uploads(filename, thumb_filename, original_filename, kind, '
-            'guest_token, status, size_bytes, created_at) VALUES(?,?,?,?,?,?,?,?)',
+            'guest_token, status, size_bytes, created_at, media_uid) VALUES(?,?,?,?,?,?,?,?,?)',
             (filename, thumb_filename, original_filename, kind, guest_token, status,
-             size_bytes, created_at)
+             size_bytes, created_at, media_uid)
         )
         conn.commit()
         return cur.lastrowid
@@ -557,7 +602,7 @@ def set_guest_upload_status(upload_id, status):
     return dict(row) if row else None
 
 
-def list_gallery_combined(sort='desc', kind='', source='', page=1, page_size=None):
+def list_gallery_combined(sort='desc', kind='', source='', page=1, page_size=None, media_uid=''):
     """Fusionne captures officielles + uploads invités approuvés pour la
     galerie, uniquement utilisée quand guest_upload.include_in_gallery est
     activé (voir gallery() dans app.py — sinon list_captures() seule est
@@ -565,7 +610,7 @@ def list_gallery_combined(sort='desc', kind='', source='', page=1, page_size=Non
     deux tables ont des schémas différents (pas d'UNION SQL simple), et les
     volumes visés (un événement) ne posent pas de problème de performance.
     Chaque item porte un champ 'source' ('official'|'guest') pour le badge
-    et le filtre côté galerie."""
+    et le filtre côté galerie. media_uid : filtre optionnel (recherche par ID)."""
     items = []
     if source in ('', 'official'):
         with closing(db_conn()) as conn:
@@ -588,6 +633,9 @@ def list_gallery_combined(sort='desc', kind='', source='', page=1, page_size=Non
             d['source'] = 'guest'
             d['printed'] = 0
             items.append(d)
+
+    if media_uid:
+        items = [it for it in items if media_uid.lower() in (it.get('media_uid') or '').lower()]
 
     if sort in ('votes_desc', 'votes_asc'):
         items.sort(key=lambda x: (x['vote_score'], x['created_at']), reverse=(sort == 'votes_desc'))
@@ -629,3 +677,146 @@ def export_emails_files():
         writer.writeheader()
         writer.writerows(payload)
     return csv_path, json_path
+
+
+# ── ID unique média ───────────────────────────────────────────────────────────
+# Chaîne de chiffres (facile à lire/taper sur un champ de recherche tactile),
+# longueur réglable depuis /admin/tags (media_id.length). Générée à la
+# capture (captures) et à l'upload invité (guest_uploads) — voir
+# record_capture() / add_guest_upload(). Unicité vérifiée dans les deux
+# tables à la fois (mêmes chances d'affichage/recherche côté galerie).
+
+def generate_media_uid(length):
+    try:
+        length = max(3, min(int(length), 12))
+    except (TypeError, ValueError):
+        length = 6
+    with closing(db_conn()) as conn:
+        for _ in range(30):
+            candidate = ''.join(random.choices('0123456789', k=length))
+            exists = conn.execute(
+                'SELECT 1 FROM captures WHERE media_uid = ? '
+                'UNION SELECT 1 FROM guest_uploads WHERE media_uid = ?',
+                (candidate, candidate)
+            ).fetchone()
+            if not exists:
+                return candidate
+    # Filet de sécurité (ne devrait jamais être atteint) : garantit quand
+    # même une terminaison plutôt qu'une boucle infinie.
+    return str(int(datetime.now().timestamp() * 1000))[-length:]
+
+
+def get_media_by_uid(media_uid):
+    """Recherche un média (capture officielle ou upload invité approuvé) par
+    son ID unique. Retourne un dict avec 'source' ('official'|'guest') ou None."""
+    media_uid = (media_uid or '').strip()
+    if not media_uid:
+        return None
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM captures WHERE media_uid = ?', (media_uid,)).fetchone()
+        if row:
+            d = dict(row)
+            d['source'] = 'official'
+            return d
+        row = conn.execute(
+            "SELECT * FROM guest_uploads WHERE media_uid = ? AND status = 'approved'", (media_uid,)
+        ).fetchone()
+        if row:
+            d = dict(row)
+            d['source'] = 'guest'
+            return d
+    return None
+
+
+# ── Tags ──────────────────────────────────────────────────────────────────────
+# Fonctionnalité activable via /admin/tags (settings tags.*). Tags prédéfinis
+# (table tags, CRUD admin) + tags "libres" saisis par l'invité via clavier
+# virtuel côté kiosque (tag_id NULL dans capture_tags). Portée aux captures
+# officielles uniquement (pas aux uploads invités).
+
+def list_tags():
+    with closing(db_conn()) as conn:
+        rows = conn.execute('SELECT * FROM tags ORDER BY sort_order ASC, label ASC').fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_tag_by_id(tag_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM tags WHERE id = ?', (tag_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_tag(label, sort_order=0):
+    with closing(db_conn()) as conn:
+        cur = conn.execute('INSERT INTO tags(label, sort_order) VALUES(?,?)', (label, sort_order))
+        conn.commit()
+        return cur.lastrowid
+
+
+def update_tag(tag_id, label, sort_order):
+    with closing(db_conn()) as conn:
+        conn.execute('UPDATE tags SET label=?, sort_order=? WHERE id=?', (label, sort_order, tag_id))
+        conn.commit()
+
+
+def delete_tag_db(tag_id):
+    """Supprime le tag prédéfini. Les assignations déjà faites (capture_tags)
+    sont conservées telles quelles (label dénormalisé) : l'historique des
+    médias déjà tagués n'est pas affecté, seul le tag disparaît de la liste
+    proposée pour les prochaines captures."""
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM tags WHERE id = ?', (tag_id,)).fetchone()
+        if not row:
+            return None
+        conn.execute('DELETE FROM tags WHERE id = ?', (tag_id,))
+        conn.commit()
+    return dict(row)
+
+
+def list_capture_tags(capture_id):
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            'SELECT * FROM capture_tags WHERE capture_id = ? ORDER BY id ASC', (capture_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def count_capture_tags(capture_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute(
+            'SELECT COUNT(*) FROM capture_tags WHERE capture_id = ?', (capture_id,)
+        ).fetchone()
+    return row[0] if row else 0
+
+
+def add_capture_tag(capture_id, tag_id=None, label=''):
+    """Assigne un tag (prédéfini si tag_id fourni, sinon libre) à une
+    capture. Empêche les doublons de tag prédéfini sur une même capture
+    (une seule ligne par tag_id non NULL) ; les tags libres, eux, n'ont pas
+    cette contrainte (deux textes libres différents sont deux lignes
+    distinctes, tag_id restant NULL dans les deux cas)."""
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        if tag_id is not None:
+            existing = conn.execute(
+                'SELECT id FROM capture_tags WHERE capture_id = ? AND tag_id = ?',
+                (capture_id, tag_id)
+            ).fetchone()
+            if existing:
+                return existing['id']
+        cur = conn.execute(
+            'INSERT INTO capture_tags(capture_id, tag_id, label, created_at) VALUES(?,?,?,?)',
+            (capture_id, tag_id, label, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def delete_capture_tag(assignment_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM capture_tags WHERE id = ?', (assignment_id,)).fetchone()
+        if not row:
+            return None
+        conn.execute('DELETE FROM capture_tags WHERE id = ?', (assignment_id,))
+        conn.commit()
+    return dict(row)
