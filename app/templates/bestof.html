@@ -45,6 +45,19 @@
       backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,.15);
     }
     #slideMediaId.hidden { display: none; }
+    /* Tags du média (voir /admin/tags → Affichage sur /bestof), coin
+       haut-gauche — police/fond/couleur/taille pilotés par tagsStyle (JS),
+       réglables depuis l'admin. */
+    #slideTags {
+      position: absolute; top: 24px; left: 24px; z-index: 5;
+      display: flex; flex-wrap: wrap; gap: 8px; max-width: 65%;
+    }
+    #slideTags.hidden { display: none; }
+    .slide-tag-chip {
+      display: inline-block; padding: 6px 16px; border-radius: 999px;
+      font-weight: 700; backdrop-filter: blur(4px);
+      border: 1px solid rgba(255,255,255,.15);
+    }
 
     /* Slide promo (fond + QR + texte) — voir /admin/slideshow */
     .slide.slide-promo { display: block; }
@@ -87,6 +100,7 @@
   <div id="slideB" class="slide"></div>
   <div id="slideBadge" class="hidden">Invité</div>
   <div id="slideMediaId" class="hidden"></div>
+  <div id="slideTags" class="hidden"></div>
   <div id="empty" style="display:none">Aucun média à afficher.</div>
 </div>
 
@@ -98,6 +112,8 @@
   let settings = { delay: 5, order: 'chrono', refreshInterval: 300 };
   let promoCfg = { enabled: false, frequency: 6 };
   let showMediaId = false;
+  let showTags = false;
+  let tagsStyle = { font: 'system-ui, sans-serif', bg_color: '#0d8b8f', text_color: '#ffffff', font_size: 14 };
   let cleanup = null;
 
   function shuffle(arr) {
@@ -250,6 +266,21 @@
         idBadge.classList.add('hidden');
       }
     }
+
+    const tagsBox = document.getElementById('slideTags');
+    if (tagsBox) {
+      const tags = (showTags && Array.isArray(slide.tags)) ? slide.tags : [];
+      if (tags.length) {
+        const chipStyle = `font-family:${tagsStyle.font};font-size:${tagsStyle.font_size}px;`
+          + `background:${tagsStyle.bg_color};color:${tagsStyle.text_color};`;
+        tagsBox.innerHTML = tags
+          .map((t) => `<span class="slide-tag-chip" style='${chipStyle}'>${escapeHtml(t)}</span>`)
+          .join('');
+        tagsBox.classList.remove('hidden');
+      } else {
+        tagsBox.classList.add('hidden');
+      }
+    }
   }
 
   let lastData = null; // dernières captures/images reçues, réutilisées pour reconstruire
@@ -277,6 +308,8 @@
       lastData = data;
       promoCfg = data.promo || promoCfg;
       showMediaId = !!data.show_media_id;
+      showTags = !!data.show_tags;
+      tagsStyle = data.tags_style || tagsStyle;
       settings.delay = data.delay || 5;
       settings.order = data.order || settings.order;
       applySlides(buildSlides(data));
@@ -310,6 +343,8 @@
     };
     promoCfg = data.promo || promoCfg;
     showMediaId = !!data.show_media_id;
+    showTags = !!data.show_tags;
+    tagsStyle = data.tags_style || tagsStyle;
     slides = buildSlides(data);
     if (!slides.length) {
       document.getElementById('empty').style.display = 'flex';

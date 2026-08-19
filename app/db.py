@@ -251,11 +251,12 @@ def record_capture(kind, filename, thumb_filename=None):
         return cur.lastrowid, media_uid
 
 
-def list_captures(sort='desc', kind='', page=1, page_size=None, media_uid=''):
+def list_captures(sort='desc', kind='', page=1, page_size=None, media_uid='', tag=''):
     """Retourne (liste, total). page_size=None charge tout (usage interne).
     sort: 'desc'|'asc' (par date) ou 'votes_desc'|'votes_asc' (par score).
     media_uid : filtre optionnel (recherche partielle) sur l'ID média —
-    voir champ de recherche de la galerie."""
+    voir champ de recherche de la galerie. tag : filtre optionnel (libellé
+    exact, prédéfini ou libre) — voir filtre "Tags" de la galerie."""
     if sort in ('votes_desc', 'votes_asc'):
         col = 'vote_score'
         order = 'DESC' if sort == 'votes_desc' else 'ASC'
@@ -270,6 +271,9 @@ def list_captures(sort='desc', kind='', page=1, page_size=None, media_uid=''):
     if media_uid:
         conditions.append('media_uid LIKE ?')
         params.append(f'%{media_uid}%')
+    if tag:
+        conditions.append('id IN (SELECT capture_id FROM capture_tags WHERE label = ?)')
+        params.append(tag)
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ''
 
     with closing(db_conn()) as conn:
@@ -602,7 +606,7 @@ def set_guest_upload_status(upload_id, status):
     return dict(row) if row else None
 
 
-def list_gallery_combined(sort='desc', kind='', source='', page=1, page_size=None, media_uid=''):
+def list_gallery_combined(sort='desc', kind='', source='', page=1, page_size=None, media_uid='', tag=''):
     """Fusionne captures officielles + uploads invités approuvés pour la
     galerie, uniquement utilisée quand guest_upload.include_in_gallery est
     activé (voir gallery() dans app.py — sinon list_captures() seule est
@@ -610,22 +614,31 @@ def list_gallery_combined(sort='desc', kind='', source='', page=1, page_size=Non
     deux tables ont des schémas différents (pas d'UNION SQL simple), et les
     volumes visés (un événement) ne posent pas de problème de performance.
     Chaque item porte un champ 'source' ('official'|'guest') pour le badge
-    et le filtre côté galerie. media_uid : filtre optionnel (recherche par ID)."""
+    et le filtre côté galerie. media_uid : filtre optionnel (recherche par
+    ID). tag : filtre optionnel par libellé — les tags ne portant que sur
+    les captures officielles, un filtre tag actif exclut d'office tous les
+    uploads invités (aucun ne pourra jamais correspondre)."""
     items = []
     if source in ('', 'official'):
+        conditions, params = [], []
+        if kind in ('photo', 'video'):
+            conditions.append('kind=?')
+            params.append(kind)
+        if tag:
+            conditions.append('id IN (SELECT capture_id FROM capture_tags WHERE label = ?)')
+            params.append(tag)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ''
         with closing(db_conn()) as conn:
-            if kind in ('photo', 'video'):
-                rows = conn.execute('SELECT * FROM captures WHERE kind=?', (kind,)).fetchall()
-            else:
-                rows = conn.execute('SELECT * FROM captures').fetchall()
+            rows = conn.execute(f'SELECT * FROM captures {where}', params).fetchall()
         for r in rows:
             d = dict(r)
             d['source'] = 'official'
             items.append(d)
 
     # Les uploads invités sont toujours kind='photo' : sans effet si un
-    # filtre 'video' est actif.
-    if source in ('', 'guest') and kind in ('', 'photo'):
+    # filtre 'video' est actif. Aucun tag possible sur un upload invité :
+    # un filtre tag actif les exclut entièrement (pas de requête inutile).
+    if source in ('', 'guest') and kind in ('', 'photo') and not tag:
         with closing(db_conn()) as conn:
             rows = conn.execute("SELECT * FROM guest_uploads WHERE status = 'approved'").fetchall()
         for r in rows:
@@ -820,3 +833,51 @@ def delete_capture_tag(assignment_id):
         conn.execute('DELETE FROM capture_tags WHERE id = ?', (assignment_id,))
         conn.commit()
     return dict(row)
+
+
+def get_tags_for_captures(capture_ids):
+    """Version "bulk" de list_capture_tags() pour éviter le N+1 quand on
+    affiche une liste de captures (galerie) : une seule requête, retourne
+    {capture_id: [label, ...]}."""
+    capture_ids = list(capture_ids)
+    if not capture_ids:
+        return {}
+    placeholders = ','.join('?' * len(capture_ids))
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            f'SELECT capture_id, label FROM capture_tags WHERE capture_id IN ({placeholders}) ORDER BY id ASC',
+            capture_ids
+        ).fetchall()
+    result = {}
+    for r in rows:
+        result.setdefault(r['capture_id'], []).append(r['label'])
+    return result
+
+
+def list_distinct_tag_labels():
+    """Libellés distincts réellement utilisés (prédéfinis ou libres),
+    pour peupler le filtre "Tags" de la galerie — indépendant de la liste
+    des tags prédéfinis (table tags), qui peut différer de ce qui a été
+    effectivement appliqué (tags supprimés depuis, tags libres, ...)."""
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            'SELECT DISTINCT label FROM capture_tags ORDER BY label COLLATE NOCASE ASC'
+        ).fetchall()
+    return [r['label'] for r in rows]
+
+
+def list_capture_tags_with_media(limit=300):
+    """Liste des assignations de tags les plus récentes, avec les infos du
+    média concerné (miniature, genre, ID) — alimente la section "Tags
+    appliqués" de /admin/tags (journal des tags posés par les invités
+    depuis le kiosque)."""
+    with closing(db_conn()) as conn:
+        rows = conn.execute("""
+            SELECT ct.id AS assignment_id, ct.tag_id, ct.label, ct.created_at,
+                   c.id AS capture_id, c.kind, c.filename, c.thumb_filename, c.media_uid
+            FROM capture_tags ct
+            JOIN captures c ON c.id = ct.capture_id
+            ORDER BY ct.id DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+    return [dict(r) for r in rows]

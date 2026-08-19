@@ -64,6 +64,47 @@
     .btn-icon.del:hover { border-color: rgba(200,50,50,.7); color: #f97b7b; }
     .btn-icon.save { border-color: var(--accent); color: var(--accent); }
     .btn-icon.save:hover { background: var(--accent); color: #fff; }
+
+    /* Réglages d'affichage (bestof) */
+    .field select {
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px;
+    }
+    .color-row { display: flex; align-items: center; gap: 8px; }
+    .color-row input[type=color] {
+      width: 44px; height: 34px; padding: 2px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface-2); cursor: pointer;
+    }
+    .color-hex { font-family: monospace; font-size: 13px; color: var(--text);
+                 background: var(--surface-2); border: 1px solid var(--border);
+                 border-radius: 8px; padding: 6px 10px; width: 88px; }
+    .tags-preview-wrap { margin-top: 18px; }
+    .tags-preview-label { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+    .tags-preview-box {
+      background: #111315; border-radius: 12px; padding: 20px; display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    .tag-preview-chip {
+      border-radius: 999px; padding: 5px 14px; font-weight: 700; display: inline-block;
+    }
+
+    /* Tags appliqués (journal) */
+    .applied-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .applied-table th {
+      text-align: left; font-size: 11px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .07em;
+      padding: 8px 10px; border-bottom: 1px solid var(--border);
+    }
+    .applied-table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.05); vertical-align: middle; }
+    .applied-thumb {
+      width: 52px; height: 52px; border-radius: 8px; object-fit: cover; background: #111315; display: block;
+    }
+    .applied-thumb-empty {
+      width: 52px; height: 52px; border-radius: 8px; background: #111315;
+      display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 10px;
+    }
+    .applied-label { font-weight: 700; }
+    .applied-meta { font-size: 12px; color: var(--muted); }
+    .applied-table .col-act { width: 110px; text-align: right; }
   </style>
 </head>
 <body class="gallery-body">
@@ -149,6 +190,69 @@
     <button class="btn-primary" type="submit">Enregistrer</button>
   </form>
 
+  <!-- Affichage des tags sur le diaporama /bestof -->
+  <form method="post" id="displayForm" style="margin-top:24px">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="display_settings">
+
+    <div class="form-card">
+      <p class="section-title">Affichage sur /bestof</p>
+      <p class="section-hint">Les tags associés à chaque média sont affichés en overlay sur le diaporama public.</p>
+      <div class="field">
+        <div class="check-row">
+          <input type="checkbox" id="show_on_bestof_tags" name="show_on_bestof"
+                 {% if settings.show_on_bestof %}checked{% endif %}>
+          <span>Afficher les tags sur le diaporama /bestof</span>
+        </div>
+      </div>
+
+      <div class="field-row" style="margin-top:14px">
+        <div class="field">
+          <label>Police</label>
+          <select name="style_font" id="style_font">
+            {% for value, label in tags_fonts %}
+            <option value="{{ value }}" {% if settings.style_font == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Taille du texte (px)</label>
+          <input type="number" name="style_font_size" id="style_font_size" min="8" max="72" value="{{ settings.style_font_size }}">
+        </div>
+        <div class="field">
+          <label>Couleur du fond</label>
+          <div class="color-row">
+            <input type="color" id="cp_bg" value="{{ settings.style_bg_color }}"
+                   oninput="document.getElementById('style_bg_color').value=this.value; updateTagsPreview()">
+            <input type="text" id="style_bg_color" name="style_bg_color" class="color-hex"
+                   value="{{ settings.style_bg_color }}" maxlength="7"
+                   oninput="document.getElementById('cp_bg').value=this.value; updateTagsPreview()">
+          </div>
+        </div>
+        <div class="field">
+          <label>Couleur du texte</label>
+          <div class="color-row">
+            <input type="color" id="cp_text" value="{{ settings.style_text_color }}"
+                   oninput="document.getElementById('style_text_color').value=this.value; updateTagsPreview()">
+            <input type="text" id="style_text_color" name="style_text_color" class="color-hex"
+                   value="{{ settings.style_text_color }}" maxlength="7"
+                   oninput="document.getElementById('cp_text').value=this.value; updateTagsPreview()">
+          </div>
+        </div>
+      </div>
+
+      <div class="tags-preview-wrap">
+        <p class="tags-preview-label">Aperçu</p>
+        <div class="tags-preview-box">
+          <span class="tag-preview-chip" id="tagPreviewChip1">Anniversaire</span>
+          <span class="tag-preview-chip" id="tagPreviewChip2">Trop bien !</span>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+
   <!-- Tags prédéfinis (CRUD) -->
   <div class="form-card" style="margin-top:24px">
     <p class="section-title">Tags prédéfinis</p>
@@ -201,6 +305,74 @@
     {% endif %}
   </div>
 
+  <!-- Tags appliqués (journal des tags posés depuis le kiosque) -->
+  <div class="form-card" style="margin-top:24px">
+    <p class="section-title">Tags appliqués</p>
+    <p class="section-hint">Tags posés par les invités depuis le kiosque, avec le média concerné — les plus récents en premier.</p>
+
+    {% if assignments %}
+    <table class="applied-table">
+      <thead>
+        <tr>
+          <th>Média</th>
+          <th>Tag</th>
+          <th>Date</th>
+          <th class="col-act">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in assignments %}
+        <tr>
+          <td>
+            {% if a.thumb_filename %}
+            <img class="applied-thumb" src="{{ url_for('media_thumb', filename=a.thumb_filename) }}" alt="{{ a.kind }}">
+            {% else %}
+            <div class="applied-thumb-empty">{{ a.kind }}</div>
+            {% endif %}
+          </td>
+          <td>
+            <div class="applied-label">{{ a.label }}</div>
+            <div class="applied-meta">{{ a.kind }}{% if a.media_uid %} · #{{ a.media_uid }}{% endif %}</div>
+          </td>
+          <td class="applied-meta">{{ a.created_at | format_dt }}</td>
+          <td class="col-act">
+            <form method="post" action="{{ url_for('admin_tags') }}" style="display:inline"
+                  onsubmit="return confirm('Retirer le tag « {{ a.label }} » de ce média ?')">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="assignment_delete">
+              <input type="hidden" name="assignment_id" value="{{ a.assignment_id }}">
+              <button class="btn-icon del" type="submit" title="Retirer">✕ Retirer</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="text-align:center;color:var(--muted);padding:24px 0;">Aucun tag appliqué pour le moment.</p>
+    {% endif %}
+  </div>
+
 </div>
+
+<script>
+  function updateTagsPreview() {
+    const font = document.getElementById('style_font').value;
+    const size = document.getElementById('style_font_size').value || 14;
+    const bg   = document.getElementById('style_bg_color').value || '#0d8b8f';
+    const text = document.getElementById('style_text_color').value || '#ffffff';
+    ['tagPreviewChip1', 'tagPreviewChip2'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.style.fontFamily = font;
+      el.style.fontSize = size + 'px';
+      el.style.background = bg;
+      el.style.color = text;
+    });
+  }
+  document.getElementById('style_font')?.addEventListener('change', updateTagsPreview);
+  document.getElementById('style_font_size')?.addEventListener('input', updateTagsPreview);
+  updateTagsPreview();
+</script>
 </body>
 </html>

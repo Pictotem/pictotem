@@ -57,7 +57,8 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_gallery_combined,
                 list_tags, get_tag_by_id, create_tag, update_tag, delete_tag_db,
                 list_capture_tags, count_capture_tags, add_capture_tag, delete_capture_tag,
-                get_media_by_uid)
+                get_media_by_uid, get_tags_for_captures, list_distinct_tag_labels,
+                list_capture_tags_with_media)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, is_autostart_enabled,
                    make_thumb, message_text, print_photo, validate_printer)
@@ -511,11 +512,16 @@ def capture_retake(capture_id):
 
 def _tags_settings():
     return {
-        'enabled':          get_setting('tags.enabled', '0') == '1',
+        'enabled':           get_setting('tags.enabled', '0') == '1',
         'free_enabled':      get_setting('tags.free_enabled', '1') == '1',
         'free_min_length':   int(get_setting('tags.free_min_length', '') or '2'),
         'free_max_length':   int(get_setting('tags.free_max_length', '') or '24'),
         'max_per_capture':   int(get_setting('tags.max_per_capture', '') or '5'),
+        'show_on_bestof':    get_setting('tags.show_on_bestof', '0') == '1',
+        'style_font':        get_setting('tags.style_font', '') or _PROMO_FONTS[0][0],
+        'style_bg_color':    get_setting('tags.style_bg_color', '') or '#0d8b8f',
+        'style_text_color':  get_setting('tags.style_text_color', '') or '#ffffff',
+        'style_font_size':   int(get_setting('tags.style_font_size', '') or '14'),
     }
 
 
@@ -681,6 +687,7 @@ def gallery():
     page = max(1, int(request.args.get('page', 1)))
     email_cookie = request.cookies.get(CONFIG['emails']['cookie_name'], '')
     media_id_query = request.args.get('q', '').strip()
+    tag_query = request.args.get('tag', '').strip()
 
     # Intégration des uploads invités dans la galerie officielle (voir
     # section "Upload invités" plus bas) : paramétrable indépendamment de
@@ -692,11 +699,19 @@ def gallery():
 
     if guest_in_gallery:
         captures, total = list_gallery_combined(sort, kind, source, page=page, page_size=page_size,
-                                                media_uid=media_id_query)
+                                                media_uid=media_id_query, tag=tag_query)
     else:
         captures, total = list_captures(sort, kind, page=page, page_size=page_size,
-                                        media_uid=media_id_query)
+                                        media_uid=media_id_query, tag=tag_query)
     total_pages = max(1, (total + page_size - 1) // page_size)
+
+    # Tags assignés par capture (chips sur les cartes) — une seule requête
+    # "bulk" plutôt qu'une par capture (voir get_tags_for_captures).
+    official_ids = [c['id'] for c in captures if c.get('source', 'official') == 'official']
+    tags_by_capture = get_tags_for_captures(official_ids)
+    for c in captures:
+        c['tags'] = tags_by_capture.get(c['id'], []) if c.get('source', 'official') == 'official' else []
+    distinct_tags = list_distinct_tag_labels()
 
     voter_token = request.cookies.get('voter_token', '')
     new_token = False
@@ -722,6 +737,7 @@ def gallery():
         guest_upload_url=guest_upload_url,
         guest_in_gallery=guest_in_gallery, source=source,
         media_id_query=media_id_query,
+        tag_query=tag_query, distinct_tags=distinct_tags,
     ))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
@@ -1432,6 +1448,22 @@ def admin_tags():
             set_setting('media_id.show_on_bestof', '1' if request.form.get('show_on_bestof') else '0')
             return redirect(url_for('admin_tags', ok='Réglages ID média mis à jour.'))
 
+        if action == 'display_settings':
+            set_setting('tags.show_on_bestof', '1' if request.form.get('show_on_bestof') else '0')
+            font_value = request.form.get('style_font', '')
+            if font_value in dict(_PROMO_FONTS):
+                set_setting('tags.style_font', font_value)
+            bg_value = request.form.get('style_bg_color', '').strip()
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_value):
+                set_setting('tags.style_bg_color', bg_value)
+            text_value = request.form.get('style_text_color', '').strip()
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', text_value):
+                set_setting('tags.style_text_color', text_value)
+            raw_fs = (request.form.get('style_font_size') or '').strip()
+            if raw_fs.isdigit() and int(raw_fs) >= 8:
+                set_setting('tags.style_font_size', raw_fs)
+            return redirect(url_for('admin_tags', ok="Réglages d'affichage mis à jour."))
+
         if action == 'tag_new':
             label = (request.form.get('label') or '').strip()
             sort_order = int(request.form.get('sort_order') or 0)
@@ -1458,9 +1490,17 @@ def admin_tags():
                 return redirect(url_for('admin_tags', ok=f"Tag « {tag['label']} » supprimé."))
             return redirect(url_for('admin_tags', err='Tag introuvable.'))
 
+        if action == 'assignment_delete':
+            assignment_id = int(request.form.get('assignment_id', 0))
+            row = delete_capture_tag(assignment_id)
+            if row:
+                return redirect(url_for('admin_tags', ok=f"Tag « {row['label']} » retiré du média."))
+            return redirect(url_for('admin_tags', err='Assignation introuvable.'))
+
     return render_template(
         'admin_tags.html', config=CONFIG,
         settings=_tags_settings(), media_id=_media_id_settings(), tags=list_tags(),
+        assignments=list_capture_tags_with_media(), tags_fonts=_PROMO_FONTS,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )
@@ -1560,6 +1600,7 @@ def bestof():
 @app.route('/api/bestof/slides')
 def api_bestof_slides():
     s = _slideshow_settings()
+    tags_cfg = _tags_settings()
 
     # Construire la requête captures
     conditions, params = ['1=1'], []
@@ -1585,11 +1626,12 @@ def api_bestof_slides():
         'random':     'created_at ASC, id ASC',   # client shuffles
     }.get(s['order'], 'created_at ASC, id ASC')   # chrono par défaut
 
-    sql = (f"SELECT kind, filename, vote_score, media_uid FROM captures "
+    sql = (f"SELECT id, kind, filename, vote_score, media_uid FROM captures "
            f"WHERE {' AND '.join(conditions)} ORDER BY {order_clause}")
     with closing(db_conn()) as conn:
         rows = conn.execute(sql, params).fetchall()
 
+    tags_map = get_tags_for_captures([r['id'] for r in rows])
     captures = [
         {
             'type':  r['kind'],
@@ -1597,6 +1639,7 @@ def api_bestof_slides():
                              filename=r['filename']),
             'score': r['vote_score'],
             'media_uid': r['media_uid'],
+            'tags': tags_map.get(r['id'], []),
         }
         for r in rows
     ]
@@ -1624,6 +1667,13 @@ def api_bestof_slides():
         'refresh_interval': s['refresh_interval'],
         'promo':            _promo_public_data(),
         'show_media_id':    _media_id_settings()['show_on_bestof'],
+        'show_tags':        tags_cfg['show_on_bestof'],
+        'tags_style':       {
+            'font':       tags_cfg['style_font'],
+            'bg_color':   tags_cfg['style_bg_color'],
+            'text_color': tags_cfg['style_text_color'],
+            'font_size':  tags_cfg['style_font_size'],
+        },
     })
 
 
