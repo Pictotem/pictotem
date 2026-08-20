@@ -14,7 +14,6 @@
   --photo-btn-text: #ffffff;
   --video-btn-bg: #8b2f0d;
   --video-btn-text: #ffffff;
-  --btn-text-color: #23282c;
   --btn-bg-pri: #16f062;
   --btn-bg-sec: #32c1f9;
   --btn-bg-ter: #ffd726;
@@ -295,8 +294,14 @@ button, input, a { font: inherit; }
   border: 1px solid var(--border);
   color: var(--text);
   text-decoration: none;
-  border-radius: 999px;
-  padding: 14px 20px;
+  /* Forme/taille/police communes, réglables depuis /admin/buttons — valeurs
+     de repli identiques au rendu historique pour les pages qui n'injectent
+     pas ces variables (galerie, admin, ...), voir index.html pour l'unique
+     page qui les définit (le kiosque). */
+  border-radius: var(--btn-radius, 999px);
+  padding: var(--btn-padding-y, 14px) var(--btn-padding-x, 20px);
+  font-family: var(--btn-font, inherit);
+  font-size: var(--btn-font-size, 16px);
   cursor: pointer;
 }
 
@@ -304,35 +309,44 @@ button, input, a { font: inherit; }
   background: var(--surface);
 }
 
+/* Couleur de fond + graisse de texte : propres à chaque rôle visuel, voir
+   /admin/buttons. "retake" (Recommencer) et "tags" (Tags) remplacent
+   l'ancienne classe .ghost, dont l'absence de font-size/font-weight cohérents
+   avec .pri/.sec/.ter causait un style visiblement différent des autres
+   boutons de la barre du bas. */
 .action-btn.pri {
-  background: var(--btn-bg-pri);
+  background: var(--btn-bg-pri, #16f062);
   border-color: transparent;
-  color: var(--btn-text-color);
-  font-size: var(--capture-font-size);
-  font-weight: 800;
+  color: var(--btn-text-pri, #23282c);
+  font-weight: var(--btn-weight-pri, 800);
 }
 
 .action-btn.sec {
-  background: var(--btn-bg-sec);
+  background: var(--btn-bg-sec, #32c1f9);
   border-color: transparent;
-  color: var(--btn-text-color);
-  font-size: var(--capture-font-size);
-  font-weight: 800;
+  color: var(--btn-text-sec, #23282c);
+  font-weight: var(--btn-weight-sec, 800);
 }
 
 .action-btn.ter {
-  background: var(--btn-bg-ter);
+  background: var(--btn-bg-ter, #ffd726);
   border-color: transparent;
-  color: var(--btn-text-color);
-  font-size: var(--capture-font-size);
-  font-weight: 800;
+  color: var(--btn-text-ter, #23282c);
+  font-weight: var(--btn-weight-ter, 800);
 }
 
-.action-btn.ghost {
-  background: rgba(255,255,255,.06);
-  border-color: rgba(255,255,255,.28);
-  color: rgba(255,255,255,.7);
-  font-weight: 600;
+.action-btn.retake {
+  background: var(--btn-bg-retake, #6c7a89);
+  border-color: transparent;
+  color: var(--btn-text-retake, #ffffff);
+  font-weight: var(--btn-weight-retake, 800);
+}
+
+.action-btn.tags {
+  background: var(--btn-bg-tags, #9b59b6);
+  border-color: transparent;
+  color: var(--btn-text-tags, #ffffff);
+  font-weight: var(--btn-weight-tags, 800);
 }
 
 .action-btn.small {

@@ -153,6 +153,57 @@ def get_bottom_bar_sizes() -> dict:
     }
 
 
+# ── Boutons d'action (kiosque) ────────────────────────────────────────────────
+# Réglages depuis /admin/buttons : un socle commun (forme, police, taille de
+# police, padding) appliqué à tous les boutons "action-btn", et une couleur de
+# fond + graisse de texte propres à chaque rôle visuel (pri/sec/ter, plus
+# retake/tags qui utilisaient auparavant un style "ghost" non aligné sur les
+# autres — c'est ce décalage qui motive cette page de réglages).
+
+_BUTTON_SHAPES = {'pill': 999, 'rounded': 16, 'square': 6}
+_BUTTON_ROLES = [
+    ('pri',    'Bouton principal (ex. Prendre une photo, Appliquer)', '#16f062'),
+    ('sec',    'Bouton secondaire (ex. Prendre une vidéo, Imprimer)',  '#32c1f9'),
+    ('ter',    'Bouton tertiaire (ex. Photo strip, Retour)',           '#ffd726'),
+    ('retake', 'Recommencer',                                          '#6c7a89'),
+    ('tags',   'Tags',                                                 '#9b59b6'),
+]
+
+
+def _readable_text_color(hex_color: str) -> str:
+    """Choisit un texte clair ou sombre selon la luminance du fond, pour que
+    la couleur de fond restе librement personnalisable sans jamais produire
+    un texte illisible (l'admin ne règle que la couleur de fond, pas celle
+    du texte — voir /admin/buttons)."""
+    h = (hex_color or '').lstrip('#')
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except (ValueError, IndexError):
+        return '#111111'
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    return '#111111' if luminance > 0.55 else '#ffffff'
+
+
+def _buttons_settings() -> dict:
+    shape = get_setting('buttons.shape', 'pill')
+    if shape not in _BUTTON_SHAPES:
+        shape = 'pill'
+    roles = {}
+    for key, label, default_bg in _BUTTON_ROLES:
+        bg = get_setting(f'buttons.{key}_bg', '') or default_bg
+        bold = get_setting(f'buttons.{key}_bold', '1') == '1'
+        roles[key] = {'label': label, 'bg': bg, 'bold': bold, 'text': _readable_text_color(bg)}
+    return {
+        'shape':      shape,
+        'radius_px':  _BUTTON_SHAPES[shape],
+        'font':       get_setting('buttons.font', '') or _PROMO_FONTS[0][0],
+        'font_size':  int(get_setting('buttons.font_size', '') or '38'),
+        'padding_y':  int(get_setting('buttons.padding_y', '') or '14'),
+        'padding_x':  int(get_setting('buttons.padding_x', '') or '20'),
+        'roles':      roles,
+    }
+
+
 # ── Helpers admin ─────────────────────────────────────────────────────────────
 
 def _admin_redirect(success=None, error=None):
@@ -287,6 +338,7 @@ def index():
         top_bar=get_top_bar_settings(),
         photo_strip=CONFIG.get('capture', {}).get('photo_strip', {}),
         tags_enabled=get_setting('tags.enabled', '0') == '1',
+        buttons=_buttons_settings(),
     )
 
 
@@ -1501,6 +1553,43 @@ def admin_tags():
         'admin_tags.html', config=CONFIG,
         settings=_tags_settings(), media_id=_media_id_settings(), tags=list_tags(),
         assignments=list_capture_tags_with_media(), tags_fonts=_PROMO_FONTS,
+        alert_success=request.args.get('ok'),
+        alert_error=request.args.get('err'),
+    )
+
+
+# ── Admin — boutons d'action (kiosque) ────────────────────────────────────────
+
+@app.route('/admin/buttons', methods=['GET', 'POST'])
+@require_admin_auth
+@csrf_protect
+def admin_buttons():
+    if request.method == 'POST':
+        shape = request.form.get('shape', 'pill')
+        if shape in _BUTTON_SHAPES:
+            set_setting('buttons.shape', shape)
+        font_value = request.form.get('font', '')
+        if font_value in dict(_PROMO_FONTS):
+            set_setting('buttons.font', font_value)
+        raw_fs = (request.form.get('font_size') or '').strip()
+        if raw_fs.isdigit() and int(raw_fs) >= 10:
+            set_setting('buttons.font_size', raw_fs)
+        raw_py = (request.form.get('padding_y') or '').strip()
+        if raw_py.isdigit():
+            set_setting('buttons.padding_y', raw_py)
+        raw_px = (request.form.get('padding_x') or '').strip()
+        if raw_px.isdigit():
+            set_setting('buttons.padding_x', raw_px)
+        for key, _label, _default_bg in _BUTTON_ROLES:
+            bg_value = request.form.get(f'{key}_bg', '').strip()
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_value):
+                set_setting(f'buttons.{key}_bg', bg_value)
+            set_setting(f'buttons.{key}_bold', '1' if request.form.get(f'{key}_bold') else '0')
+        return redirect(url_for('admin_buttons', ok='Paramètres mis à jour.'))
+
+    return render_template(
+        'admin_buttons.html', config=CONFIG,
+        settings=_buttons_settings(), fonts=_PROMO_FONTS,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )

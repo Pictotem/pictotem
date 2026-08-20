@@ -14,6 +14,35 @@
       --bottom-bar-qr-size: {{ bottom_bar_sizes.qr_size }}px;
       --top-bar-height: {{ top_bar.height }}px;
       --top-bar-color: {{ top_bar.color }};
+
+      /* Boutons d'action — socle commun réglable depuis /admin/buttons.
+         Filtre "safe" sur la police : sa valeur peut contenir des guillemets
+         (ex. system-ui, "Segoe UI", sans-serif) — l'échappement HTML par
+         défaut de Jinja les transformerait en &quot; et casserait la
+         déclaration CSS (elle est injectée ici dans un bloc <style>, pas
+         dans un attribut HTML, donc aucun risque d'injection : la valeur
+         provient uniquement de la liste fixe _PROMO_FONTS, jamais de saisie
+         libre). */
+      --btn-radius: {{ buttons.radius_px }}px;
+      --btn-font: {{ buttons.font|safe }};
+      --btn-font-size: {{ buttons.font_size }}px;
+      --btn-padding-y: {{ buttons.padding_y }}px;
+      --btn-padding-x: {{ buttons.padding_x }}px;
+      --btn-bg-pri: {{ buttons.roles.pri.bg }};
+      --btn-text-pri: {{ buttons.roles.pri.text }};
+      --btn-weight-pri: {{ '800' if buttons.roles.pri.bold else '400' }};
+      --btn-bg-sec: {{ buttons.roles.sec.bg }};
+      --btn-text-sec: {{ buttons.roles.sec.text }};
+      --btn-weight-sec: {{ '800' if buttons.roles.sec.bold else '400' }};
+      --btn-bg-ter: {{ buttons.roles.ter.bg }};
+      --btn-text-ter: {{ buttons.roles.ter.text }};
+      --btn-weight-ter: {{ '800' if buttons.roles.ter.bold else '400' }};
+      --btn-bg-retake: {{ buttons.roles.retake.bg }};
+      --btn-text-retake: {{ buttons.roles.retake.text }};
+      --btn-weight-retake: {{ '800' if buttons.roles.retake.bold else '400' }};
+      --btn-bg-tags: {{ buttons.roles.tags.bg }};
+      --btn-text-tags: {{ buttons.roles.tags.text }};
+      --btn-weight-tags: {{ '800' if buttons.roles.tags.bold else '400' }};
     }
 
     /* Barre de progression tout en haut de l'écran : illustre n'importe quel
@@ -229,9 +258,9 @@
           </div>
           <div class="bottom-bar-buttons hidden" id="replayPhotoBtns">
             <button class="action-btn pri" id="btnBackPhoto">{{ texts.btn_retour }}</button>
-            <button class="action-btn ghost" id="btnRetakePhoto">{{ texts.btn_recommencer }}</button>
+            <button class="action-btn retake" id="btnRetakePhoto">{{ texts.btn_recommencer }}</button>
             {% if tags_enabled %}
-            <button class="action-btn ghost" id="btnTagsPhoto">{{ texts.btn_tags }}</button>
+            <button class="action-btn tags" id="btnTagsPhoto">{{ texts.btn_tags }}</button>
             {% endif %}
             {% if not hide_print_button %}
             <button class="action-btn sec" id="btnPrintPhoto">{{ texts.btn_imprimer }}</button>
@@ -239,9 +268,9 @@
           </div>
           <div class="bottom-bar-buttons hidden" id="replayVideoBtns">
             <button class="action-btn pri" id="btnBackVideo">{{ texts.btn_retour }}</button>
-            <button class="action-btn ghost" id="btnRetakeVideo">{{ texts.btn_recommencer }}</button>
+            <button class="action-btn retake" id="btnRetakeVideo">{{ texts.btn_recommencer }}</button>
             {% if tags_enabled %}
-            <button class="action-btn ghost" id="btnTagsVideo">{{ texts.btn_tags }}</button>
+            <button class="action-btn tags" id="btnTagsVideo">{{ texts.btn_tags }}</button>
             {% endif %}
           </div>
         </div>
