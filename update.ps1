@@ -3,17 +3,17 @@
 # par update.bat. Journalise le deroule dans logs\update.log (distinct de
 # logs\launcher.log et logs\app.log).
 #
-# IMPORTANT : l'etape de mise a jour reinitialise ce dossier a l'identique
-# d'origin/main (git reset --hard) -- toute modification locale d'un fichier
-# suivi par git (par ex. config.toml edite a la main pour changer un mot de
-# passe) sera perdue, SANS confirmation ni message d'erreur : c'est le but de
-# ce script (une mise a jour qui ne peut jamais s'arreter sur un conflit).
-# Pour personnaliser un mot de passe sans risquer de le perdre a la prochaine
-# mise a jour, preferez les variables d'environnement PICTOTEM_MAIN_PASSWORD
-# / PICTOTEM_GALLERY_PASSWORD / PICTOTEM_ADMIN_PASSWORD (voir auth.py),
-# jamais versionnees. Les donnees (data\), les logs et python-embed\/ffmpeg\
-# ne sont pas suivis par git (voir .gitignore) et ne sont donc jamais
-# affectes par cette reinitialisation.
+# IMPORTANT : la mise a jour reinitialise ce dossier a l'identique
+# d'origin/main (git reset --hard), SANS jamais s'arreter sur un message de
+# conflit ("local changes would be overwritten", etc.), quel que soit l'etat
+# local -- c'est le but de ce script (une mise a jour qui reussit toujours).
+# Seule exception : config\config.toml (mots de passe, camera, imprimante,
+# ports...) est sauvegarde avant la reinitialisation puis restaure juste
+# apres -- vos reglages locaux ne sont donc jamais perdus, meme si le
+# fichier a change entre-temps sur GitHub (dans ce cas, comparez a l'occasion
+# avec la version du depot pour recuperer d'eventuelles nouvelles options).
+# Les donnees (data\), les logs et python-embed\/ffmpeg\ ne sont pas suivis
+# par git (voir .gitignore) et ne sont de toute facon jamais affectes.
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
@@ -68,6 +68,18 @@ try {
     }
 
     # ── 2. Mise a jour via git ──────────────────────────────────────────────
+    # config\config.toml est mis de cote avant la reinitialisation puis
+    # restaure juste apres (copie de fichier, pas de git) : vos reglages
+    # locaux (mots de passe, camera, imprimante...) ne sont jamais ecrases,
+    # meme si le reset --hard remplace tout le reste sans condition.
+    $configPath = Join-Path $root "config\config.toml"
+    $configBackup = $null
+    if (Test-Path $configPath) {
+        $configBackup = Join-Path $env:TEMP ("pictotem_config_backup_{0}.toml" -f ([guid]::NewGuid()))
+        Copy-Item -Path $configPath -Destination $configBackup -Force
+        Write-Log "Configuration locale (config\config.toml) mise de cote avant la mise a jour."
+    }
+
     Write-Log "Recuperation des dernieres modifications (origin/main)..."
     & git -C $root checkout main --quiet 2>&1 | ForEach-Object { Write-Relayed $_ }
     & git -C $root fetch origin main --quiet 2>&1 | ForEach-Object { Write-Relayed $_ }
@@ -76,6 +88,12 @@ try {
     Write-Log "Reinitialisation sur origin/main (toute modification locale est ecrasee silencieusement)..."
     & git -C $root reset --hard origin/main --quiet 2>&1 | ForEach-Object { Write-Relayed $_ }
     if ($LASTEXITCODE -ne 0) { throw "git reset --hard a echoue (code $LASTEXITCODE)." }
+
+    if ($configBackup -and (Test-Path $configBackup)) {
+        Copy-Item -Path $configBackup -Destination $configPath -Force
+        Remove-Item -Path $configBackup -Force -ErrorAction SilentlyContinue
+        Write-Log "Configuration locale (config\config.toml) restauree."
+    }
 
     $newCommit = (& git -C $root rev-parse --short HEAD 2>$null).Trim()
     Write-Log "Mise a jour terminee (commit $newCommit)."
