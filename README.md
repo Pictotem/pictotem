@@ -113,6 +113,9 @@ cd app
 
 Flask sert toujours une vraie interface HTTP normale en arrière-plan (la fenêtre native n'est qu'un client parmi d'autres) : vous pouvez donc aussi ouvrir `http://127.0.0.1/` dans un navigateur classique en parallèle si vous préférez ses outils de développement.
 
+## Mise à jour
+`update.bat` (racine du dossier) automatise la mise à jour depuis GitHub : il arrête Pictotem s'il tourne, réinitialise le dossier sur la dernière version de la branche `main` (`git fetch` + `git reset --hard origin/main` — **toute modification locale d'un fichier suivi par git, par exemple `config.toml` édité à la main, est écrasée silencieusement, sans confirmation**), puis relance l'application via `run.bat`. Le détail de chaque étape est journalisé dans `logs\update.log`. Pour personnaliser un mot de passe sans risquer de le perdre à la prochaine mise à jour, utilisez plutôt les variables d'environnement `PICTOTEM_MAIN_PASSWORD` / `PICTOTEM_GALLERY_PASSWORD` / `PICTOTEM_ADMIN_PASSWORD` (jamais versionnées). Les dossiers non suivis par git (`data\`, `logs\`, `python-embed\`, `ffmpeg\` — voir `.gitignore`) ne sont jamais affectés.
+
 ## URLs
 - Borne locale : `http://127.0.0.1/` (ou `http://127.0.0.1:8080/` si le port 80 est indisponible)
 - Galerie distante : `http://<IP_DU_PC>/gallery`
