@@ -18,6 +18,7 @@ import socket
 import subprocess
 import threading
 import time
+import zipfile
 from contextlib import closing
 from datetime import datetime, timedelta
 
@@ -46,7 +47,8 @@ from config_loader import (ALLOWED_OVERLAY_EXT, ALLOWED_PREVIEW_EXT, BASE_DIR,
                             THUMBS_DIR, VIDEO_DIR)
 from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 export_emails_files, get_default_frame, get_frame_by_id_db,
-                get_setting, init_db, list_captures, list_emails, list_frames,
+                get_setting, init_db, list_captures, list_captures_in_range,
+                list_emails, list_frames,
                 record_capture, save_email, set_setting, update_email_by_id,
                 upsert_frame,
                 list_slideshow_images, add_slideshow_image, delete_slideshow_image_db,
@@ -1045,6 +1047,130 @@ def admin_capture_delete(capture_id):
                             sort=request.form.get('sort', 'desc'),
                             kind=request.form.get('kind', ''),
                             page=request.form.get('page', 1)))
+
+
+# ── Admin — archivage / nettoyage par plage de dates ─────────────────────────
+# Deux outils distincts partageant la même page (/admin/archive) : export ZIP
+# (médias + manifeste tags/votes/date) et suppression définitive, tous deux
+# bornés par un intervalle [date+heure début, date+heure fin] saisi via deux
+# <input type="datetime-local">.
+
+def _parse_archive_range(form) -> tuple[str, str, str]:
+    """Valide les champs range_start/range_end (format natif de
+    <input type=datetime-local> : 'YYYY-MM-DDTHH:MM') et les convertit en
+    bornes ISO 8601 comparables à captures.created_at ('YYYY-MM-DDTHH:MM:SS').
+    La minute de fin est incluse en entier (:00 -> :59) pour que la borne
+    saisie couvre bien toute cette minute. Retourne (start_iso, end_iso, err)
+    — err est une chaîne non vide en cas de problème, les deux ISO valent
+    alors ''."""
+    raw_start = (form.get('range_start') or '').strip()
+    raw_end   = (form.get('range_end') or '').strip()
+    if not raw_start or not raw_end:
+        return '', '', 'Sélectionnez une date de début et une date de fin.'
+    try:
+        start_dt = datetime.strptime(raw_start, '%Y-%m-%dT%H:%M')
+        end_dt   = datetime.strptime(raw_end, '%Y-%m-%dT%H:%M')
+    except ValueError:
+        return '', '', 'Format de date invalide.'
+    if start_dt > end_dt:
+        return '', '', 'La date de début doit précéder (ou égaler) la date de fin.'
+    return start_dt.strftime('%Y-%m-%dT%H:%M:00'), end_dt.strftime('%Y-%m-%dT%H:%M:59'), ''
+
+
+def _build_archive_zip(start_iso: str, end_iso: str):
+    """Construit une archive ZIP (fichiers média sous media/ + manifeste
+    manifest.csv/.json avec tags, score de votes, date/heure de capture)
+    pour toutes les captures officielles de [start_iso, end_iso]. Écrite
+    dans EXPORTS_DIR (nom horodaté, jamais nettoyée automatiquement — même
+    logique que emails.csv/.json). Retourne (zip_path, nb_captures)."""
+    captures = list_captures_in_range(start_iso, end_iso)
+    tags_map = get_tags_for_captures([c['id'] for c in captures])
+
+    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    zip_path = EXPORTS_DIR / f'archive-{stamp}.zip'
+
+    fieldnames = ['id', 'media_uid', 'kind', 'filename', 'created_at', 'vote_score', 'tags']
+    manifest_rows = []
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for cap in captures:
+            media_dir = PHOTO_DIR if cap['kind'] == 'photo' else VIDEO_DIR
+            src = media_dir / cap['filename']
+            if src.is_file():
+                zf.write(src, arcname=f"media/{cap['filename']}")
+            else:
+                logger.warning('Archive admin : fichier introuvable, ignoré : %s', src)
+            manifest_rows.append({
+                'id':          cap['id'],
+                'media_uid':   cap.get('media_uid') or '',
+                'kind':        cap['kind'],
+                'filename':    cap['filename'],
+                'created_at':  cap['created_at'],
+                'vote_score':  cap.get('vote_score', 0),
+                'tags':        ', '.join(tags_map.get(cap['id'], [])),
+            })
+
+        manifest_csv = io.StringIO()
+        writer = csv.DictWriter(manifest_csv, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(manifest_rows)
+        zf.writestr('manifest.csv', manifest_csv.getvalue())
+        zf.writestr('manifest.json', json.dumps(manifest_rows, ensure_ascii=False, indent=2))
+
+    return zip_path, len(manifest_rows)
+
+
+@app.route('/admin/archive')
+@require_admin_auth
+def admin_archive():
+    return render_template(
+        'admin_archive.html', config=CONFIG,
+        alert_success=request.args.get('ok'),
+        alert_error=request.args.get('err'),
+    )
+
+
+@app.route('/admin/archive/export', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_archive_export():
+    start_iso, end_iso, err = _parse_archive_range(request.form)
+    if err:
+        return redirect(url_for('admin_archive', err=err))
+    zip_path, count = _build_archive_zip(start_iso, end_iso)
+    if count == 0:
+        zip_path.unlink(missing_ok=True)
+        return redirect(url_for('admin_archive', err='Aucune capture dans cet intervalle.'))
+    logger.info('Archive admin : %d capture(s) exportée(s) (%s -> %s).', count, start_iso, end_iso)
+    return send_file(zip_path, mimetype='application/zip', as_attachment=True, download_name=zip_path.name)
+
+
+@app.route('/admin/archive/cleanup', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_archive_cleanup():
+    start_iso, end_iso, err = _parse_archive_range(request.form)
+    if err:
+        return redirect(url_for('admin_archive', err=err))
+    if not request.form.get('confirm'):
+        return redirect(url_for('admin_archive', err='Cochez la case de confirmation pour supprimer.'))
+
+    captures = list_captures_in_range(start_iso, end_iso)
+    count = 0
+    for cap in captures:
+        deleted = delete_capture(cap['id'])
+        if not deleted:
+            continue
+        media_dir = PHOTO_DIR if deleted['kind'] == 'photo' else VIDEO_DIR
+        try:
+            (media_dir / deleted['filename']).unlink(missing_ok=True)
+        except Exception:
+            logger.warning('Nettoyage admin : suppression fichier échouée : %s', deleted['filename'])
+        if deleted.get('thumb_filename'):
+            (THUMBS_DIR / deleted['thumb_filename']).unlink(missing_ok=True)
+        count += 1
+    logger.info('Nettoyage admin : %d capture(s) supprimée(s) (%s -> %s).', count, start_iso, end_iso)
+    return redirect(url_for('admin_archive', ok=f'{count} capture(s) supprimée(s) (tags et votes inclus).'))
 
 
 # ── Admin — cadres ────────────────────────────────────────────────────────────

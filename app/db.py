@@ -291,7 +291,10 @@ def list_captures(sort='desc', kind='', page=1, page_size=None, media_uid='', ta
 
 
 def delete_capture(capture_id):
-    """Supprime la capture de la DB et retourne le dict (pour que l'appelant supprime les fichiers)."""
+    """Supprime la capture de la DB (+ tags et votes associés) et retourne
+    le dict (pour que l'appelant supprime les fichiers). Le nettoyage des
+    votes (absent avant cette correction) évite de laisser des lignes
+    orphelines dans `votes` après suppression d'une capture officielle."""
     with closing(db_conn()) as conn:
         row = conn.execute('SELECT * FROM captures WHERE id = ?', (capture_id,)).fetchone()
         if not row:
@@ -299,8 +302,23 @@ def delete_capture(capture_id):
         cap = dict(row)
         conn.execute('DELETE FROM captures WHERE id = ?', (capture_id,))
         conn.execute('DELETE FROM capture_tags WHERE capture_id = ?', (capture_id,))
+        conn.execute('DELETE FROM votes WHERE source = ? AND capture_id = ?', ('official', capture_id))
         conn.commit()
     return cap
+
+
+def list_captures_in_range(start_iso, end_iso):
+    """Toutes les captures officielles dont created_at est dans
+    [start_iso, end_iso] (bornes incluses). Comparaison lexicographique sur
+    les chaînes ISO 8601 — valide car record_capture() écrit toujours au
+    format 'YYYY-MM-DDTHH:MM:SS' (timespec='seconds'). Utilisé par
+    l'archivage et le nettoyage par plage de dates (/admin/archive)."""
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            'SELECT * FROM captures WHERE created_at >= ? AND created_at <= ? ORDER BY created_at ASC',
+            (start_iso, end_iso)
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ── Frames ────────────────────────────────────────────────────────────────────
