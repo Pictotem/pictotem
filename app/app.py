@@ -1077,6 +1077,23 @@ def _parse_archive_range(form) -> tuple[str, str, str]:
     return start_dt.strftime('%Y-%m-%dT%H:%M:00'), end_dt.strftime('%Y-%m-%dT%H:%M:59'), ''
 
 
+# Bornes couvrant la totalité des dates plausibles pour created_at (format
+# ISO 8601, comparaison lexicographique) — utilisées quand la case "Tout"
+# est cochée, pour réutiliser telles quelles les fonctions écrites pour un
+# intervalle borné (_build_archive_zip, list_captures_in_range...).
+_ARCHIVE_RANGE_ALL = ('0000-01-01T00:00:00', '9999-12-31T23:59:59')
+
+
+def _resolve_archive_range(form) -> tuple[str, str, str]:
+    """Résout l'intervalle demandé par le formulaire : la totalité des
+    captures si la case 'Tout' (range_all) est cochée — auquel cas les
+    champs de dates sont ignorés, même vides —, sinon les deux champs
+    datetime-local (voir _parse_archive_range)."""
+    if form.get('range_all'):
+        return _ARCHIVE_RANGE_ALL[0], _ARCHIVE_RANGE_ALL[1], ''
+    return _parse_archive_range(form)
+
+
 def _build_archive_zip(start_iso: str, end_iso: str):
     """Construit une archive ZIP (fichiers média sous media/ + manifeste
     manifest.csv/.json avec tags, score de votes, date/heure de capture)
@@ -1134,7 +1151,7 @@ def admin_archive():
 @require_admin_auth
 @csrf_protect
 def admin_archive_export():
-    start_iso, end_iso, err = _parse_archive_range(request.form)
+    start_iso, end_iso, err = _resolve_archive_range(request.form)
     if err:
         return redirect(url_for('admin_archive', err=err))
     zip_path, count = _build_archive_zip(start_iso, end_iso)
@@ -1149,7 +1166,7 @@ def admin_archive_export():
 @require_admin_auth
 @csrf_protect
 def admin_archive_cleanup():
-    start_iso, end_iso, err = _parse_archive_range(request.form)
+    start_iso, end_iso, err = _resolve_archive_range(request.form)
     if err:
         return redirect(url_for('admin_archive', err=err))
     if not request.form.get('confirm'):

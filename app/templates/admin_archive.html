@@ -35,6 +35,10 @@
     .confirm-row { display: flex; align-items: center; gap: 10px; margin: 4px 0 18px; cursor: pointer; }
     .confirm-row input { width: 18px; height: 18px; accent-color: #f97b7b; cursor: pointer; }
     .confirm-row span { font-size: 13px; color: rgba(255,255,255,.75); }
+    .all-row { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; cursor: pointer; }
+    .all-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+    .all-row span { font-size: 13px; font-weight: 700; color: rgba(255,255,255,.85); }
+    .text-fields.range-disabled { opacity: .35; pointer-events: none; }
   </style>
 </head>
 <body class="gallery-body">
@@ -43,7 +47,7 @@
   <div class="admin-header">
     <div>
       <h1>Archive &amp; nettoyage</h1>
-      <p>Export et suppression des captures par plage de dates (bornes incluses).</p>
+      <p>Export et suppression des captures par plage de dates (bornes incluses), ou en totalité via l'option « Tout ».</p>
     </div>
     <nav class="admin-nav">
       <a class="action-btn" href="{{ url_for('admin_home') }}">← Admin</a>
@@ -65,14 +69,18 @@
     </p>
     <form method="post" action="{{ url_for('admin_archive_export') }}">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <div class="text-fields">
+      <label class="all-row">
+        <input type="checkbox" name="range_all" value="1" class="archive-all-toggle" data-target="export">
+        <span>Tout (ignore l'intervalle, archive toutes les captures)</span>
+      </label>
+      <div class="text-fields" id="export_range_fields">
         <div class="text-field">
           <label class="field-label" for="export_range_start">Début</label>
-          <input type="datetime-local" id="export_range_start" name="range_start" required>
+          <input type="datetime-local" id="export_range_start" name="range_start">
         </div>
         <div class="text-field">
           <label class="field-label" for="export_range_end">Fin</label>
-          <input type="datetime-local" id="export_range_end" name="range_end" required>
+          <input type="datetime-local" id="export_range_end" name="range_end">
         </div>
       </div>
       <button type="submit" class="action-btn primary">Générer et télécharger l'archive</button>
@@ -87,17 +95,20 @@
       pensez à archiver l'intervalle ci-dessus avant de nettoyer si vous souhaitez conserver
       une copie.
     </p>
-    <form method="post" action="{{ url_for('admin_archive_cleanup') }}"
-          onsubmit="return confirm('Supprimer définitivement toutes les captures (photos, vidéos, tags, votes) de cet intervalle ? Cette action est irréversible.');">
+    <form method="post" action="{{ url_for('admin_archive_cleanup') }}" id="cleanupForm">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <div class="text-fields">
+      <label class="all-row">
+        <input type="checkbox" name="range_all" value="1" class="archive-all-toggle" data-target="cleanup" id="cleanupRangeAll">
+        <span>Tout (ignore l'intervalle, supprime toutes les captures)</span>
+      </label>
+      <div class="text-fields" id="cleanup_range_fields">
         <div class="text-field">
           <label class="field-label" for="cleanup_range_start">Début</label>
-          <input type="datetime-local" id="cleanup_range_start" name="range_start" required>
+          <input type="datetime-local" id="cleanup_range_start" name="range_start">
         </div>
         <div class="text-field">
           <label class="field-label" for="cleanup_range_end">Fin</label>
-          <input type="datetime-local" id="cleanup_range_end" name="range_end" required>
+          <input type="datetime-local" id="cleanup_range_end" name="range_end">
         </div>
       </div>
       <label class="confirm-row">
@@ -105,10 +116,31 @@
         <span>Je confirme vouloir supprimer définitivement ces captures, leurs tags et leurs votes.</span>
       </label>
       <button type="submit" class="action-btn" style="border-color:rgba(200,50,50,.5);color:#f97b7b">
-        Supprimer les captures de cet intervalle
+        Supprimer les captures
       </button>
     </form>
   </div>
+
+  <script>
+    // Case "Tout" (les deux formulaires) : grise/désactive visuellement les
+    // champs de dates (ignorés côté serveur dans ce cas, voir
+    // _resolve_archive_range() dans app.py) sans bloquer la soumission.
+    document.querySelectorAll('.archive-all-toggle').forEach((toggle) => {
+      const fields = document.getElementById(toggle.dataset.target + '_range_fields');
+      const sync = () => fields?.classList.toggle('range-disabled', toggle.checked);
+      toggle.addEventListener('change', sync);
+      sync();
+    });
+
+    // Message de confirmation adapté selon la case "Tout" du nettoyage.
+    document.getElementById('cleanupForm')?.addEventListener('submit', (e) => {
+      const all = document.getElementById('cleanupRangeAll')?.checked;
+      const msg = all
+        ? 'Supprimer DÉFINITIVEMENT TOUTES les captures (photos, vidéos, tags, votes), sans exception ? Cette action est irréversible.'
+        : 'Supprimer définitivement toutes les captures (photos, vidéos, tags, votes) de cet intervalle ? Cette action est irréversible.';
+      if (!confirm(msg)) e.preventDefault();
+    });
+  </script>
 
 </div>
 </body>
