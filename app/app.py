@@ -139,6 +139,16 @@ def get_top_bar_settings() -> dict:
     }
 
 
+def _about_settings() -> dict:
+    """Cartouche 'version' en haut à droite du kiosque : libellé affiché +
+    texte libre affiché dans la fenêtre au clic, réglables depuis
+    /admin/texts — voir #versionBadge/#versionModal dans index.html."""
+    return {
+        'version_label': get_setting('about.version_label', '') or 'v1.0',
+        'info_text':     get_setting('about.info_text', ''),
+    }
+
+
 def get_bottom_bar_sizes() -> dict:
     """Tailles (px) réglables depuis /admin/texts pour le texte de droite et le
     QR code de la barre du bas — surchargent right_message_font_size_px /
@@ -339,6 +349,7 @@ def index():
         photo_strip=CONFIG.get('capture', {}).get('photo_strip', {}),
         tags_enabled=get_setting('tags.enabled', '0') == '1',
         buttons=_buttons_settings(),
+        about=_about_settings(),
     )
 
 
@@ -1109,6 +1120,11 @@ def admin_texts():
         if re.match(r'^#[0-9a-fA-F]{6}$', top_bar_color):
             set_setting('ui.top_bar_color', top_bar_color)
 
+        version_label = (request.form.get('about_version_label') or '').strip()
+        set_setting('about.version_label', version_label)
+        info_text = (request.form.get('about_info_text') or '').strip()
+        set_setting('about.info_text', info_text)
+
         return redirect(url_for('admin_texts', ok='Paramètres mis à jour.'))
     return render_template('admin_texts.html', config=CONFIG,
                            texts=get_ui_texts(),
@@ -1122,6 +1138,7 @@ def admin_texts():
                            hide_print_button=get_setting('ui.hide_print_button', '0') == '1',
                            bottom_bar_sizes=get_bottom_bar_sizes(),
                            top_bar=get_top_bar_settings(),
+                           about=_about_settings(),
                            alert_success=request.args.get('ok'),
                            alert_error=request.args.get('err'))
 

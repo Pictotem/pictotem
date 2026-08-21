@@ -40,6 +40,9 @@ const bottomLeftMessage  = document.getElementById('bottomLeftMessage');
 const bottomRightMessage = document.getElementById('bottomRightMessage');
 const idleTimerEl    = document.getElementById('idleTimerEl');
 const idleTimerBadge = document.getElementById('idleTimerBadge');
+const versionBadge      = document.getElementById('versionBadge');
+const versionModal      = document.getElementById('versionModal');
+const versionModalClose = document.getElementById('versionModalClose');
 const topCountdownBar     = document.getElementById('topCountdownBar');
 const topCountdownBarFill = document.getElementById('topCountdownBarFill');
 
@@ -148,6 +151,7 @@ function startIdleTimer() {
   idleRemaining = idleTotal;
   _idleUpdateUi();
   setVisible(idleTimerEl, true);
+  setVisible(versionBadge, false);
   startTopBarCountdown(idleTotal * 1000);
   idleTimer = setInterval(() => {
     idleRemaining -= 1;
@@ -163,6 +167,7 @@ function stopIdleTimer() {
   clearInterval(idleTimer);
   idleTimer = null;
   setVisible(idleTimerEl, false);
+  setVisible(versionBadge, true);
   stopTopBarCountdown();
 }
 
@@ -1088,6 +1093,21 @@ kioskUnlockCancel?.addEventListener('click', _closeUnlockModal);
 kioskUnlockInput?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); _submitUnlock(); }
   if (e.key === 'Escape') { e.preventDefault(); _closeUnlockModal(); }
+});
+
+// — Fenêtre d'informations du cartouche version (#versionBadge) —
+// Contenu (libellé + texte) rendu côté serveur depuis /admin/texts, cette
+// modale ne fait qu'afficher/masquer le bloc déjà présent dans le DOM.
+function _openVersionModal() {
+  versionModal?.classList.remove('hidden');
+}
+function _closeVersionModal() {
+  versionModal?.classList.add('hidden');
+}
+versionBadge?.addEventListener('click', _openVersionModal);
+versionModalClose?.addEventListener('click', _closeVersionModal);
+versionModal?.addEventListener('click', (e) => {
+  if (e.target === versionModal) _closeVersionModal();
 });
 
 (function setupKioskUnlock() {

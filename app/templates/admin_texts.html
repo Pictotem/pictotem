@@ -260,6 +260,24 @@
       </div>
     </div>
 
+    <div class="text-section">
+      <h2>Cartouche version</h2>
+      <div class="text-fields">
+        <div class="text-field">
+          <label class="field-label" for="about_version_label">Libellé affiché (haut à droite)</label>
+          <input type="text" id="about_version_label" name="about_version_label"
+                 value="{{ about.version_label }}" placeholder="v1.0">
+          <p class="field-default">Défaut : v1.0. Disparaît quand le badge « Retour dans Xs » s'affiche.</p>
+        </div>
+        <div class="text-field" style="grid-column:1/-1">
+          <label class="field-label" for="about_info_text">Informations affichées au clic</label>
+          <textarea id="about_info_text" name="about_info_text" rows="6"
+                    placeholder="Ex. version de l'appli, date de mise à jour, contact support...">{{ about.info_text }}</textarea>
+          <p class="field-default">Texte libre, sauts de ligne conservés.</p>
+        </div>
+      </div>
+    </div>
+
     <button type="submit" class="action-btn primary" style="margin-top:8px">Enregistrer tous les textes</button>
     <p class="reset-hint" style="margin-top:10px;font-size:12px;color:rgba(255,255,255,.3);">
       Vider un champ et enregistrer restaure la valeur par défaut.

@@ -97,6 +97,25 @@
     .kiosk-unlock-msg { min-height: 16px; font-size: 12px; color: #f97b7b; margin-top: 9px; }
     .kiosk-unlock-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; }
 
+    /* Fenêtre d'informations du cartouche version (#versionBadge) — même
+       gabarit que la modale de déverrouillage ci-dessus. */
+    .version-modal {
+      position: fixed; inset: 0; z-index: 20000;
+      background: rgba(0,0,0,.75);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .version-modal.hidden { display: none; }
+    .version-modal-box {
+      background: #14161a; border: 1px solid rgba(255,255,255,.14); border-radius: 16px;
+      padding: 26px; width: 360px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    }
+    .version-modal-title { font-weight: 700; font-size: 16px; margin-bottom: 14px; color: #fff; }
+    .version-modal-text {
+      font-size: 14px; line-height: 1.5; color: rgba(255,255,255,.75);
+      white-space: pre-wrap; max-height: 45vh; overflow-y: auto;
+    }
+    .version-modal-actions { display: flex; gap: 10px; margin-top: 18px; justify-content: flex-end; }
+
     /* Écran de veille : diaporama plein écran affiché après N minutes sans
        interaction sur l'accueil (voir setupScreensaver() dans app.js). Rendu
        en DOM direct (pas d'iframe) pour que les clics/touches à l'intérieur
@@ -192,6 +211,18 @@
     </div>
   </div>
 
+  <!-- Fenêtre d'informations ouverte au clic sur le cartouche version
+       (#versionBadge, haut à droite) — voir static/app.js. -->
+  <div id="versionModal" class="version-modal hidden">
+    <div class="version-modal-box">
+      <div class="version-modal-title">{{ about.version_label }}</div>
+      <div class="version-modal-text">{{ about.info_text or "Aucune information renseignée." }}</div>
+      <div class="version-modal-actions">
+        <button class="action-btn ter" id="versionModalClose" type="button">Fermer</button>
+      </div>
+    </div>
+  </div>
+
   <div class="preview-shell" id="previewShell">
     <img class="preview-stream" src="{{ url_for('stream_mjpg') }}" alt="Prévisualisation" />
     <div class="overlay">
@@ -207,6 +238,7 @@
 
       <div class="top-bar">
         <div class="brand">{{ texts.app_title }}</div>
+        <div class="version-badge" id="versionBadge">{{ about.version_label }}</div>
       </div>
 
       <div class="look-here-banner" id="lookHereBanner">

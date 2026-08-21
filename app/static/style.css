@@ -229,6 +229,27 @@ button, input, a { font: inherit; }
   font-weight: 700;
 }
 
+/* Cartouche version, haut à droite — clic = fenêtre d'infos (voir #versionModal
+   dans index.html et app.js). Masqué pendant le badge "Retour dans Xs" (même
+   emplacement visuel), voir startIdleTimer()/stopIdleTimer() dans app.js. */
+.version-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,.65);
+  background: rgba(0,0,0,.35);
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.14);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  user-select: none;
+  pointer-events: auto;
+}
+.version-badge:hover {
+  color: rgba(255,255,255,.9);
+  border-color: rgba(255,255,255,.3);
+}
+
 @keyframes arrowBlink {
   0%, 100% { opacity: 1; transform: translateY(0); filter: drop-shadow(0 0 10px #fff) drop-shadow(0 0 24px #fff); }
   50%       { opacity: 0; transform: translateY(-10px); filter: none; }
