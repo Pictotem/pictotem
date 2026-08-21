@@ -1040,17 +1040,30 @@ tagsModalOverlay?.addEventListener('click', (e) => {
   if (e.target === tagsModalOverlay) closeTagsModal();
 });
 
-// — Plein écran (fenêtre native) : sortie/entrée protégée par mot de passe —
-// Déclencheurs : 5 appuis rapides dans le coin haut-gauche (kioskUnlockZone),
-// ou Ctrl+Maj+K. Sans effet hors de la fenêtre native (pywebview absent).
-// Modale HTML intégrée à la page plutôt que prompt()/alert() natifs : ces
-// derniers peuvent rester masqués derrière une fenêtre plein écran
-// "always on top", donnant l'impression que rien ne se passe.
-const kioskUnlockModal   = document.getElementById('kioskUnlockModal');
-const kioskUnlockInput   = document.getElementById('kioskUnlockInput');
-const kioskUnlockMsg     = document.getElementById('kioskUnlockMsg');
-const kioskUnlockConfirm = document.getElementById('kioskUnlockConfirm');
-const kioskUnlockCancel  = document.getElementById('kioskUnlockCancel');
+// — Plein écran (fenêtre native) : sortie/entrée protégée par un code PIN —
+// Déclencheurs : N appuis rapides dans le coin haut-gauche (kioskUnlockZone,
+// cfg.kioskUnlockTaps réglable depuis /admin/system), ou Ctrl+Maj+K. Sans
+// effet hors de la fenêtre native (pywebview absent). Modale HTML intégrée
+// à la page plutôt que prompt()/alert() natifs : ces derniers peuvent
+// rester masqués derrière une fenêtre plein écran "always on top", donnant
+// l'impression que rien ne se passe. Le PIN attendu n'est jamais transmis
+// au client (voir _kiosk_unlock_settings() côté serveur) : la vérification
+// se fait exclusivement dans _KioskAPI.toggle_fullscreen (app.py), appelée
+// via le pont pywebview.
+const kioskUnlockModal      = document.getElementById('kioskUnlockModal');
+const kioskUnlockPinDisplay = document.getElementById('kioskUnlockPinDisplay');
+const kioskUnlockMsg        = document.getElementById('kioskUnlockMsg');
+const kioskUnlockConfirm    = document.getElementById('kioskUnlockConfirm');
+const kioskUnlockErase      = document.getElementById('kioskUnlockErase');
+const kioskUnlockCancel     = document.getElementById('kioskUnlockCancel');
+const kioskUnlockKeys       = document.querySelectorAll('.kiosk-unlock-key[data-digit]');
+const KIOSK_UNLOCK_MAX_LEN  = 8;
+
+let kioskUnlockPin = '';
+
+function _renderUnlockPin() {
+  if (kioskUnlockPinDisplay) kioskUnlockPinDisplay.innerHTML = kioskUnlockPin ? '&#9679;'.repeat(kioskUnlockPin.length) : '&nbsp;';
+}
 
 function _openUnlockModal() {
   if (!window.pywebview || !window.pywebview.api) {
@@ -1058,41 +1071,71 @@ function _openUnlockModal() {
     return;
   }
   if (!kioskUnlockModal) return;
-  if (kioskUnlockMsg) kioskUnlockMsg.textContent = '';
-  if (kioskUnlockInput) kioskUnlockInput.value = '';
+  kioskUnlockPin = '';
+  _renderUnlockPin();
+  if (kioskUnlockMsg) kioskUnlockMsg.innerHTML = '&nbsp;';
   kioskUnlockModal.classList.remove('hidden');
-  setTimeout(() => kioskUnlockInput?.focus(), 50);
 }
 
 function _closeUnlockModal() {
   kioskUnlockModal?.classList.add('hidden');
+  kioskUnlockPin = '';
 }
 
 function _submitUnlock() {
-  const pwd = kioskUnlockInput ? kioskUnlockInput.value : '';
-  if (kioskUnlockConfirm) kioskUnlockConfirm.disabled = true;
+  if (!kioskUnlockPin) return;
+  const pin = kioskUnlockPin;
   if (kioskUnlockMsg) kioskUnlockMsg.textContent = 'Vérification…';
   console.log('[kiosk-unlock] appel toggle_fullscreen...');
-  window.pywebview.api.toggle_fullscreen(pwd).then(res => {
+  window.pywebview.api.toggle_fullscreen(pin).then(res => {
     console.log('[kiosk-unlock] réponse:', res);
-    if (kioskUnlockConfirm) kioskUnlockConfirm.disabled = false;
     if (res && res.ok) {
       _closeUnlockModal();
-    } else if (kioskUnlockMsg) {
-      kioskUnlockMsg.textContent = (res && res.error) || 'Erreur.';
+    } else {
+      kioskUnlockPin = '';
+      _renderUnlockPin();
+      if (kioskUnlockMsg) kioskUnlockMsg.textContent = (res && res.error) || 'Erreur.';
     }
   }).catch(err => {
     console.error('[kiosk-unlock] erreur d\'appel:', err);
-    if (kioskUnlockConfirm) kioskUnlockConfirm.disabled = false;
+    kioskUnlockPin = '';
+    _renderUnlockPin();
     if (kioskUnlockMsg) kioskUnlockMsg.textContent = 'Erreur de communication.';
   });
 }
 
+kioskUnlockKeys.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (kioskUnlockPin.length >= KIOSK_UNLOCK_MAX_LEN) return;
+    kioskUnlockPin += btn.dataset.digit;
+    _renderUnlockPin();
+    if (kioskUnlockMsg) kioskUnlockMsg.innerHTML = '&nbsp;';
+  });
+});
+kioskUnlockErase?.addEventListener('click', () => {
+  kioskUnlockPin = kioskUnlockPin.slice(0, -1);
+  _renderUnlockPin();
+});
 kioskUnlockConfirm?.addEventListener('click', _submitUnlock);
 kioskUnlockCancel?.addEventListener('click', _closeUnlockModal);
-kioskUnlockInput?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); _submitUnlock(); }
-  if (e.key === 'Escape') { e.preventDefault(); _closeUnlockModal(); }
+// Support clavier physique (pratique pour tester hors écran tactile) —
+// actif uniquement pendant que la modale est ouverte.
+document.addEventListener('keydown', (e) => {
+  if (!kioskUnlockModal || kioskUnlockModal.classList.contains('hidden')) return;
+  if (e.key >= '0' && e.key <= '9') {
+    e.preventDefault();
+    if (kioskUnlockPin.length < KIOSK_UNLOCK_MAX_LEN) { kioskUnlockPin += e.key; _renderUnlockPin(); }
+  } else if (e.key === 'Backspace') {
+    e.preventDefault();
+    kioskUnlockPin = kioskUnlockPin.slice(0, -1);
+    _renderUnlockPin();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    _submitUnlock();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    _closeUnlockModal();
+  }
 });
 
 // — Fenêtre d'informations du cartouche version (#versionBadge) —
@@ -1112,7 +1155,7 @@ versionModal?.addEventListener('click', (e) => {
 
 (function setupKioskUnlock() {
   const zone = document.getElementById('kioskUnlockZone');
-  const TAP_COUNT = 5;
+  const TAP_COUNT = cfg.kioskUnlockTaps || 5;
   const TAP_WINDOW_MS = 3000;
   let taps = [];
   zone?.addEventListener('click', () => {

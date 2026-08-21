@@ -88,14 +88,26 @@
       background: #14161a; border: 1px solid rgba(255,255,255,.14); border-radius: 16px;
       padding: 26px; width: 320px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,.5);
     }
-    .kiosk-unlock-title { font-weight: 700; font-size: 16px; margin-bottom: 14px; color: #fff; }
-    .kiosk-unlock-input {
-      width: 100%; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18);
-      color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 15px; box-sizing: border-box;
+    .kiosk-unlock-title { font-weight: 700; font-size: 16px; margin-bottom: 14px; color: #fff; text-align: center; }
+    .kiosk-unlock-pin-display {
+      text-align: center; font-size: 30px; font-weight: 700; letter-spacing: 12px;
+      color: #fff; min-height: 36px; line-height: 36px; padding-left: 12px; /* recentre malgré letter-spacing */
     }
-    .kiosk-unlock-input:focus { outline: 2px solid var(--accent, #f2c94c); border-color: transparent; }
-    .kiosk-unlock-msg { min-height: 16px; font-size: 12px; color: #f97b7b; margin-top: 9px; }
-    .kiosk-unlock-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; }
+    .kiosk-unlock-msg { min-height: 16px; font-size: 12px; color: #f97b7b; margin-top: 6px; text-align: center; }
+    .kiosk-unlock-keypad {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px;
+    }
+    .kiosk-unlock-key {
+      background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.18);
+      color: #fff; border-radius: 10px; padding: 16px 0; font-size: 20px; font-weight: 700;
+      cursor: pointer; user-select: none;
+    }
+    .kiosk-unlock-key:active { background: rgba(255,255,255,.16); }
+    .kiosk-unlock-key-alt { background: rgba(255,255,255,.03); font-size: 18px; }
+    .kiosk-unlock-key-ok {
+      background: rgba(13,139,143,.35); border-color: rgba(13,139,143,.6);
+    }
+    .kiosk-unlock-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: center; }
 
     /* Fenêtre d'informations du cartouche version (#versionBadge) — même
        gabarit que la modale de déverrouillage ci-dessus. */
@@ -200,13 +212,25 @@
 
   <div id="kioskUnlockModal" class="kiosk-unlock-modal hidden">
     <div class="kiosk-unlock-box">
-      <div class="kiosk-unlock-title">Accès administrateur</div>
-      <input type="password" id="kioskUnlockInput" class="kiosk-unlock-input"
-             placeholder="Mot de passe" autocomplete="off">
-      <div class="kiosk-unlock-msg" id="kioskUnlockMsg"></div>
+      <div class="kiosk-unlock-title">Code de déverrouillage</div>
+      <div class="kiosk-unlock-pin-display" id="kioskUnlockPinDisplay">&nbsp;</div>
+      <div class="kiosk-unlock-msg" id="kioskUnlockMsg">&nbsp;</div>
+      <div class="kiosk-unlock-keypad">
+        <button type="button" class="kiosk-unlock-key" data-digit="1">1</button>
+        <button type="button" class="kiosk-unlock-key" data-digit="2">2</button>
+        <button type="button" class="kiosk-unlock-key" data-digit="3">3</button>
+        <button type="button" class="kiosk-unlock-key" data-digit="4">4</button>
+        <button type="button" class="kiosk-unlock-key" data-digit="5">5</button>
+        <button type="button" class="kiosk-unlock-key" data-digit="6">6</button>
+        <button type="button" class="kiosk-unlock-key" data-digit="7">7</button>
+        <button type="button" class="kiosk-unlock-key" data-digit="8">8</button>
+        <button type="button" class="kiosk-unlock-key" data-digit="9">9</button>
+        <button type="button" class="kiosk-unlock-key kiosk-unlock-key-alt" id="kioskUnlockErase" aria-label="Effacer">&#9003;</button>
+        <button type="button" class="kiosk-unlock-key" data-digit="0">0</button>
+        <button type="button" class="kiosk-unlock-key kiosk-unlock-key-ok" id="kioskUnlockConfirm" aria-label="Valider">&#10003;</button>
+      </div>
       <div class="kiosk-unlock-actions">
         <button class="action-btn ter" id="kioskUnlockCancel" type="button">Annuler</button>
-        <button class="action-btn pri" id="kioskUnlockConfirm" type="button">Valider</button>
       </div>
     </div>
   </div>
@@ -405,6 +429,7 @@
       photoStripShots:           {{ photo_strip.get('shots', 3) }},
       photoStripIntervalSec:     {{ photo_strip.get('interval_sec', 1.2) }},
       tagsEnabled:               {{ 'true' if tags_enabled else 'false' }},
+      kioskUnlockTaps:           {{ kiosk_unlock_taps }},
     };
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>

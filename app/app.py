@@ -149,6 +149,21 @@ def _about_settings() -> dict:
     }
 
 
+def _kiosk_unlock_settings() -> dict:
+    """Code PIN + nombre d'appuis déclencheurs pour la sortie de plein écran
+    depuis l'interface principale (zone tactile haut-gauche), réglables
+    depuis /admin/system — voir _KioskAPI.toggle_fullscreen ci-dessous et
+    #kioskUnlockModal / setupKioskUnlock() dans index.html/app.js. Le PIN
+    n'est jamais transmis au client : seul le nombre d'appuis (`taps`) est
+    injecté dans window.PICTOTEM, la vérification du code se fait ici,
+    côté serveur, via le pont pywebview."""
+    raw_taps = get_setting('kiosk.unlock_taps', '')
+    return {
+        'pin':  get_setting('kiosk.unlock_pin', '') or '1234',
+        'taps': int(raw_taps) if raw_taps.isdigit() and 2 <= int(raw_taps) <= 15 else 5,
+    }
+
+
 def get_bottom_bar_sizes() -> dict:
     """Tailles (px) réglables depuis /admin/texts pour le texte de droite et le
     QR code de la barre du bas — surchargent right_message_font_size_px /
@@ -350,6 +365,7 @@ def index():
         tags_enabled=get_setting('tags.enabled', '0') == '1',
         buttons=_buttons_settings(),
         about=_about_settings(),
+        kiosk_unlock_taps=_kiosk_unlock_settings()['taps'],
     )
 
 
@@ -1187,6 +1203,13 @@ def admin_system():
         raw_screen = (request.form.get('ui_kiosk_screen') or '0').strip()
         set_setting('ui.kiosk_screen', raw_screen if raw_screen.isdigit() else '0')
 
+        # Déverrouillage plein écran (interface principale) — champ vidé =
+        # retour à la valeur par défaut (voir _kiosk_unlock_settings()).
+        raw_pin = re.sub(r'\D', '', request.form.get('kiosk_unlock_pin') or '')[:8]
+        set_setting('kiosk.unlock_pin', raw_pin)
+        raw_taps = (request.form.get('kiosk_unlock_taps') or '').strip()
+        set_setting('kiosk.unlock_taps', raw_taps if raw_taps.isdigit() and 2 <= int(raw_taps) <= 15 else '')
+
         reset_camera()
         return redirect(url_for('admin_system', ok='Réglages enregistrés. Caméra relancée avec les nouvelles valeurs.'))
 
@@ -1211,6 +1234,7 @@ def admin_system():
     return render_template(
         'admin_system.html', config=CONFIG,
         camera=camera_values, screen=screen_values,
+        kiosk_unlock=_kiosk_unlock_settings(),
         autostart_enabled=is_autostart_enabled(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
@@ -2503,9 +2527,10 @@ def _port_is_free(host: str, port: int) -> bool:
 
 class _KioskAPI:
     """Exposée en JS via window.pywebview.api (voir static/app.js). Permet à
-    l'interface principale de sortir/rentrer du plein écran, protégé par le
-    mot de passe admin — pour laisser le personnel accéder ponctuellement à
-    Windows sans fermer l'application.
+    l'interface principale de sortir/rentrer du plein écran, protégé par un
+    code PIN dédié (réglable depuis /admin/system, indépendant du mot de
+    passe admin) saisi via un clavier numérique virtuel — pour laisser le
+    personnel accéder ponctuellement à Windows sans fermer l'application.
 
     IMPORTANT : ne jamais stocker l'objet Window pywebview sur un attribut
     public (sans underscore) de cette classe. pywebview parcourt récursivement
@@ -2532,10 +2557,11 @@ class _KioskAPI:
             return {'ok': False, 'error': 'Erreur interne lors du basculement (voir logs\\app.log).'}
         return {'ok': True}
 
-    def toggle_fullscreen(self, password: str):
-        if not check_admin_password(password or ''):
-            logger.warning('Bascule plein écran refusée (mot de passe incorrect).')
-            return {'ok': False, 'error': 'Mot de passe incorrect.'}
+    def toggle_fullscreen(self, pin: str):
+        expected_pin = get_setting('kiosk.unlock_pin', '') or '1234'
+        if not pin or str(pin) != expected_pin:
+            logger.warning('Bascule plein écran refusée (code PIN incorrect).')
+            return {'ok': False, 'error': 'Code incorrect.'}
         return self._do_toggle('interface principale')
 
 
