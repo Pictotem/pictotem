@@ -63,9 +63,10 @@
     <p class="text-section-desc">
       Génère une archive ZIP téléchargeable contenant les photos/vidéos officielles capturées
       dans l'intervalle choisi, ainsi qu'un manifeste (<code>manifest.csv</code> et
-      <code>manifest.json</code>) listant pour chaque média : identifiant, ID unique, type,
-      nom de fichier, date et heure de capture, score de votes et tags appliqués.
-      N'affecte pas les captures elles-mêmes (lecture seule).
+      <code>manifest.json</code>) listant pour chaque média : identifiant, source (officiel ou
+      invité), statut, ID unique, type, nom de fichier, date et heure, score de votes et tags
+      appliqués (invités uniquement pour la source et le statut ; les tags ne concernent que les
+      captures officielles). N'affecte pas les médias eux-mêmes (lecture seule).
     </p>
     <form method="post" action="{{ url_for('admin_archive_export') }}">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -83,6 +84,10 @@
           <input type="datetime-local" id="export_range_end" name="range_end">
         </div>
       </div>
+      <label class="all-row">
+        <input type="checkbox" name="include_guests" value="1" checked>
+        <span>Contient les médias invités (uploads via le lien de partage)</span>
+      </label>
       <button type="submit" class="action-btn primary">Générer et télécharger l'archive</button>
     </form>
   </div>
@@ -111,12 +116,16 @@
           <input type="datetime-local" id="cleanup_range_end" name="range_end">
         </div>
       </div>
+      <label class="all-row">
+        <input type="checkbox" name="include_guests" value="1" checked id="cleanupIncludeGuests">
+        <span>Contient les médias invités (uploads via le lien de partage)</span>
+      </label>
       <label class="confirm-row">
         <input type="checkbox" name="confirm" value="1" required>
-        <span>Je confirme vouloir supprimer définitivement ces captures, leurs tags et leurs votes.</span>
+        <span>Je confirme vouloir supprimer définitivement ces médias, leurs tags et leurs votes.</span>
       </label>
       <button type="submit" class="action-btn" style="border-color:rgba(200,50,50,.5);color:#f97b7b">
-        Supprimer les captures
+        Supprimer les médias
       </button>
     </form>
   </div>
@@ -132,12 +141,13 @@
       sync();
     });
 
-    // Message de confirmation adapté selon la case "Tout" du nettoyage.
+    // Message de confirmation adapté selon les cases "Tout" et "médias invités".
     document.getElementById('cleanupForm')?.addEventListener('submit', (e) => {
       const all = document.getElementById('cleanupRangeAll')?.checked;
-      const msg = all
-        ? 'Supprimer DÉFINITIVEMENT TOUTES les captures (photos, vidéos, tags, votes), sans exception ? Cette action est irréversible.'
-        : 'Supprimer définitivement toutes les captures (photos, vidéos, tags, votes) de cet intervalle ? Cette action est irréversible.';
+      const guests = document.getElementById('cleanupIncludeGuests')?.checked;
+      const scope = all ? 'TOUTES les captures, sans exception' : 'les captures de cet intervalle';
+      const withGuests = guests ? ' ainsi que les médias invités correspondants' : ' (médias invités exclus)';
+      const msg = `Supprimer définitivement ${scope}${withGuests}, avec tags et votes ? Cette action est irréversible.`;
       if (!confirm(msg)) e.preventDefault();
     });
   </script>

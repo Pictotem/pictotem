@@ -681,15 +681,33 @@ def list_gallery_combined(sort='desc', kind='', source='', page=1, page_size=Non
 
 
 def delete_guest_upload_db(upload_id):
-    """Supprime de la DB et retourne le dict (l'appelant supprime fichier + thumb)."""
+    """Supprime de la DB (+ votes associés) et retourne le dict (l'appelant
+    supprime fichier + thumb). Le nettoyage des votes (absent avant cette
+    correction, même défaut que l'ancien delete_capture()) évite de
+    laisser des lignes orphelines dans `votes` (source='guest')."""
     with closing(db_conn()) as conn:
         row = conn.execute('SELECT * FROM guest_uploads WHERE id = ?', (upload_id,)).fetchone()
         if not row:
             return None
         item = dict(row)
         conn.execute('DELETE FROM guest_uploads WHERE id = ?', (upload_id,))
+        conn.execute('DELETE FROM votes WHERE source = ? AND capture_id = ?', ('guest', upload_id))
         conn.commit()
     return item
+
+
+def list_guest_uploads_in_range(start_iso, end_iso):
+    """Tous les uploads invités (quel que soit leur statut — pending/
+    approved/rejected) dont created_at est dans [start_iso, end_iso]
+    (bornes incluses). Même logique que list_captures_in_range(), utilisée
+    par l'archivage et le nettoyage par plage de dates quand l'option
+    « médias invités » est cochée (/admin/archive)."""
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            'SELECT * FROM guest_uploads WHERE created_at >= ? AND created_at <= ? ORDER BY created_at ASC',
+            (start_iso, end_iso)
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def export_emails_files():

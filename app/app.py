@@ -56,6 +56,7 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 cast_vote, admin_adjust_vote, get_voter_votes,
                 add_guest_upload, list_guest_uploads, list_approved_guest_uploads,
                 count_guest_uploads_by_token, set_guest_upload_status, delete_guest_upload_db,
+                list_guest_uploads_in_range,
                 list_gallery_combined,
                 list_tags, get_tag_by_id, create_tag, update_tag, delete_tag_db,
                 list_capture_tags, count_capture_tags, add_capture_tag, delete_capture_tag,
@@ -1094,20 +1095,26 @@ def _resolve_archive_range(form) -> tuple[str, str, str]:
     return _parse_archive_range(form)
 
 
-def _build_archive_zip(start_iso: str, end_iso: str):
-    """Construit une archive ZIP (fichiers média sous media/ + manifeste
-    manifest.csv/.json avec tags, score de votes, date/heure de capture)
-    pour toutes les captures officielles de [start_iso, end_iso]. Écrite
-    dans EXPORTS_DIR (nom horodaté, jamais nettoyée automatiquement — même
-    logique que emails.csv/.json). Retourne (zip_path, nb_captures)."""
+def _build_archive_zip(start_iso: str, end_iso: str, include_guests: bool = True):
+    """Construit une archive ZIP (fichiers média + manifeste manifest.csv/
+    .json avec source, tags, score de votes, date/heure de capture) pour
+    toutes les captures officielles de [start_iso, end_iso], sous media/,
+    et — si include_guests — les uploads invités (quel que soit leur
+    statut) de la même plage, sous guest_media/ (fichiers stockés dans
+    GUEST_UPLOAD_DIR, définitions plus bas dans ce fichier). Les uploads
+    invités n'ont pas de tags (fonctionnalité réservée aux captures
+    officielles côté kiosque) : colonne laissée vide pour ces lignes.
+    Écrite dans EXPORTS_DIR (nom horodaté, jamais nettoyée automatiquement
+    — même logique que emails.csv/.json). Retourne (zip_path, nb_médias)."""
     captures = list_captures_in_range(start_iso, end_iso)
     tags_map = get_tags_for_captures([c['id'] for c in captures])
+    guests = list_guest_uploads_in_range(start_iso, end_iso) if include_guests else []
 
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     zip_path = EXPORTS_DIR / f'archive-{stamp}.zip'
 
-    fieldnames = ['id', 'media_uid', 'kind', 'filename', 'created_at', 'vote_score', 'tags']
+    fieldnames = ['id', 'source', 'status', 'media_uid', 'kind', 'filename', 'created_at', 'vote_score', 'tags']
     manifest_rows = []
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
         for cap in captures:
@@ -1119,12 +1126,32 @@ def _build_archive_zip(start_iso: str, end_iso: str):
                 logger.warning('Archive admin : fichier introuvable, ignoré : %s', src)
             manifest_rows.append({
                 'id':          cap['id'],
+                'source':      'official',
+                'status':      '',
                 'media_uid':   cap.get('media_uid') or '',
                 'kind':        cap['kind'],
                 'filename':    cap['filename'],
                 'created_at':  cap['created_at'],
                 'vote_score':  cap.get('vote_score', 0),
                 'tags':        ', '.join(tags_map.get(cap['id'], [])),
+            })
+
+        for up in guests:
+            src = GUEST_UPLOAD_DIR / up['filename']
+            if src.is_file():
+                zf.write(src, arcname=f"guest_media/{up['filename']}")
+            else:
+                logger.warning('Archive admin : fichier invité introuvable, ignoré : %s', src)
+            manifest_rows.append({
+                'id':          up['id'],
+                'source':      'guest',
+                'status':      up.get('status') or '',
+                'media_uid':   up.get('media_uid') or '',
+                'kind':        up['kind'],
+                'filename':    up['filename'],
+                'created_at':  up['created_at'],
+                'vote_score':  up.get('vote_score', 0),
+                'tags':        '',
             })
 
         manifest_csv = io.StringIO()
@@ -1154,11 +1181,13 @@ def admin_archive_export():
     start_iso, end_iso, err = _resolve_archive_range(request.form)
     if err:
         return redirect(url_for('admin_archive', err=err))
-    zip_path, count = _build_archive_zip(start_iso, end_iso)
+    include_guests = bool(request.form.get('include_guests'))
+    zip_path, count = _build_archive_zip(start_iso, end_iso, include_guests)
     if count == 0:
         zip_path.unlink(missing_ok=True)
-        return redirect(url_for('admin_archive', err='Aucune capture dans cet intervalle.'))
-    logger.info('Archive admin : %d capture(s) exportée(s) (%s -> %s).', count, start_iso, end_iso)
+        return redirect(url_for('admin_archive', err='Aucun média dans cet intervalle.'))
+    logger.info('Archive admin : %d média(s) exporté(s) (%s -> %s, invités %s).',
+                count, start_iso, end_iso, 'inclus' if include_guests else 'exclus')
     return send_file(zip_path, mimetype='application/zip', as_attachment=True, download_name=zip_path.name)
 
 
@@ -1171,6 +1200,8 @@ def admin_archive_cleanup():
         return redirect(url_for('admin_archive', err=err))
     if not request.form.get('confirm'):
         return redirect(url_for('admin_archive', err='Cochez la case de confirmation pour supprimer.'))
+
+    include_guests = bool(request.form.get('include_guests'))
 
     captures = list_captures_in_range(start_iso, end_iso)
     count = 0
@@ -1186,8 +1217,28 @@ def admin_archive_cleanup():
         if deleted.get('thumb_filename'):
             (THUMBS_DIR / deleted['thumb_filename']).unlink(missing_ok=True)
         count += 1
-    logger.info('Nettoyage admin : %d capture(s) supprimée(s) (%s -> %s).', count, start_iso, end_iso)
-    return redirect(url_for('admin_archive', ok=f'{count} capture(s) supprimée(s) (tags et votes inclus).'))
+
+    guest_count = 0
+    if include_guests:
+        for up in list_guest_uploads_in_range(start_iso, end_iso):
+            deleted_up = delete_guest_upload_db(up['id'])
+            if not deleted_up:
+                continue
+            try:
+                (GUEST_UPLOAD_DIR / deleted_up['filename']).unlink(missing_ok=True)
+            except Exception:
+                logger.warning('Nettoyage admin : suppression fichier invité échouée : %s', deleted_up['filename'])
+            if deleted_up.get('thumb_filename'):
+                (THUMBS_DIR / deleted_up['thumb_filename']).unlink(missing_ok=True)
+            guest_count += 1
+
+    logger.info('Nettoyage admin : %d capture(s) + %d média(s) invité(s) supprimé(s) (%s -> %s).',
+                count, guest_count, start_iso, end_iso)
+    msg = f'{count} capture(s) supprimée(s)'
+    if include_guests:
+        msg += f' + {guest_count} média(s) invité(s) supprimé(s)'
+    msg += ' (tags et votes inclus).'
+    return redirect(url_for('admin_archive', ok=msg))
 
 
 # ── Admin — cadres ────────────────────────────────────────────────────────────
