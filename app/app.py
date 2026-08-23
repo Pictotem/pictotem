@@ -371,6 +371,7 @@ def index():
         buttons=_buttons_settings(),
         about=_about_settings(),
         kiosk_unlock_taps=_kiosk_unlock_settings()['taps'],
+        photostrip_step=_photostrip_step_settings(),
     )
 
 
@@ -757,9 +758,83 @@ def _compose_photo_strip(frames, ps_cfg):
     return canvas
 
 
-@app.route('/api/capture/photostrip', methods=['POST'])
+# ── Photo strip : grand chiffre d'étape (paramétrable B-O) ────────────────────
+# Affiché plein écran pendant chaque prise du strip, en synchro avec le
+# petit label "Photo x/N" (voir _scan_and_tag_qr_codes plus haut pour le
+# contexte général du strip). Modèle "{n}"/"{total}" identique à la
+# convention idle_timer_badge_text ("Retour dans {n}s"). Position résolue
+# côté serveur en propriétés CSS explicites (top/left/right/bottom/
+# transform) — plus simple à maintenir qu'un jeu de classes CSS par preset.
+
+_PHOTOSTRIP_STEP_POSITIONS = {
+    'center':       {'top': '50%',   'left': '50%',  'right': 'auto', 'bottom': 'auto',  'transform': 'translate(-50%, -50%)'},
+    'top':          {'top': '110px', 'left': '50%',  'right': 'auto', 'bottom': 'auto',  'transform': 'translateX(-50%)'},
+    'bottom':       {'top': 'auto',  'left': '50%',  'right': 'auto', 'bottom': '190px', 'transform': 'translateX(-50%)'},
+    'top-left':     {'top': '110px', 'left': '40px', 'right': 'auto', 'bottom': 'auto',  'transform': 'none'},
+    'top-right':    {'top': '110px', 'left': 'auto', 'right': '40px', 'bottom': 'auto',  'transform': 'none'},
+    'bottom-left':  {'top': 'auto',  'left': '40px', 'right': 'auto', 'bottom': '190px', 'transform': 'none'},
+    'bottom-right': {'top': 'auto',  'left': 'auto', 'right': '40px', 'bottom': '190px', 'transform': 'none'},
+}
+_PHOTOSTRIP_STEP_POSITION_LABELS = [
+    ('center', 'Centre'), ('top', 'Haut'), ('bottom', 'Bas'),
+    ('top-left', 'Haut gauche'), ('top-right', 'Haut droite'),
+    ('bottom-left', 'Bas gauche'), ('bottom-right', 'Bas droite'),
+]
+
+
+def _photostrip_step_settings() -> dict:
+    position = get_setting('photostrip_step.position', '') or 'center'
+    if position not in _PHOTOSTRIP_STEP_POSITIONS:
+        position = 'center'
+    css = _PHOTOSTRIP_STEP_POSITIONS[position]
+    return {
+        'text':      get_setting('photostrip_step.text', '') or '{n}',
+        'font':      get_setting('photostrip_step.font', '') or _PROMO_FONTS[0][0],
+        'font_size': int(get_setting('photostrip_step.font_size', '') or '160'),
+        'position':  position,
+        'css_top':       css['top'],
+        'css_left':      css['left'],
+        'css_right':     css['right'],
+        'css_bottom':    css['bottom'],
+        'css_transform': css['transform'],
+    }
+
+
+# ── Photo strip : capture pilotée par le client, prise par prise ──────────────
+# Historique : la version précédente prenait les N clichés dans une seule
+# requête HTTP bloquante (boucle for + time.sleep côté serveur), pendant que
+# le client SIMULAIT l'avancement "Photo x/N" avec son propre setInterval
+# calé sur les mêmes durées — un pur pari de calibrage, sans aucune
+# confirmation réelle du serveur entre chaque prise. Tout décalage (charge
+# CPU, contention caméra avec l'aperçu live, temps de composition/encodage)
+# désynchronisait l'affichage de la réalité, d'où le bug "1/3 avant 2/3"
+# remonté par l'utilisateur. Nouveau flux en 3 requêtes séquentielles
+# (start → shot ×N → finish), chaque "shot" ne renvoyant OK qu'une fois la
+# prise réellement effectuée côté serveur : l'affichage client (petit label
+# + grand chiffre, voir applyPhotoStripStep dans app.js) n'avance donc plus
+# JAMAIS en avance sur la réalité, par construction. État de session
+# conservé en mémoire (process unique, un seul kiosque actif à la fois) et
+# purgé après un délai si une session est abandonnée (borne redémarrée en
+# cours de strip, etc.).
+
+_PHOTOSTRIP_SESSIONS: dict = {}
+_PHOTOSTRIP_LOCK = threading.Lock()
+_PHOTOSTRIP_SESSION_TTL = 120  # secondes avant purge d'une session abandonnée
+
+
+def _purge_expired_photostrip_sessions():
+    now = time.time()
+    expired = [tok for tok, s in _PHOTOSTRIP_SESSIONS.items()
+               if now - s['created_at'] > _PHOTOSTRIP_SESSION_TTL]
+    for tok in expired:
+        _PHOTOSTRIP_SESSIONS.pop(tok, None)
+    if expired:
+        logger.info('Photo strip : %d session(s) abandonnée(s) purgée(s).', len(expired))
+
+
+@app.route('/api/capture/photostrip/start', methods=['POST'])
 @require_main_auth
-def capture_photostrip():
+def capture_photostrip_start():
     ps_cfg = CONFIG.get('capture', {}).get('photo_strip', {})
     if not ps_cfg.get('enabled', True):
         return jsonify({'ok': False, 'error': 'Photo strip désactivé'}), 403
@@ -767,23 +842,64 @@ def capture_photostrip():
     frame_id = req.get('frame', 'none')
     shots = max(2, min(int(ps_cfg.get('shots', 3)), 6))
     interval = max(0.3, float(ps_cfg.get('interval_sec', 1.2)))
+    with _PHOTOSTRIP_LOCK:
+        _purge_expired_photostrip_sessions()
+        token = secrets.token_hex(8)
+        _PHOTOSTRIP_SESSIONS[token] = {
+            'frame_id': frame_id,
+            'shots': shots,
+            'frames': [],
+            'created_at': time.time(),
+        }
+    logger.info('Photo strip : session démarrée (%d prises, cadre=%s)', shots, frame_id)
+    return jsonify({'ok': True, 'token': token, 'shots': shots, 'interval_sec': interval})
 
-    overlay_path = get_frame_overlay_path(frame_id)
-    has_overlay = bool(overlay_path and overlay_path.exists())
 
-    frames = []
-    for i in range(shots):
-        raw = read_frame()
-        display = raw
-        if has_overlay:
-            h, w = raw.shape[:2]
-            overlay = get_overlay_bgra(overlay_path, w, h)
-            if overlay is not None:
-                display = composite_frame_overlay(raw, overlay)
-        frames.append(display)
-        if i < shots - 1:
-            time.sleep(interval)
+@app.route('/api/capture/photostrip/shot', methods=['POST'])
+@require_main_auth
+def capture_photostrip_shot():
+    req = request.get_json(silent=True) or {}
+    token = req.get('token', '')
+    with _PHOTOSTRIP_LOCK:
+        session = _PHOTOSTRIP_SESSIONS.get(token)
+    if not session:
+        return jsonify({'ok': False, 'error': 'Session photo strip introuvable ou expirée'}), 404
+    if len(session['frames']) >= session['shots']:
+        return jsonify({'ok': False, 'error': 'Photo strip déjà complet'}), 400
 
+    raw = read_frame()
+    display = raw
+    overlay_path = get_frame_overlay_path(session['frame_id'])
+    if overlay_path and overlay_path.exists():
+        h, w = raw.shape[:2]
+        overlay = get_overlay_bgra(overlay_path, w, h)
+        if overlay is not None:
+            display = composite_frame_overlay(raw, overlay)
+
+    with _PHOTOSTRIP_LOCK:
+        session = _PHOTOSTRIP_SESSIONS.get(token)
+        if not session:
+            return jsonify({'ok': False, 'error': 'Session photo strip introuvable ou expirée'}), 404
+        session['frames'].append(display)
+        shot_index = len(session['frames'])
+        shots = session['shots']
+    return jsonify({'ok': True, 'shot_index': shot_index, 'shots': shots})
+
+
+@app.route('/api/capture/photostrip/finish', methods=['POST'])
+@require_main_auth
+def capture_photostrip_finish():
+    req = request.get_json(silent=True) or {}
+    token = req.get('token', '')
+    with _PHOTOSTRIP_LOCK:
+        session = _PHOTOSTRIP_SESSIONS.pop(token, None)
+    if not session:
+        return jsonify({'ok': False, 'error': 'Session photo strip introuvable ou expirée'}), 404
+    frames = session['frames']
+    if len(frames) != session['shots']:
+        return jsonify({'ok': False, 'error': 'Photo strip incomplet'}), 400
+
+    ps_cfg = CONFIG.get('capture', {}).get('photo_strip', {})
     strip_img = _compose_photo_strip(frames, ps_cfg)
     stamp = current_stamp()
     filename = f'strip-{stamp}.jpg'
@@ -797,11 +913,24 @@ def capture_photostrip():
     thumb_name = f'thumb-{stamp}.jpg'
     make_thumb(filepath, THUMBS_DIR / thumb_name)
     capture_id, media_uid = record_capture('photo', filename, thumb_name)
-    logger.info('Photo strip capturé %s (%d prises, cadre=%s)', filename, shots, frame_id)
+    logger.info('Photo strip capturé %s (%d prises, cadre=%s)', filename, len(frames), session['frame_id'])
     qr_tags = _scan_and_tag_qr_codes(capture_id, strip_img)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
                     'filename': filename, 'qr_tags': qr_tags,
                     'url': f'/media/photo/{filename}', 'message': message_text()})
+
+
+@app.route('/api/capture/photostrip/cancel', methods=['POST'])
+@require_main_auth
+def capture_photostrip_cancel():
+    """Nettoyage best-effort si le visiteur interrompt un strip en cours
+    (retour à l'accueil, etc.) — la purge par TTL reste le filet de sécurité
+    si ce endpoint n'est jamais appelé."""
+    req = request.get_json(silent=True) or {}
+    token = req.get('token', '')
+    with _PHOTOSTRIP_LOCK:
+        _PHOTOSTRIP_SESSIONS.pop(token, None)
+    return jsonify({'ok': True})
 
 
 @app.route('/api/print/<int:capture_id>', methods=['POST'])
@@ -1401,6 +1530,17 @@ def admin_texts():
         info_text = (request.form.get('about_info_text') or '').strip()
         set_setting('about.info_text', info_text)
 
+        ps_text = (request.form.get('photostrip_step_text') or '{n}').strip()
+        set_setting('photostrip_step.text', ps_text or '{n}')
+        ps_font = (request.form.get('photostrip_step_font') or '').strip()
+        set_setting('photostrip_step.font', ps_font or _PROMO_FONTS[0][0])
+        raw_ps_size = (request.form.get('photostrip_step_font_size') or '160').strip()
+        set_setting('photostrip_step.font_size', str(max(20, int(raw_ps_size))) if raw_ps_size.isdigit() else '160')
+        ps_position = (request.form.get('photostrip_step_position') or 'center').strip()
+        if ps_position not in _PHOTOSTRIP_STEP_POSITIONS:
+            ps_position = 'center'
+        set_setting('photostrip_step.position', ps_position)
+
         return redirect(url_for('admin_texts', ok='Paramètres mis à jour.'))
     return render_template('admin_texts.html', config=CONFIG,
                            texts=get_ui_texts(),
@@ -1415,6 +1555,9 @@ def admin_texts():
                            bottom_bar_sizes=get_bottom_bar_sizes(),
                            top_bar=get_top_bar_settings(),
                            about=_about_settings(),
+                           photostrip_step=_photostrip_step_settings(),
+                           photostrip_step_fonts=_PROMO_FONTS,
+                           photostrip_step_positions=_PHOTOSTRIP_STEP_POSITION_LABELS,
                            alert_success=request.args.get('ok'),
                            alert_error=request.args.get('err'))
 

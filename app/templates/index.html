@@ -46,7 +46,38 @@
       --btn-bg-tags: {{ buttons.roles.tags.bg }};
       --btn-text-tags: {{ buttons.roles.tags.text }};
       --btn-weight-tags: {{ '800' if buttons.roles.tags.bold else '400' }};
+
+      /* Grand chiffre d'étape du photo strip — réglable depuis /admin/texts.
+         Position résolue côté serveur (voir _photostrip_step_settings dans
+         app.py) en propriétés CSS explicites plutôt qu'en classes multiples. */
+      --strip-step-font: {{ photostrip_step.font|safe }};
+      --strip-step-font-size: {{ photostrip_step.font_size }}px;
+      --strip-step-top: {{ photostrip_step.css_top }};
+      --strip-step-left: {{ photostrip_step.css_left }};
+      --strip-step-right: {{ photostrip_step.css_right }};
+      --strip-step-bottom: {{ photostrip_step.css_bottom }};
+      --strip-step-transform: {{ photostrip_step.css_transform }};
     }
+
+    /* Grand chiffre d'étape du photo strip (1, 2, 3...) affiché plein écran
+       pendant chaque prise — masqué le reste du temps. Même esprit visuel
+       que .countdown (style.css) mais position/taille/police indépendantes
+       et réglables, et jamais affiché en même temps que .countdown. */
+    .photostrip-step {
+      position: absolute;
+      top: var(--strip-step-top); left: var(--strip-step-left);
+      right: var(--strip-step-right); bottom: var(--strip-step-bottom);
+      transform: var(--strip-step-transform);
+      z-index: 5;
+      font-family: var(--strip-step-font);
+      font-size: var(--strip-step-font-size);
+      font-weight: 900; line-height: 1; color: #fff;
+      -webkit-text-stroke: 5px rgba(0,0,0,.85);
+      paint-order: stroke fill;
+      text-shadow: 0 0 30px rgba(0,0,0,1), 0 0 70px rgba(0,0,0,.8);
+      pointer-events: none;
+    }
+    .photostrip-step.hidden { display: none; }
 
     /* Barre de progression tout en haut de l'écran : illustre n'importe quel
        compte à rebours de l'appli (veille, décompte photo/vidéo avant capture,
@@ -274,6 +305,7 @@
       </div>
 
       <div class="countdown hidden" id="countdown">3</div>
+      <div class="photostrip-step hidden" id="photoStripStep"></div>
       <div class="countdown-recording hidden" id="countdownRecording">
         <span class="recording-dot"></span>
         <span id="recordingSeconds"></span>
@@ -448,6 +480,7 @@
       photoStripIntervalSec:     {{ photo_strip.get('interval_sec', 1.2) }},
       tagsEnabled:               {{ 'true' if tags_enabled else 'false' }},
       kioskUnlockTaps:           {{ kiosk_unlock_taps }},
+      photoStripStepText:        {{ photostrip_step.text | tojson }},
     };
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>

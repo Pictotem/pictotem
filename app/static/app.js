@@ -49,6 +49,7 @@ const versionModal      = document.getElementById('versionModal');
 const versionModalClose = document.getElementById('versionModalClose');
 const topCountdownBar     = document.getElementById('topCountdownBar');
 const topCountdownBarFill = document.getElementById('topCountdownBarFill');
+const photoStripStepEl    = document.getElementById('photoStripStep');
 
 // — Barre de progression partagée (tout en haut de l'écran) —
 // Un seul élément, réutilisé par tous les comptes à rebours de l'appli (timer
@@ -125,6 +126,15 @@ function showQrDetectedBadge(show, count = 0) {
   }
 }
 function showLookHere(show)  { setVisible(lookHereBanner, show); }
+// Grand chiffre d'étape du photo strip (1, 2, 3...) — texte/taille/police/
+// position réglables depuis /admin/texte (voir photostrip_step côté
+// serveur). Modèle "{n}"/"{total}", même convention que le badge de veille.
+function showPhotoStripStep(show) { setVisible(photoStripStepEl, show); }
+function updatePhotoStripStep(n, total) {
+  if (!photoStripStepEl) return;
+  const template = cfg.photoStripStepText || '{n}';
+  photoStripStepEl.textContent = template.replace(/\{n\}/g, String(n)).replace(/\{total\}/g, String(total));
+}
 function showPicker(show)    { setVisible(framePickerPanel, show); }
 
 function setBottomCenterState(which) {
@@ -496,6 +506,7 @@ function applyHomeUi() {
   showReplayBadge(false);
   showQrDetectedBadge(false);
   showLookHere(false);
+  showPhotoStripStep(false);
   updateFrameOverlay(false);
   showWelcomeOverlay(true);
   setBottomMessages(cfg.bottomLeftHome || 'Touchez un bouton pour lancer une capture', cfg.bottomRight || '');
@@ -517,6 +528,7 @@ function applyFrameStepUi(mode) {
   showReplayBadge(false);
   showQrDetectedBadge(false);
   showLookHere(false);
+  showPhotoStripStep(false);
   showWelcomeOverlay(false);
   updateFrameOverlay(true);
   setBottomMessages(cfg.bottomLeftFrame || 'Choisissez un cadre puis lancez la capture', cfg.bottomRight || '');
@@ -535,6 +547,7 @@ async function applyFramePickerUi() {
   showReplayBadge(false);
   showQrDetectedBadge(false);
   showLookHere(false);
+  showPhotoStripStep(false);
   showWelcomeOverlay(false);
   showOverlayFor(pendingFrame);
   try {
@@ -564,6 +577,7 @@ function applyReplayUi(kind, capture) {
     showQrDetectedBadge(qrTags.length > 0, qrTags.length);
   }
   showLookHere(false);
+  showPhotoStripStep(false);
   showWelcomeOverlay(false);
   updateFrameOverlay(false);
   setBottomMessages(cfg.bottomLeftReplay || 'Votre capture est prête', cfg.bottomRight || '');
@@ -580,6 +594,7 @@ function applyCountdownUi() {
   showReplayBadge(false);
   showQrDetectedBadge(false);
   showLookHere(true);
+  showPhotoStripStep(false);
   showProcessing(false);
   updateFrameOverlay(true);
 }
@@ -667,8 +682,15 @@ async function startCountdownAndCapture(kind) {
     setVisible(countdown, false);
     showLookHere(false);
 
+    if (kind === 'strip') {
+      // Photo strip : flux dédié, piloté par le client prise par prise (voir
+      // runPhotoStrip ci-dessous) — chaque étape n'avance qu'une fois
+      // confirmée par le serveur, contrairement à l'ancien minuteur simulé.
+      await runPhotoStrip();
+      return;
+    }
+
     const payload = { frame: selectedFrame };
-    let stripTicker = null;
 
     if (kind === 'video') {
       // Phase 2 vidéo : overlay reste visible pendant l'enregistrement
@@ -677,22 +699,6 @@ async function startCountdownAndCapture(kind) {
       const dur = cfg.videoDurationSec || 5;
       payload.duration = dur;
       startRecordingCounter(dur);
-    } else if (kind === 'strip') {
-      // Photo strip : le serveur prend plusieurs clichés à la suite (voir
-      // capture.photo_strip dans config.toml) — indicateur visuel "Photo
-      // X/N" purement côté client, calé sur le même rythme (shots ×
-      // interval_sec) pour rester synchro avec la prise réelle côté serveur.
-      const shots = Number(cfg.photoStripShots || 3);
-      const intervalMs = Number(cfg.photoStripIntervalSec || 1.2) * 1000;
-      let shotN = 1;
-      showLookHere(true);
-      if (lookHereLabel) lookHereLabel.textContent = `Photo ${shotN}/${shots}`;
-      startTopBarCountdown(shots * intervalMs);
-      stripTicker = setInterval(() => {
-        shotN += 1;
-        if (shotN > shots) { clearInterval(stripTicker); return; }
-        if (lookHereLabel) lookHereLabel.textContent = `Photo ${shotN}/${shots}`;
-      }, intervalMs);
     } else {
       // Photo : on cache l'overlay et on montre le spinner (pas de durée
       // connue pendant le traitement serveur, donc pas de barre à ce stade)
@@ -701,20 +707,13 @@ async function startCountdownAndCapture(kind) {
       showProcessing(true);
     }
 
-    const apiPath = kind === 'photo' ? '/api/capture/photo'
-                  : kind === 'video' ? '/api/capture/video'
-                  : '/api/capture/photostrip';
+    const apiPath = kind === 'video' ? '/api/capture/video' : '/api/capture/photo';
 
     try {
       const data = await api(apiPath, payload);
       if (kind === 'video') {
         stopRecordingCounter();
         updateFrameOverlay(false);  // cache l'overlay maintenant que la vidéo est capturée
-      } else if (kind === 'strip') {
-        clearInterval(stripTicker);
-        stopTopBarCountdown();
-        showLookHere(false);
-        updateFrameOverlay(false);
       }
       showProcessing(false);
       renderResultMedia(data);
@@ -722,13 +721,69 @@ async function startCountdownAndCapture(kind) {
       applyReplayUi(kind, data);
     } catch (e) {
       if (kind === 'video') { stopRecordingCounter(); updateFrameOverlay(false); }
-      if (kind === 'strip') { clearInterval(stripTicker); showLookHere(false); updateFrameOverlay(false); }
       stopTopBarCountdown();
       showProcessing(false);
       applyHomeUi();
       alert(e.message || 'Erreur de capture');
     }
   }, 1000);
+}
+
+// — Photo strip : capture pilotée par le client, prise par prise —
+// Remplace l'ancienne requête unique bloquante (voir historique côté
+// serveur, /api/capture/photostrip/start|shot|finish dans app.py) par une
+// séquence de N+2 requêtes : chaque "shot" ne renvoie OK qu'une fois la
+// prise réellement effectuée côté serveur, donc le petit label "Photo x/N"
+// et le grand chiffre d'étape (#photoStripStep) ne peuvent plus jamais
+// s'afficher en avance ou en retard sur la réalité — corrige le bug
+// remonté ("1/3 avant 2/3"), qui venait d'un minuteur purement simulé côté
+// client sans aucune confirmation serveur entre les prises. Une pause
+// (durée = interval_sec) précède désormais aussi la toute première prise
+// (et pas seulement celles d'après), pour laisser le temps de voir le
+// chiffre/label et de poser avant chaque déclenchement — léger changement
+// de rythme assumé par rapport à l'ancien comportement.
+async function runPhotoStrip() {
+  showLookHere(true);
+  showPhotoStripStep(true);
+  let token = null;
+  try {
+    const startData = await api('/api/capture/photostrip/start', { frame: selectedFrame });
+    token = startData.token;
+    const shots = Number(startData.shots || cfg.photoStripShots || 3);
+    const intervalMs = Number(startData.interval_sec || cfg.photoStripIntervalSec || 1.2) * 1000;
+
+    for (let n = 1; n <= shots; n++) {
+      if (lookHereLabel) lookHereLabel.textContent = `Photo ${n}/${shots}`;
+      updatePhotoStripStep(n, shots);
+      startTopBarCountdown(intervalMs);
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      await api('/api/capture/photostrip/shot', { token });
+    }
+
+    stopTopBarCountdown();
+    showLookHere(false);
+    showPhotoStripStep(false);
+    updateFrameOverlay(false);
+    showProcessing(true);
+
+    const data = await api('/api/capture/photostrip/finish', { token });
+    showProcessing(false);
+    renderResultMedia(data);
+    if (resultMessage) resultMessage.textContent = data.message || '';
+    applyReplayUi('strip', data);
+  } catch (e) {
+    if (token) {
+      try { await api('/api/capture/photostrip/cancel', { token }); }
+      catch (_) { /* best-effort, la purge par TTL prend le relais */ }
+    }
+    stopTopBarCountdown();
+    showLookHere(false);
+    showPhotoStripStep(false);
+    showProcessing(false);
+    updateFrameOverlay(false);
+    applyHomeUi();
+    alert(e.message || 'Erreur de capture');
+  }
 }
 
 // — Drag du picker —

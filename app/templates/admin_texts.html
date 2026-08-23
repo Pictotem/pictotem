@@ -285,6 +285,49 @@
       </div>
     </div>
 
+    <div class="text-section">
+      <h2>Photo strip — chiffre d'étape</h2>
+      <p class="field-default" style="margin-bottom:10px">
+        Grand chiffre affiché plein écran pendant chaque prise du photo strip
+        (1, 2, 3...), en plus du petit texte « Photo x/N ».
+      </p>
+      <div class="text-fields">
+        <div class="text-field">
+          <label class="field-label" for="photostrip_step_text">Texte</label>
+          <input type="text" id="photostrip_step_text" name="photostrip_step_text"
+                 value="{{ photostrip_step.text }}" placeholder="{n}">
+          <p class="field-default">
+            Utilisez <code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px">{n}</code>
+            pour le numéro de la prise en cours et
+            <code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px">{total}</code>
+            pour le nombre total de prises. Défaut : <code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px">{n}</code>.
+          </p>
+        </div>
+        <div class="text-field">
+          <label class="field-label" for="photostrip_step_font">Police</label>
+          <select id="photostrip_step_font" name="photostrip_step_font">
+            {% for value, label in photostrip_step_fonts %}
+            <option value="{{ value }}" {% if photostrip_step.font == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="text-field">
+          <label class="field-label" for="photostrip_step_font_size">Taille (px)</label>
+          <input type="number" id="photostrip_step_font_size" name="photostrip_step_font_size"
+                 value="{{ photostrip_step.font_size }}" min="20" max="500" style="width:110px">
+          <p class="field-default">Défaut : 160 px</p>
+        </div>
+        <div class="text-field">
+          <label class="field-label" for="photostrip_step_position">Position à l'écran</label>
+          <select id="photostrip_step_position" name="photostrip_step_position">
+            {% for value, label in photostrip_step_positions %}
+            <option value="{{ value }}" {% if photostrip_step.position == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+
     <button type="submit" class="action-btn primary" style="margin-top:8px">Enregistrer tous les textes</button>
     <p class="reset-hint" style="margin-top:10px;font-size:12px;color:rgba(255,255,255,.3);">
       Vider un champ et enregistrer restaure la valeur par défaut.
