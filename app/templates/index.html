@@ -294,6 +294,19 @@
 
       <div class="replay-badge hidden" id="replayBadge">{{ texts.replay_badge }}</div>
 
+      <!-- Confirmation de lecture QR-code (add-on /admin/tags) — visible sur
+           l'écran de relecture uniquement si un QR-code a été détecté et
+           tagué sur la capture affichée, voir applyReplayUi() dans app.js. -->
+      <div class="qr-detected-badge hidden" id="qrDetectedBadge">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="3" y="3" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="2"/>
+          <rect x="14" y="3" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="2"/>
+          <rect x="3" y="14" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="2"/>
+          <path d="M14 14h3v3h-3zM19 14h2v2h-2zM14 19h2v2h-2zM19 19h2v2h-2z" fill="currentColor"/>
+        </svg>
+        <span id="qrDetectedText">QR-code détecté</span>
+      </div>
+
       <div class="bottom-action-bar" id="bottomActionBar">
         <div class="bottom-bar-zone bottom-bar-left">
           <button class="action-btn ter hidden" id="btnFrameStepBack">{{ texts.btn_retour }}</button>

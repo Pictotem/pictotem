@@ -430,9 +430,9 @@ def capture_photo():
     make_thumb(filepath, THUMBS_DIR / thumb_name)
     capture_id, media_uid = record_capture('photo', filename, thumb_name)
     logger.info('Photo capturée %s (cadre=%s)', filename, frame_id)
-    _scan_and_tag_qr_codes(capture_id, display_frame)
+    qr_tags = _scan_and_tag_qr_codes(capture_id, display_frame)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
-                    'filename': filename,
+                    'filename': filename, 'qr_tags': qr_tags,
                     'url': f'/media/photo/{filename}', 'message': message_text()})
 
 
@@ -796,9 +796,9 @@ def capture_photostrip():
     make_thumb(filepath, THUMBS_DIR / thumb_name)
     capture_id, media_uid = record_capture('photo', filename, thumb_name)
     logger.info('Photo strip capturé %s (%d prises, cadre=%s)', filename, shots, frame_id)
-    _scan_and_tag_qr_codes(capture_id, strip_img)
+    qr_tags = _scan_and_tag_qr_codes(capture_id, strip_img)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
-                    'filename': filename,
+                    'filename': filename, 'qr_tags': qr_tags,
                     'url': f'/media/photo/{filename}', 'message': message_text()})
 
 

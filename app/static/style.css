@@ -709,6 +709,27 @@ button, input, a { font: inherit; }
   pointer-events: none;
 }
 
+.qr-detected-badge {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 10px 12px;
+  border-radius: 999px;
+  background: rgba(13,139,143,.9);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid rgba(255,255,255,.25);
+  box-shadow: 0 10px 30px rgba(0,0,0,.28);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
 .login-body,
 .gallery-body {
   min-height: 100vh;
@@ -733,6 +754,13 @@ button, input, a { font: inherit; }
     left: var(--replay-mobile-left);
     font-size: var(--replay-mobile-font-size);
     padding: var(--replay-mobile-padding-y) var(--replay-mobile-padding-x);
+  }
+
+  .qr-detected-badge {
+    top: var(--replay-mobile-top, 12px);
+    right: var(--replay-mobile-left, 12px);
+    font-size: 12px;
+    padding: 7px 12px 7px 10px;
   }
 
   .bottom-action-bar {

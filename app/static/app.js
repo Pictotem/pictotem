@@ -14,6 +14,8 @@ const resultShell      = document.getElementById('resultShell');
 const resultMedia      = document.getElementById('resultMedia');
 const resultMessage    = document.getElementById('resultMessage');
 const replayBadge      = document.getElementById('replayBadge');
+const qrDetectedBadge  = document.getElementById('qrDetectedBadge');
+const qrDetectedText   = document.getElementById('qrDetectedText');
 const welcomeOverlayEl = document.getElementById('welcomeOverlayEl');
 const frameOverlayImg  = document.getElementById('frameOverlayImg');
 const framePickerPanel = document.getElementById('framePickerPanel');
@@ -104,6 +106,22 @@ function showBottomBar(show) { setVisible(bottomBar, show); }
 function showResult(show)    { setVisible(resultShell, show); }
 function showProcessing(show){ setVisible(processingOverlay, show); }
 function showReplayBadge(show){ setVisible(replayBadge, show); }
+// Badge de confirmation "QR-code détecté" sur l'écran de relecture — visible
+// uniquement quand l'add-on de détection QR (voir /admin/tags) a effectivement
+// trouvé et tagué un ou plusieurs QR-codes sur la capture affichée (qr_tags
+// non vide dans la réponse de /api/capture/photo|photostrip, voir
+// applyReplayUi()). Jamais affiché pour les vidéos (pas de détection QR).
+function showQrDetectedBadge(show, count = 0) {
+  if (!qrDetectedBadge) return;
+  if (show && count > 0) {
+    if (qrDetectedText) {
+      qrDetectedText.textContent = count > 1 ? `${count} QR-codes détectés` : 'QR-code détecté';
+    }
+    setVisible(qrDetectedBadge, true);
+  } else {
+    setVisible(qrDetectedBadge, false);
+  }
+}
 function showLookHere(show)  { setVisible(lookHereBanner, show); }
 function showPicker(show)    { setVisible(framePickerPanel, show); }
 
@@ -474,6 +492,7 @@ function applyHomeUi() {
   showResult(false);
   showProcessing(false);
   showReplayBadge(false);
+  showQrDetectedBadge(false);
   showLookHere(false);
   updateFrameOverlay(false);
   showWelcomeOverlay(true);
@@ -494,6 +513,7 @@ function applyFrameStepUi(mode) {
   showResult(false);
   showProcessing(false);
   showReplayBadge(false);
+  showQrDetectedBadge(false);
   showLookHere(false);
   showWelcomeOverlay(false);
   updateFrameOverlay(true);
@@ -511,6 +531,7 @@ async function applyFramePickerUi() {
   showResult(false);
   showProcessing(false);
   showReplayBadge(false);
+  showQrDetectedBadge(false);
   showLookHere(false);
   showWelcomeOverlay(false);
   showOverlayFor(pendingFrame);
@@ -536,6 +557,10 @@ function applyReplayUi(kind, capture) {
   showFrameStepBack(false);
   showResult(true);
   showReplayBadge(true);
+  {
+    const qrTags = Array.isArray(capture?.qr_tags) ? capture.qr_tags : [];
+    showQrDetectedBadge(qrTags.length > 0, qrTags.length);
+  }
   showLookHere(false);
   showWelcomeOverlay(false);
   updateFrameOverlay(false);
@@ -551,6 +576,7 @@ function applyCountdownUi() {
   setBottomCenterState('none');
   showResult(false);
   showReplayBadge(false);
+  showQrDetectedBadge(false);
   showLookHere(true);
   showProcessing(false);
   updateFrameOverlay(true);
