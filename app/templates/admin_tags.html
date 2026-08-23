@@ -180,6 +180,17 @@
           <span>Activer la détection automatique de QR-codes</span>
         </div>
       </div>
+      <div class="field">
+        <div class="check-row">
+          <input type="checkbox" id="qrcode_live_overlay" name="live_overlay" {% if qrcode_settings.live_overlay %}checked{% endif %}>
+          <span>Afficher le contenu en direct au-dessus du QR-code sur l'aperçu caméra</span>
+        </div>
+        <p class="section-hint" style="margin-top:6px">
+          Avant même la capture (accueil, choix du cadre) : si un QR-code est présenté devant
+          l'objectif, son contenu s'affiche en surimpression pendant que le visiteur le tient.
+          Indépendant du tag automatique ci-dessus — peut être activé seul.
+        </p>
+      </div>
     </div>
 
     <button class="btn-primary" type="submit">Enregistrer</button>

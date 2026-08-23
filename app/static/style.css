@@ -737,6 +737,38 @@ button, input, a { font: inherit; }
   pointer-events: none;
 }
 
+/* Contenu d'un QR-code affiché en direct au-dessus de celui-ci pendant que
+   le visiteur le présente devant l'objectif (avant capture) — voir
+   pollQrLive()/renderQrLiveBoxes() dans app.js, activable depuis
+   /admin/tags (add-on QR-code, case "live_overlay"). Calque plein écran,
+   une étiquette positionnée dynamiquement (style.left/top en JS) par
+   QR-code détecté. */
+.qr-live-overlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.qr-live-label {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  max-width: min(70vw, 420px);
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(13,139,143,.92);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid rgba(255,255,255,.25);
+  box-shadow: 0 10px 30px rgba(0,0,0,.28);
+  backdrop-filter: blur(8px);
+}
+
 .login-body,
 .gallery-body {
   min-height: 100vh;

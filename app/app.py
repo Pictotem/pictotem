@@ -38,9 +38,9 @@ from auth import (auth_enabled, build_secret_key, check_admin_password,
                   require_media_auth)
 from camera import (VIDEO_CAPTURE_ACTIVE, CAM_LOCK, clear_overlay_cache,
                     clear_recording_frame, composite_frame_overlay,
-                    encode_jpeg, get_frame_overlay_path, get_overlay_bgra,
-                    publish_recording_frame, read_frame, reset_camera,
-                    stream_generator)
+                    encode_jpeg, get_frame_overlay_path, get_latest_preview_frame,
+                    get_overlay_bgra, publish_recording_frame, read_frame,
+                    reset_camera, stream_generator)
 from config_loader import (ALLOWED_OVERLAY_EXT, ALLOWED_PREVIEW_EXT, BASE_DIR,
                             CONFIG, EXPORTS_DIR, FFMPEG_EXE, FRAMES_DIR,
                             LOGS_DIR, PHOTO_DIR, RAW_PHOTO_DIR, RAW_VIDEO_DIR,
@@ -372,6 +372,7 @@ def index():
         about=_about_settings(),
         kiosk_unlock_taps=_kiosk_unlock_settings()['taps'],
         photostrip_step=_photostrip_step_settings(),
+        qrcode=_qrcode_settings(),
     )
 
 
@@ -637,6 +638,7 @@ _qr_detector = cv2.QRCodeDetector()
 def _qrcode_settings() -> dict:
     return {
         'enabled': get_setting('qrcode.enabled', '0') == '1',
+        'live_overlay': get_setting('qrcode.live_overlay', '0') == '1',
     }
 
 
@@ -678,6 +680,49 @@ def _scan_and_tag_qr_codes(capture_id: int, image) -> list:
         logger.info('QR-code(s) détecté(s) sur la capture #%d, ajouté(s) comme tag(s) : %s',
                     capture_id, ', '.join(added))
     return added
+
+
+# ── Add-on : contenu QR-code affiché en direct sur l'aperçu caméra ────────────
+# Activable indépendamment du tag automatique ci-dessus (voir admin_tags.html,
+# case "live_overlay") : pendant que le visiteur cadre sa prise (accueil,
+# choix du cadre), le contenu décodé d'un QR-code présenté devant l'objectif
+# s'affiche au-dessus de celui-ci sur l'écran du kiosque (voir
+# pollQrLive/renderQrLiveBoxes dans app.js). Interrogé par polling côté
+# client (pas de scan en continu côté serveur) et scanne la DERNIÈRE frame
+# déjà lue par le flux MJPEG live (get_latest_preview_frame, voir
+# camera.py/publish_preview_frame) — aucune lecture caméra supplémentaire,
+# aucune contention avec le flux principal.
+@app.route('/api/qr/live')
+@require_main_auth
+def api_qr_live():
+    if get_setting('qrcode.live_overlay', '0') != '1':
+        return jsonify({'ok': True, 'enabled': False, 'boxes': []})
+    frame = get_latest_preview_frame()
+    if frame is None:
+        return jsonify({'ok': True, 'enabled': True, 'boxes': []})
+    h, w = frame.shape[:2]
+    try:
+        found, decoded_texts, points, _straight = _qr_detector.detectAndDecodeMulti(frame)
+    except Exception:
+        logger.exception('QR live : détection échouée.')
+        return jsonify({'ok': True, 'enabled': True, 'boxes': []})
+
+    boxes = []
+    if found and decoded_texts is not None and points is not None:
+        for i, text in enumerate(decoded_texts):
+            text = (text or '').strip().replace('\n', ' ').replace('\r', ' ')
+            if not text or i >= len(points):
+                continue
+            pts = points[i]
+            xs = [float(p[0]) for p in pts]
+            ys = [float(p[1]) for p in pts]
+            display_text = text if len(text) <= 80 else text[:80] + '…'
+            boxes.append({
+                'text': display_text,
+                'x0': min(xs), 'y0': min(ys),
+                'x1': max(xs), 'y1': max(ys),
+            })
+    return jsonify({'ok': True, 'enabled': True, 'frame_width': w, 'frame_height': h, 'boxes': boxes})
 
 
 @app.route('/api/capture/<int:capture_id>/tags', methods=['GET', 'POST'])
@@ -1995,6 +2040,7 @@ def admin_tags():
 
         if action == 'qrcode_settings':
             set_setting('qrcode.enabled', '1' if request.form.get('enabled') else '0')
+            set_setting('qrcode.live_overlay', '1' if request.form.get('live_overlay') else '0')
             return redirect(url_for('admin_tags', ok='Réglages QR-code mis à jour.'))
 
     return render_template(

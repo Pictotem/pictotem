@@ -287,6 +287,7 @@
       <div id="welcomeOverlayEl" class="frame-overlay-live{% if not welcome_frame_url %} hidden{% endif %}"
            style="{% if welcome_frame_url %}background-image:url('{{ welcome_frame_url }}');{% endif %}"></div>
       <div id="frameOverlayImg" class="frame-overlay-live hidden"></div>
+      <div id="qrLiveOverlayLayer" class="qr-live-overlay-layer"></div>
 
       <!-- Badge "Retour dans Ns" — la barre elle-même est #topCountdownBar,
            partagée, tout en haut de l'écran. -->
@@ -481,6 +482,7 @@
       tagsEnabled:               {{ 'true' if tags_enabled else 'false' }},
       kioskUnlockTaps:           {{ kiosk_unlock_taps }},
       photoStripStepText:        {{ photostrip_step.text | tojson }},
+      qrLiveOverlayEnabled:      {{ 'true' if qrcode.live_overlay else 'false' }},
     };
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>

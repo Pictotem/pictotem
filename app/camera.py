@@ -228,6 +228,27 @@ def clear_recording_frame():
         _LATEST_RECORDING_FRAME = None
 
 
+# Dernière frame diffusée par le flux MJPEG live (stream_generator ci-dessous),
+# republiée pour permettre à d'autres fonctionnalités de la consommer en
+# lecture seule (ex. détection QR en direct, voir /api/qr/live dans app.py)
+# sans provoquer une deuxième lecture caméra concurrente — même principe que
+# publish_recording_frame()/_pop_recording_frame() ci-dessus, mais alimenté
+# en permanence (pas seulement pendant un enregistrement vidéo).
+_LATEST_PREVIEW_FRAME = None
+_PREVIEW_FRAME_LOCK = threading.Lock()
+
+
+def publish_preview_frame(frame):
+    global _LATEST_PREVIEW_FRAME
+    with _PREVIEW_FRAME_LOCK:
+        _LATEST_PREVIEW_FRAME = frame
+
+
+def get_latest_preview_frame():
+    with _PREVIEW_FRAME_LOCK:
+        return _LATEST_PREVIEW_FRAME
+
+
 def encode_jpeg(frame, quality=None):
     quality = quality or int(CONFIG['camera'].get('jpeg_quality', 92))
     ok, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
@@ -252,11 +273,13 @@ def stream_generator():
                 if frame is None:
                     time.sleep(0.05)
                     continue
+                publish_preview_frame(frame)
                 jpg = encode_jpeg(frame, quality=82)
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpg + b'\r\n')
                 time.sleep(frame_interval)
                 continue
             frame = read_frame()
+            publish_preview_frame(frame)
             jpg = encode_jpeg(frame, quality=82)
             if _camera_was_down:
                 logger.info('Caméra reconnectée')

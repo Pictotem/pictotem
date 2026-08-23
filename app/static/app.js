@@ -15,6 +15,8 @@ const resultMedia      = document.getElementById('resultMedia');
 const resultMessage    = document.getElementById('resultMessage');
 const replayBadge      = document.getElementById('replayBadge');
 const qrDetectedBadge  = document.getElementById('qrDetectedBadge');
+const previewStreamImg  = document.querySelector('.preview-stream');
+const qrLiveOverlayLayer = document.getElementById('qrLiveOverlayLayer');
 const qrDetectedText   = document.getElementById('qrDetectedText');
 const welcomeOverlayEl = document.getElementById('welcomeOverlayEl');
 const frameOverlayImg  = document.getElementById('frameOverlayImg');
@@ -130,6 +132,69 @@ function showQrDetectedBadge(show, count = 0) {
     setVisible(qrDetectedBadge, false);
   }
 }
+
+// — QR-code en direct sur l'aperçu caméra (avant capture) —
+// Activable indépendamment du tag automatique ci-dessus (voir /admin/tags,
+// case "live_overlay") : interroge périodiquement /api/qr/live (scan côté
+// serveur de la dernière frame déjà lue par le flux MJPEG, aucune lecture
+// caméra supplémentaire) et affiche le texte décodé au-dessus du QR-code
+// réel. Le flux vidéo (.preview-stream) est en `object-fit: cover` : on
+// reproduit le même calcul d'échelle/recadrage ici pour convertir les
+// coordonnées pixel de la frame scannée en position à l'écran.
+const QR_LIVE_POLL_MS = 600;
+let qrLivePollTimer = null;
+
+function renderQrLiveBoxes(boxes, frameW, frameH) {
+  if (!qrLiveOverlayLayer) return;
+  qrLiveOverlayLayer.innerHTML = '';
+  if (!previewStreamImg || !frameW || !frameH || !Array.isArray(boxes) || !boxes.length) return;
+  const containerW = previewStreamImg.clientWidth;
+  const containerH = previewStreamImg.clientHeight;
+  if (!containerW || !containerH) return;
+  const scale = Math.max(containerW / frameW, containerH / frameH);
+  const offsetX = (containerW - frameW * scale) / 2;
+  const offsetY = (containerH - frameH * scale) / 2;
+  boxes.forEach((b) => {
+    if (!b || !b.text) return;
+    const screenX0 = b.x0 * scale + offsetX;
+    const screenX1 = b.x1 * scale + offsetX;
+    const screenY0 = b.y0 * scale + offsetY;
+    const el = document.createElement('div');
+    el.className = 'qr-live-label';
+    el.textContent = b.text;
+    el.style.left = `${(screenX0 + screenX1) / 2}px`;
+    el.style.top = `${Math.max(0, screenY0 - 10)}px`;
+    qrLiveOverlayLayer.appendChild(el);
+  });
+}
+
+async function pollQrLive() {
+  // Pas de scan pendant la relecture (le flux live n'est plus la vue
+  // principale) ni pendant l'écran de veille — évite des requêtes inutiles.
+  const screensaverActive = screensaverOverlay && !screensaverOverlay.classList.contains('hidden');
+  if (state === 'replay' || screensaverActive) {
+    if (qrLiveOverlayLayer) qrLiveOverlayLayer.innerHTML = '';
+    return;
+  }
+  try {
+    const res = await fetch('/api/qr/live');
+    const data = await res.json().catch(() => ({}));
+    if (!data || data.enabled === false) {
+      if (qrLiveOverlayLayer) qrLiveOverlayLayer.innerHTML = '';
+      return;
+    }
+    renderQrLiveBoxes(data.boxes, data.frame_width, data.frame_height);
+  } catch (_) {
+    // silencieux : on retente au prochain tick, pas la peine d'alerter
+    // pour une fonctionnalité purement décorative
+  }
+}
+
+function startQrLivePolling() {
+  if (!cfg.qrLiveOverlayEnabled || qrLivePollTimer) return;
+  qrLivePollTimer = setInterval(pollQrLive, QR_LIVE_POLL_MS);
+}
+
 function showLookHere(show)  { setVisible(lookHereBanner, show); }
 // Grand chiffre d'étape du photo strip (1, 2, 3...) — texte/taille/police/
 // position réglables depuis /admin/texte (voir photostrip_step côté
@@ -1283,6 +1348,8 @@ versionModal?.addEventListener('click', (e) => {
     }
   });
 })();
+
+startQrLivePolling();
 
 // — Init —
 applyHomeUi();
