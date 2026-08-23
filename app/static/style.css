@@ -754,8 +754,9 @@ button, input, a { font: inherit; }
 .qr-live-label {
   position: absolute;
   max-width: min(70vw, 420px);
-  padding: 7px 14px;
+  padding: var(--qr-live-padding, 7px 14px);
   border-radius: var(--qr-live-radius, 999px);
+  clip-path: var(--qr-live-clip-path, none);
   background: var(--qr-live-bg-color, rgba(13,139,143,.92));
   color: var(--qr-live-text-color, #ffffff);
   font-family: var(--qr-live-font, inherit);

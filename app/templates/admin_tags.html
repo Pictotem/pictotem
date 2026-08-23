@@ -291,6 +291,11 @@
             </div>
           </div>
         </div>
+        <p class="field-hint" style="margin-top:-6px;margin-bottom:14px">
+          La forme s'applique aussi en mode « Image de fond » ci-dessous (découpe l'image
+          selon le contour choisi). Cercle, ovale et étoile conviennent mieux à un texte
+          court : les contenus longs peuvent être rognés par les bords ou les pointes.
+        </p>
 
         <div id="qr_bg_image_fields" class="field">
           <label>Image de fond (PNG, JPG, WEBP)</label>
@@ -538,7 +543,21 @@
   // l'aperçu des tags ci-dessus. L'image de fond n'est prévisualisable que
   // si une image est déjà enregistrée (un nouveau fichier tout juste
   // sélectionné n'est visible qu'après enregistrement).
-  const QR_LIVE_SHAPE_RADIUS = { pill: '999px', rounded: '14px', square: '0px' };
+  // Miroir de _QR_LIVE_SHAPE_CSS (app.py) — uniquement pour l'aperçu local à
+  // cette page, la mise en forme réelle sur le kiosque vient des variables
+  // CSS injectées côté serveur dans index.html.
+  const QR_LIVE_SHAPE_CSS = {
+    pill:    { radius: '999px', clip: 'none', padding: '7px 14px' },
+    rounded: { radius: '14px',  clip: 'none', padding: '7px 14px' },
+    square:  { radius: '0px',   clip: 'none', padding: '7px 14px' },
+    circle:  { radius: '50%',   clip: 'none', padding: '1.5em 1.7em' },
+    oval:    { radius: '50%',   clip: 'none', padding: '0.9em 2.4em' },
+    star:    {
+      radius: '0px',
+      clip: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+      padding: '1.9em 2.1em',
+    },
+  };
   const QR_LIVE_EXISTING_BG_IMAGE_URL = {{ (qrcode_live_style.bg_image_url or '') | tojson }};
 
   function updateQrLivePreview() {
@@ -548,20 +567,22 @@
     const size = document.getElementById('qr_live_font_size')?.value || 15;
     const textColor = document.getElementById('qr_live_text_color')?.value || '#ffffff';
     const bgMode = document.querySelector('input[name="bg_mode"]:checked')?.value || 'shape';
+    const shape = document.getElementById('qr_live_bg_shape')?.value || 'pill';
+    const shapeCss = QR_LIVE_SHAPE_CSS[shape] || QR_LIVE_SHAPE_CSS.pill;
     chip.style.fontFamily = font;
     chip.style.fontSize = size + 'px';
     chip.style.color = textColor;
+    chip.style.borderRadius = shapeCss.radius;
+    chip.style.clipPath = shapeCss.clip;
+    chip.style.padding = shapeCss.padding;
     if (bgMode === 'image' && QR_LIVE_EXISTING_BG_IMAGE_URL) {
       chip.style.backgroundImage = `url('${QR_LIVE_EXISTING_BG_IMAGE_URL}')`;
       chip.style.backgroundSize = '100% 100%';
       chip.style.backgroundColor = 'transparent';
-      chip.style.borderRadius = '14px';
     } else {
-      const shape = document.getElementById('qr_live_bg_shape')?.value || 'pill';
       const bgColor = document.getElementById('qr_live_bg_color')?.value || '#0d8b8f';
       chip.style.backgroundImage = 'none';
       chip.style.backgroundColor = bgColor;
-      chip.style.borderRadius = QR_LIVE_SHAPE_RADIUS[shape] || '999px';
     }
   }
 

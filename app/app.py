@@ -660,8 +660,31 @@ _QR_LIVE_SHAPES = [
     ('pill', 'Pilule (arrondi complet)'),
     ('rounded', 'Coins arrondis'),
     ('square', 'Rectangle (angles droits)'),
+    ('circle', 'Cercle'),
+    ('oval', 'Ovale'),
+    ('star', 'Étoile'),
 ]
-_QR_LIVE_SHAPE_RADIUS = {'pill': '999px', 'rounded': '14px', 'square': '0px'}
+# Formes rectangulaires (pill/rounded/square) : simple border-radius, marge
+# standard. Formes non rectangulaires (circle/oval/star) : nécessitent un
+# clip-path en plus, ET une marge interne plus généreuse (en em, donc
+# proportionnelle à la taille de police choisie) pour que le texte reste
+# lisible à l'intérieur du contour plutôt que rogné par ses bords/pointes.
+# L'étoile en particulier ne convient bien qu'à un texte court (ses pointes
+# rognent tout ce qui déborde de son corps central) — signalé à l'admin
+# dans l'aide contextuelle du formulaire.
+_QR_LIVE_SHAPE_CSS = {
+    'pill':    {'radius': '999px', 'clip': 'none', 'padding': '7px 14px'},
+    'rounded': {'radius': '14px',  'clip': 'none', 'padding': '7px 14px'},
+    'square':  {'radius': '0px',   'clip': 'none', 'padding': '7px 14px'},
+    'circle':  {'radius': '50%',   'clip': 'none', 'padding': '1.5em 1.7em'},
+    'oval':    {'radius': '50%',   'clip': 'none', 'padding': '0.9em 2.4em'},
+    'star':    {
+        'radius': '0px',
+        'clip': ('polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, '
+                 '50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)'),
+        'padding': '1.9em 2.1em',
+    },
+}
 _QR_LIVE_POSITIONS = [
     ('above', 'Au-dessus du QR-code'),
     ('below', 'En dessous du QR-code'),
@@ -676,8 +699,9 @@ def _qr_live_style_settings() -> dict:
     if bg_mode not in ('shape', 'image'):
         bg_mode = 'shape'
     bg_shape = get_setting('qrcode.live_style.bg_shape', '') or 'pill'
-    if bg_shape not in _QR_LIVE_SHAPE_RADIUS:
+    if bg_shape not in _QR_LIVE_SHAPE_CSS:
         bg_shape = 'pill'
+    shape_css = _QR_LIVE_SHAPE_CSS[bg_shape]
     position = get_setting('qrcode.live_style.position', '') or 'above'
     if position not in dict(_QR_LIVE_POSITIONS):
         position = 'above'
@@ -685,7 +709,9 @@ def _qr_live_style_settings() -> dict:
     return {
         'bg_mode': bg_mode,
         'bg_shape': bg_shape,
-        'bg_radius_css': _QR_LIVE_SHAPE_RADIUS[bg_shape],
+        'bg_radius_css': shape_css['radius'],
+        'bg_clip_css': shape_css['clip'],
+        'bg_padding_css': shape_css['padding'],
         'bg_color': get_setting('qrcode.live_style.bg_color', '') or '#0d8b8f',
         'bg_image_filename': bg_image_filename,
         'bg_image_url': f'/static/qr_live/{bg_image_filename}' if bg_image_filename else '',
@@ -2162,7 +2188,7 @@ def admin_tags():
             bg_mode = request.form.get('bg_mode', 'shape')
             set_setting('qrcode.live_style.bg_mode', bg_mode if bg_mode in ('shape', 'image') else 'shape')
             bg_shape = request.form.get('bg_shape', 'pill')
-            set_setting('qrcode.live_style.bg_shape', bg_shape if bg_shape in _QR_LIVE_SHAPE_RADIUS else 'pill')
+            set_setting('qrcode.live_style.bg_shape', bg_shape if bg_shape in _QR_LIVE_SHAPE_CSS else 'pill')
             bg_color = (request.form.get('bg_color') or '').strip()
             if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
                 set_setting('qrcode.live_style.bg_color', bg_color)

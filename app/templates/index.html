@@ -65,6 +65,8 @@
       --qr-live-text-color: {{ qrcode_live_style.text_color }};
       --qr-live-bg-color: {{ qrcode_live_style.bg_color }};
       --qr-live-radius: {{ qrcode_live_style.bg_radius_css }};
+      --qr-live-clip-path: {{ qrcode_live_style.bg_clip_css }};
+      --qr-live-padding: {{ qrcode_live_style.bg_padding_css }};
       {% if qrcode_live_style.bg_mode == 'image' and qrcode_live_style.bg_image_url %}--qr-live-bg-image: url('{{ qrcode_live_style.bg_image_url }}');{% endif %}
     }
 
