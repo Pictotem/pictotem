@@ -623,25 +623,27 @@ def _media_id_settings():
 # ── Add-on : détection de QR-codes → tags automatiques ────────────────────────
 # Activable depuis /admin/tags (section dédiée). À chaque photo (capture
 # simple ou photo strip), si activé, on scanne l'image finale (avec cadre
-# déjà appliqué) à la recherche de QR-codes via cv2.QRCodeDetector — déjà
-# une dépendance du projet (camera.py), donc aucun paquet supplémentaire à
-# installer sur la distribution Python portable du Pi/PC. Chaque QR-code
-# décodé devient un tag libre sur la capture, avec les mêmes bornes que les
-# tags libres saisis à la main (tags.free_min_length/free_max_length/
-# max_per_capture, voir _tags_settings()) pour rester cohérent avec le
-# reste de la fonctionnalité tags. Ne s'applique pas aux vidéos (détection
-# sur une image fixe uniquement). N'affecte jamais le succès de la
-# capture : toute erreur de détection est journalisée et ignorée.
+# déjà appliqué) à la recherche de QR-codes. Chaque QR-code décodé devient
+# un tag libre sur la capture, avec les mêmes bornes que les tags libres
+# saisis à la main (tags.free_min_length/free_max_length/max_per_capture,
+# voir _tags_settings()) pour rester cohérent avec le reste de la
+# fonctionnalité tags. Ne s'applique pas aux vidéos (détection sur une
+# image fixe uniquement). N'affecte jamais le succès de la capture : toute
+# erreur de détection est journalisée et ignorée. Utilise le même pipeline
+# de détection robuste (_qr_detect_boxes_robust, voir plus bas) que
+# l'aperçu en direct (/api/qr/live) : un QR-code repéré et lisible avant la
+# capture (grâce au détecteur ArUco + tentatives d'agrandissement) doit
+# aussi l'être une fois la photo prise, sous peine d'un tag manquant alors
+# que le visiteur a vu le contenu s'afficher en direct.
 
-_qr_detector = cv2.QRCodeDetector()
-# Détecteur alternatif (basé sur les marqueurs ArUco), sensiblement plus
-# sensible que QRCodeDetector pour la simple DÉTECTION (pas forcément le
-# décodage) de QR-codes de petite taille — utilisé uniquement pour l'aperçu
-# en direct (/api/qr/live) afin de pouvoir signaler "détecté mais trop
-# petit" au lieu de ne rien afficher du tout. Mesuré empiriquement : détecte
-# la présence d'un QR-code jusqu'à environ 5% de la largeur de l'image
-# (contre ~15% pour QRCodeDetector), mais ne parvient à le DÉCODER de façon
-# fiable qu'au-delà d'environ 10% — d'où l'écart observé par l'utilisateur.
+# Détecteur basé sur les marqueurs ArUco, sensiblement plus sensible que le
+# détecteur QR classique pour la simple DÉTECTION (pas forcément le
+# décodage) de QR-codes de petite taille. Mesuré empiriquement : détecte la
+# présence d'un QR-code jusqu'à environ 5% de la largeur de l'image (contre
+# ~15% pour le détecteur classique), et jusqu'à ~3-4% avec la tentative sur
+# image agrandie ci-dessous — mais ne parvient à le DÉCODER de façon fiable
+# qu'au-delà, d'où les tentatives de rattrapage supplémentaires
+# (_qr_retry_decode_upscaled, repêchage image entière).
 _qr_detector_aruco = cv2.QRCodeDetectorAruco()
 # Facteur d'agrandissement numérique de l'image ENTIÈRE, tenté uniquement si
 # la détection échoue complètement sur l'image brute (voir api_qr_live) —
@@ -758,15 +760,18 @@ def _scan_and_tag_qr_codes(capture_id: int, image) -> list:
     """Détecte les QR-codes présents dans `image` (tableau BGR déjà composé
     avec son cadre) et les ajoute comme tags libres sur `capture_id`.
     Retourne la liste des textes ajoutés (peut être vide). No-op immédiat
-    si l'add-on est désactivé."""
+    si l'add-on est désactivé. Utilise le pipeline de détection robuste
+    partagé avec l'aperçu en direct (_qr_detect_boxes_robust) : un QR-code
+    lu en direct doit aussi l'être sur la photo finale."""
     if get_setting('qrcode.enabled', '0') != '1':
         return []
     try:
-        found, decoded_texts, _points, _straight = _qr_detector.detectAndDecodeMulti(image)
+        detections = _qr_detect_boxes_robust(image)
     except Exception:
         logger.exception('QR-code : détection échouée pour la capture #%d.', capture_id)
         return []
-    if not found or not decoded_texts:
+    decoded_texts = [d['text'] for d in detections if d.get('text')]
+    if not decoded_texts:
         return []
 
     tags_cfg = _tags_settings()
@@ -838,6 +843,58 @@ def _qr_retry_decode_upscaled(frame, pts, target_side=400, max_scale=10.0):
         return ''
 
 
+def _qr_detect_boxes_robust(image) -> list:
+    """Pipeline de détection/décodage QR-code robuste, partagé entre
+    l'aperçu en direct (/api/qr/live) et le marquage automatique
+    post-capture (_scan_and_tag_qr_codes), pour qu'un QR-code lu pendant le
+    cadrage soit aussi lu sur la photo finale : passe directe (détecteur
+    ArUco) → si rien trouvé, nouvelle tentative sur l'image entière
+    agrandie (_QR_LIVE_FULLFRAME_UPSCALE) → pour chaque zone repérée mais
+    non décodée, nouvelle tentative sur un recadrage agrandi
+    (_qr_retry_decode_upscaled). Retourne une liste de dicts
+    {'text': str|None, 'points': [...]} — 'text' vaut None quand le code
+    est repéré (marqueurs trouvés) mais reste illisible malgré ces
+    tentatives."""
+    try:
+        found, decoded_texts, points, _straight = _qr_detector_aruco.detectAndDecodeMulti(image)
+    except Exception:
+        logger.exception('QR : détection échouée.')
+        return []
+
+    if not found or points is None or not len(points):
+        # Rien trouvé sur l'image brute : nouvelle tentative sur l'image
+        # ENTIÈRE agrandie numériquement. Les points trouvés sont dans
+        # l'espace de l'image agrandie : remis à l'échelle de l'image
+        # d'origine juste après, pour que le reste de la fonction
+        # (recadrage, coordonnées renvoyées à l'appelant) continue de
+        # raisonner dans l'espace de l'image brute sans distinction de cas.
+        try:
+            factor = _QR_LIVE_FULLFRAME_UPSCALE
+            big = cv2.resize(image, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
+            found2, points2 = _qr_detector_aruco.detectMulti(big)
+            if found2 and points2 is not None and len(points2):
+                _ok2, texts2, _straight2 = _qr_detector_aruco.decodeMulti(big, points2)
+                found = True
+                decoded_texts = texts2
+                points = [[(float(p[0]) / factor, float(p[1]) / factor) for p in pts] for pts in points2]
+        except Exception:
+            logger.exception('QR : nouvelle tentative (image entière agrandie) échouée.')
+
+    results = []
+    if found and points is not None:
+        texts = list(decoded_texts) if decoded_texts is not None else []
+        for i, pts in enumerate(points):
+            text = (texts[i] if i < len(texts) else '') or ''
+            text = text.strip().replace('\n', ' ').replace('\r', ' ')
+            if not text:
+                # Détecté mais pas décodé au premier passage : nouvelle
+                # tentative sur un recadrage agrandi avant de conclure que
+                # le code est réellement trop petit à lire.
+                text = _qr_retry_decode_upscaled(image, pts)
+            results.append({'text': text or None, 'points': pts})
+    return results
+
+
 # ── Add-on : contenu QR-code affiché en direct sur l'aperçu caméra ────────────
 # Activable indépendamment du tag automatique ci-dessus (voir admin_tags.html,
 # case "live_overlay") : pendant que le visiteur cadre sa prise (accueil,
@@ -858,61 +915,29 @@ def api_qr_live():
         return jsonify({'ok': True, 'enabled': True, 'boxes': []})
     h, w = frame.shape[:2]
     too_small_enabled = get_setting('qrcode.too_small_message_enabled', '1') == '1'
-    try:
-        found, decoded_texts, points, _straight = _qr_detector_aruco.detectAndDecodeMulti(frame)
-    except Exception:
-        logger.exception('QR live : détection échouée.')
-        return jsonify({'ok': True, 'enabled': True, 'boxes': []})
-
-    if not found or points is None or not len(points):
-        # Rien trouvé sur l'image brute : nouvelle tentative sur l'image
-        # ENTIÈRE agrandie numériquement (voir _QR_LIVE_FULLFRAME_UPSCALE) —
-        # repêche les QR-codes juste sous le seuil de détection. Les points
-        # trouvés sont dans l'espace de l'image agrandie : remis à l'échelle
-        # de l'image d'origine juste après, pour que tout le reste de la
-        # fonction (recadrage, coordonnées renvoyées au client) continue de
-        # raisonner dans l'espace de la frame brute sans distinction de cas.
-        try:
-            factor = _QR_LIVE_FULLFRAME_UPSCALE
-            big = cv2.resize(frame, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
-            found2, points2 = _qr_detector_aruco.detectMulti(big)
-            if found2 and points2 is not None and len(points2):
-                _ok2, texts2, _straight2 = _qr_detector_aruco.decodeMulti(big, points2)
-                found = True
-                decoded_texts = texts2
-                points = [[(float(p[0]) / factor, float(p[1]) / factor) for p in pts] for pts in points2]
-        except Exception:
-            logger.exception('QR live : nouvelle tentative (image entière agrandie) échouée.')
+    detections = _qr_detect_boxes_robust(frame)
 
     boxes = []
-    if found and points is not None:
-        texts = list(decoded_texts) if decoded_texts is not None else []
-        for i, pts in enumerate(points):
-            text = (texts[i] if i < len(texts) else '') or ''
-            text = text.strip().replace('\n', ' ').replace('\r', ' ')
-            if not text:
-                # Détecté mais pas décodé au premier passage : nouvelle
-                # tentative sur un recadrage agrandi avant de conclure que
-                # le code est réellement trop petit à lire.
-                text = _qr_retry_decode_upscaled(frame, pts)
-            xs = [float(p[0]) for p in pts]
-            ys = [float(p[1]) for p in pts]
-            if text:
-                box = {'x0': min(xs), 'y0': min(ys), 'x1': max(xs), 'y1': max(ys)}
-                box['text'] = text if len(text) <= 80 else text[:80] + '…'
-                box['too_small'] = False
-                boxes.append(box)
-            elif too_small_enabled:
-                # Marqueurs du QR-code repérés, mais code trop petit dans
-                # l'image pour être décodé même après agrandissement —
-                # signalé au visiteur (désactivable depuis /admin/tags),
-                # plutôt que silencieusement ignoré.
-                box = {'x0': min(xs), 'y0': min(ys), 'x1': max(xs), 'y1': max(ys)}
-                box['text'] = None
-                box['too_small'] = True
-                boxes.append(box)
-            # sinon (trop petit + message désactivé) : zone ignorée, comme
-            # si rien n'avait été détecté.
+    for det in detections:
+        pts = det['points']
+        xs = [float(p[0]) for p in pts]
+        ys = [float(p[1]) for p in pts]
+        if det['text']:
+            box = {'x0': min(xs), 'y0': min(ys), 'x1': max(xs), 'y1': max(ys)}
+            box['text'] = det['text'] if len(det['text']) <= 80 else det['text'][:80] + '…'
+            box['too_small'] = False
+            boxes.append(box)
+        elif too_small_enabled:
+            # Marqueurs du QR-code repérés, mais code trop petit dans
+            # l'image pour être décodé même après agrandissement —
+            # signalé au visiteur (désactivable depuis /admin/tags),
+            # plutôt que silencieusement ignoré.
+            box = {'x0': min(xs), 'y0': min(ys), 'x1': max(xs), 'y1': max(ys)}
+            box['text'] = None
+            box['too_small'] = True
+            boxes.append(box)
+        # sinon (trop petit + message désactivé) : zone ignorée, comme si
+        # rien n'avait été détecté.
     return jsonify({'ok': True, 'enabled': True, 'frame_width': w, 'frame_height': h, 'boxes': boxes})
 
 
