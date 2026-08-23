@@ -35,6 +35,11 @@ const btnValiderPhoto  = document.getElementById('btnValiderPhoto');
 const btnValiderVideo  = document.getElementById('btnValiderVideo');
 const btnPrintPhoto    = document.getElementById('btnPrintPhoto');
 const lookHereLabel    = document.getElementById('lookHereLabel');
+// Texte par défaut du bandeau "Regardez ici", tel que rendu côté serveur au
+// chargement de la page (texts.look_here) — capturé une seule fois ici, AVANT
+// toute mutation par le photo strip (qui réécrit temporairement ce texte en
+// "Photo x/N"). Sert à restaurer le bon texte avant chaque nouvelle capture.
+const LOOK_HERE_DEFAULT_TEXT = lookHereLabel ? lookHereLabel.textContent : '';
 const btnFramePickerBack  = document.getElementById('btnFramePickerBack');
 const btnFramePickerApply = document.getElementById('btnFramePickerApply');
 const btnPickerLeft  = document.getElementById('btnPickerLeft');
@@ -665,6 +670,12 @@ function stopRecordingCounter() {
 
 async function startCountdownAndCapture(kind) {
   clearInterval(countdownTimer);
+  // Toujours repartir du texte par défaut du bandeau "Regardez ici" : un
+  // photo strip précédent peut l'avoir laissé sur "Photo x/N" (voir
+  // runPhotoStrip) — sans cette remise à zéro, une capture photo/vidéo
+  // suivante affichait brièvement ce texte du strip pendant son propre
+  // décompte 3-2-1.
+  if (lookHereLabel) lookHereLabel.textContent = LOOK_HERE_DEFAULT_TEXT;
   let remaining = Number(cfg.countdownSeconds || 3);
 
   // Phase 1 : décompte pré-capture (centré, grand, "regardez ici" visible)
@@ -763,6 +774,7 @@ async function runPhotoStrip() {
     stopTopBarCountdown();
     showLookHere(false);
     showPhotoStripStep(false);
+    if (lookHereLabel) lookHereLabel.textContent = LOOK_HERE_DEFAULT_TEXT;
     updateFrameOverlay(false);
     showProcessing(true);
 
@@ -779,6 +791,7 @@ async function runPhotoStrip() {
     stopTopBarCountdown();
     showLookHere(false);
     showPhotoStripStep(false);
+    if (lookHereLabel) lookHereLabel.textContent = LOOK_HERE_DEFAULT_TEXT;
     showProcessing(false);
     updateFrameOverlay(false);
     applyHomeUi();
