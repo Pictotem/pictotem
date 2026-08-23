@@ -643,6 +643,15 @@ _qr_detector = cv2.QRCodeDetector()
 # (contre ~15% pour QRCodeDetector), mais ne parvient à le DÉCODER de façon
 # fiable qu'au-delà d'environ 10% — d'où l'écart observé par l'utilisateur.
 _qr_detector_aruco = cv2.QRCodeDetectorAruco()
+# Facteur d'agrandissement numérique de l'image ENTIÈRE, tenté uniquement si
+# la détection échoue complètement sur l'image brute (voir api_qr_live) —
+# repêche les QR-codes juste sous le seuil de détection du détecteur ArUco.
+# Mesuré empiriquement : un facteur 2 retrouve des QR-codes synthétiques
+# jusqu'à ~3-4% de la largeur de l'image (contre ~5% sans cette étape).
+# Coût mesuré ~70ms sur une image 1280x720 (contre ~40ms pour la passe
+# directe) : acceptable pour un polling à 600ms même quand aucun QR-code
+# n'est réellement présent dans le champ (cas le plus fréquent).
+_QR_LIVE_FULLFRAME_UPSCALE = 2.0
 
 
 def _qrcode_settings() -> dict:
@@ -694,6 +703,23 @@ _QR_LIVE_POSITIONS = [
 ]
 
 
+def _scale_padding_css(padding_css: str, scale: float) -> str:
+    """Multiplie chaque valeur numérique d'une déclaration CSS padding
+    ('7px 14px', '1.5em 1.7em', ...) par `scale`, en conservant l'unité
+    (px ou em) de chaque valeur. Utilisé pour la taille réglable de la
+    forme d'arrière-plan (bg_size_pct) — la police reste inchangée, seule
+    la marge interne (donc la taille de la forme) est mise à l'échelle."""
+    parts = []
+    for token in padding_css.split():
+        m = re.match(r'^([\d.]+)(px|em)$', token)
+        if not m:
+            parts.append(token)
+            continue
+        value, unit = float(m.group(1)), m.group(2)
+        parts.append(f'{value * scale:.3f}{unit}')
+    return ' '.join(parts) if parts else padding_css
+
+
 def _qr_live_style_settings() -> dict:
     bg_mode = get_setting('qrcode.live_style.bg_mode', '') or 'shape'
     if bg_mode not in ('shape', 'image'):
@@ -702,6 +728,11 @@ def _qr_live_style_settings() -> dict:
     if bg_shape not in _QR_LIVE_SHAPE_CSS:
         bg_shape = 'pill'
     shape_css = _QR_LIVE_SHAPE_CSS[bg_shape]
+    raw_size_pct = get_setting('qrcode.live_style.bg_size_pct', '') or '100'
+    try:
+        bg_size_pct = max(50, min(300, int(raw_size_pct)))
+    except ValueError:
+        bg_size_pct = 100
     position = get_setting('qrcode.live_style.position', '') or 'above'
     if position not in dict(_QR_LIVE_POSITIONS):
         position = 'above'
@@ -709,9 +740,10 @@ def _qr_live_style_settings() -> dict:
     return {
         'bg_mode': bg_mode,
         'bg_shape': bg_shape,
+        'bg_size_pct': bg_size_pct,
         'bg_radius_css': shape_css['radius'],
         'bg_clip_css': shape_css['clip'],
-        'bg_padding_css': shape_css['padding'],
+        'bg_padding_css': _scale_padding_css(shape_css['padding'], bg_size_pct / 100),
         'bg_color': get_setting('qrcode.live_style.bg_color', '') or '#0d8b8f',
         'bg_image_filename': bg_image_filename,
         'bg_image_url': f'/static/qr_live/{bg_image_filename}' if bg_image_filename else '',
@@ -831,6 +863,26 @@ def api_qr_live():
     except Exception:
         logger.exception('QR live : détection échouée.')
         return jsonify({'ok': True, 'enabled': True, 'boxes': []})
+
+    if not found or points is None or not len(points):
+        # Rien trouvé sur l'image brute : nouvelle tentative sur l'image
+        # ENTIÈRE agrandie numériquement (voir _QR_LIVE_FULLFRAME_UPSCALE) —
+        # repêche les QR-codes juste sous le seuil de détection. Les points
+        # trouvés sont dans l'espace de l'image agrandie : remis à l'échelle
+        # de l'image d'origine juste après, pour que tout le reste de la
+        # fonction (recadrage, coordonnées renvoyées au client) continue de
+        # raisonner dans l'espace de la frame brute sans distinction de cas.
+        try:
+            factor = _QR_LIVE_FULLFRAME_UPSCALE
+            big = cv2.resize(frame, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
+            found2, points2 = _qr_detector_aruco.detectMulti(big)
+            if found2 and points2 is not None and len(points2):
+                _ok2, texts2, _straight2 = _qr_detector_aruco.decodeMulti(big, points2)
+                found = True
+                decoded_texts = texts2
+                points = [[(float(p[0]) / factor, float(p[1]) / factor) for p in pts] for pts in points2]
+        except Exception:
+            logger.exception('QR live : nouvelle tentative (image entière agrandie) échouée.')
 
     boxes = []
     if found and points is not None:
@@ -2189,6 +2241,9 @@ def admin_tags():
             set_setting('qrcode.live_style.bg_mode', bg_mode if bg_mode in ('shape', 'image') else 'shape')
             bg_shape = request.form.get('bg_shape', 'pill')
             set_setting('qrcode.live_style.bg_shape', bg_shape if bg_shape in _QR_LIVE_SHAPE_CSS else 'pill')
+            raw_bg_size = (request.form.get('bg_size_pct') or '100').strip()
+            set_setting('qrcode.live_style.bg_size_pct',
+                        str(max(50, min(300, int(raw_bg_size)))) if raw_bg_size.isdigit() else '100')
             bg_color = (request.form.get('bg_color') or '').strip()
             if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
                 set_setting('qrcode.live_style.bg_color', bg_color)

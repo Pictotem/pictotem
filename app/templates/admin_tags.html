@@ -281,6 +281,12 @@
             </select>
           </div>
           <div class="field">
+            <label>Taille de la forme (%)</label>
+            <input type="number" name="bg_size_pct" id="qr_live_bg_size_pct" min="50" max="300" step="10"
+                   value="{{ qrcode_live_style.bg_size_pct }}" oninput="updateQrLivePreview()">
+            <p class="field-hint">Défaut : 100 %. Agrandit ou réduit la forme sans changer la taille du texte.</p>
+          </div>
+          <div class="field">
             <label>Couleur de fond</label>
             <div class="color-row">
               <input type="color" id="cp_qr_bg" value="{{ qrcode_live_style.bg_color }}"
@@ -560,6 +566,16 @@
   };
   const QR_LIVE_EXISTING_BG_IMAGE_URL = {{ (qrcode_live_style.bg_image_url or '') | tojson }};
 
+  // Mirroir de _scale_padding_css (app.py) : multiplie chaque valeur
+  // numérique d'un padding CSS par un facteur, unité conservée.
+  function scaleQrLivePadding(paddingCss, scale) {
+    return paddingCss.split(' ').map((token) => {
+      const m = token.match(/^([\d.]+)(px|em)$/);
+      if (!m) return token;
+      return (parseFloat(m[1]) * scale).toFixed(3) + m[2];
+    }).join(' ');
+  }
+
   function updateQrLivePreview() {
     const chip = document.getElementById('qrLivePreviewChip');
     if (!chip) return;
@@ -568,13 +584,14 @@
     const textColor = document.getElementById('qr_live_text_color')?.value || '#ffffff';
     const bgMode = document.querySelector('input[name="bg_mode"]:checked')?.value || 'shape';
     const shape = document.getElementById('qr_live_bg_shape')?.value || 'pill';
+    const sizePct = Number(document.getElementById('qr_live_bg_size_pct')?.value || 100) || 100;
     const shapeCss = QR_LIVE_SHAPE_CSS[shape] || QR_LIVE_SHAPE_CSS.pill;
     chip.style.fontFamily = font;
     chip.style.fontSize = size + 'px';
     chip.style.color = textColor;
     chip.style.borderRadius = shapeCss.radius;
     chip.style.clipPath = shapeCss.clip;
-    chip.style.padding = shapeCss.padding;
+    chip.style.padding = scaleQrLivePadding(shapeCss.padding, sizePct / 100);
     if (bgMode === 'image' && QR_LIVE_EXISTING_BG_IMAGE_URL) {
       chip.style.backgroundImage = `url('${QR_LIVE_EXISTING_BG_IMAGE_URL}')`;
       chip.style.backgroundSize = '100% 100%';
