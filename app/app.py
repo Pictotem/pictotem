@@ -633,6 +633,15 @@ def _media_id_settings():
 # capture : toute erreur de détection est journalisée et ignorée.
 
 _qr_detector = cv2.QRCodeDetector()
+# Détecteur alternatif (basé sur les marqueurs ArUco), sensiblement plus
+# sensible que QRCodeDetector pour la simple DÉTECTION (pas forcément le
+# décodage) de QR-codes de petite taille — utilisé uniquement pour l'aperçu
+# en direct (/api/qr/live) afin de pouvoir signaler "détecté mais trop
+# petit" au lieu de ne rien afficher du tout. Mesuré empiriquement : détecte
+# la présence d'un QR-code jusqu'à environ 5% de la largeur de l'image
+# (contre ~15% pour QRCodeDetector), mais ne parvient à le DÉCODER de façon
+# fiable qu'au-delà d'environ 10% — d'où l'écart observé par l'utilisateur.
+_qr_detector_aruco = cv2.QRCodeDetectorAruco()
 
 
 def _qrcode_settings() -> dict:
@@ -702,26 +711,31 @@ def api_qr_live():
         return jsonify({'ok': True, 'enabled': True, 'boxes': []})
     h, w = frame.shape[:2]
     try:
-        found, decoded_texts, points, _straight = _qr_detector.detectAndDecodeMulti(frame)
+        found, decoded_texts, points, _straight = _qr_detector_aruco.detectAndDecodeMulti(frame)
     except Exception:
         logger.exception('QR live : détection échouée.')
         return jsonify({'ok': True, 'enabled': True, 'boxes': []})
 
     boxes = []
-    if found and decoded_texts is not None and points is not None:
-        for i, text in enumerate(decoded_texts):
-            text = (text or '').strip().replace('\n', ' ').replace('\r', ' ')
-            if not text or i >= len(points):
-                continue
-            pts = points[i]
+    if found and points is not None:
+        texts = list(decoded_texts) if decoded_texts is not None else []
+        for i, pts in enumerate(points):
+            text = (texts[i] if i < len(texts) else '') or ''
+            text = text.strip().replace('\n', ' ').replace('\r', ' ')
             xs = [float(p[0]) for p in pts]
             ys = [float(p[1]) for p in pts]
-            display_text = text if len(text) <= 80 else text[:80] + '…'
-            boxes.append({
-                'text': display_text,
-                'x0': min(xs), 'y0': min(ys),
-                'x1': max(xs), 'y1': max(ys),
-            })
+            box = {'x0': min(xs), 'y0': min(ys), 'x1': max(xs), 'y1': max(ys)}
+            if text:
+                box['text'] = text if len(text) <= 80 else text[:80] + '…'
+                box['too_small'] = False
+            else:
+                # Marqueurs du QR-code repérés, mais code trop petit dans
+                # l'image pour être décodé (voir commentaire sur
+                # _qr_detector_aruco) — signalé au visiteur plutôt que
+                # silencieusement ignoré.
+                box['text'] = None
+                box['too_small'] = True
+            boxes.append(box)
     return jsonify({'ok': True, 'enabled': True, 'frame_width': w, 'frame_height': h, 'boxes': boxes})
 
 

@@ -142,6 +142,7 @@ function showQrDetectedBadge(show, count = 0) {
 // reproduit le même calcul d'échelle/recadrage ici pour convertir les
 // coordonnées pixel de la frame scannée en position à l'écran.
 const QR_LIVE_POLL_MS = 600;
+const QR_TOO_SMALL_TEXT = 'QR-code détecté mais trop petit';
 let qrLivePollTimer = null;
 
 function renderQrLiveBoxes(boxes, frameW, frameH) {
@@ -155,13 +156,19 @@ function renderQrLiveBoxes(boxes, frameW, frameH) {
   const offsetX = (containerW - frameW * scale) / 2;
   const offsetY = (containerH - frameH * scale) / 2;
   boxes.forEach((b) => {
-    if (!b || !b.text) return;
+    // b.text = null + b.too_small = true : marqueurs du QR-code repérés
+    // (détecteur ArUco, plus sensible) mais code trop petit dans l'image
+    // pour être décodé — on le signale quand même plutôt que de rester
+    // silencieux (voir _qr_detector_aruco côté serveur).
+    if (!b) return;
+    const label = b.too_small ? QR_TOO_SMALL_TEXT : b.text;
+    if (!label) return;
     const screenX0 = b.x0 * scale + offsetX;
     const screenX1 = b.x1 * scale + offsetX;
     const screenY0 = b.y0 * scale + offsetY;
     const el = document.createElement('div');
-    el.className = 'qr-live-label';
-    el.textContent = b.text;
+    el.className = 'qr-live-label' + (b.too_small ? ' too-small' : '');
+    el.textContent = label;
     el.style.left = `${(screenX0 + screenX1) / 2}px`;
     el.style.top = `${Math.max(0, screenY0 - 10)}px`;
     qrLiveOverlayLayer.appendChild(el);

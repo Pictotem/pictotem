@@ -768,6 +768,9 @@ button, input, a { font: inherit; }
   box-shadow: 0 10px 30px rgba(0,0,0,.28);
   backdrop-filter: blur(8px);
 }
+.qr-live-label.too-small {
+  background: rgba(178,110,10,.92);
+}
 
 .login-body,
 .gallery-body {
