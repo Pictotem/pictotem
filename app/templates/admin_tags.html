@@ -191,6 +191,18 @@
           Indépendant du tag automatique ci-dessus — peut être activé seul.
         </p>
       </div>
+      <div class="field">
+        <div class="check-row">
+          <input type="checkbox" id="qrcode_too_small_enabled" name="too_small_message_enabled"
+                 {% if qrcode_settings.too_small_message_enabled %}checked{% endif %}>
+          <span>Signaler « détecté mais trop petit » si le QR-code est repéré sans pouvoir être lu</span>
+        </div>
+        <p class="section-hint" style="margin-top:6px">
+          S'applique uniquement à l'aperçu en direct ci-dessus. Décoché : les QR-codes trop petits
+          pour être décodés (même après une nouvelle tentative en zoom numérique) sont
+          simplement ignorés, comme s'ils n'étaient pas présents.
+        </p>
+      </div>
     </div>
 
     <button class="btn-primary" type="submit">Enregistrer</button>

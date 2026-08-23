@@ -649,6 +649,7 @@ def _qrcode_settings() -> dict:
     return {
         'enabled': get_setting('qrcode.enabled', '0') == '1',
         'live_overlay': get_setting('qrcode.live_overlay', '0') == '1',
+        'too_small_message_enabled': get_setting('qrcode.too_small_message_enabled', '1') == '1',
     }
 
 
@@ -735,6 +736,50 @@ def _scan_and_tag_qr_codes(capture_id: int, image) -> list:
     return added
 
 
+def _qr_retry_decode_upscaled(frame, pts, target_side=400, max_scale=10.0):
+    """Deuxième chance de décodage pour un QR-code repéré (marqueurs ArUco
+    trouvés) mais dont le décodage a échoué au premier passage — typiquement
+    un code trop petit dans l'image brute. Recadre la zone détectée (avec
+    marge) puis l'agrandit numériquement (interpolation cubique) avant de
+    retenter la détection+décodage sur ce recadrage seul. Mesuré
+    empiriquement : rattrape le décodage pour des QR-codes descendant
+    jusqu'à ~5% de la largeur de l'image (contre ~10% sans cette étape),
+    y compris en présence de flou/bruit/compression JPEG typiques d'une
+    caméra réelle — mais ne fait pas de miracle en dessous : un code
+    peut rester illisible s'il n'a physiquement pas assez de pixels captés
+    par le capteur. Coût négligeable (recadrage minuscule), tenté
+    uniquement pour les zones déjà repérées mais non décodées."""
+    h, w = frame.shape[:2]
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    margin = 12
+    x0 = max(0, int(min(xs)) - margin)
+    y0 = max(0, int(min(ys)) - margin)
+    x1 = min(w, int(max(xs)) + margin)
+    y1 = min(h, int(max(ys)) + margin)
+    if x1 <= x0 or y1 <= y0:
+        return ''
+    crop = frame[y0:y1, x0:x1]
+    side = max(crop.shape[:2])
+    if side <= 0:
+        return ''
+    scale = min(max_scale, target_side / side)
+    if scale <= 1.0:
+        return ''  # déjà assez grand : le premier échec n'est pas dû à la taille
+    try:
+        upscaled = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        found2, points2 = _qr_detector_aruco.detectMulti(upscaled)
+        if not found2 or points2 is None or not len(points2):
+            return ''
+        _ok2, texts2, _straight2 = _qr_detector_aruco.decodeMulti(upscaled, points2)
+        if texts2 is None or not len(texts2):
+            return ''
+        return (texts2[0] or '').strip()
+    except Exception:
+        logger.exception('QR live : nouvelle tentative (recadrage agrandi) échouée.')
+        return ''
+
+
 # ── Add-on : contenu QR-code affiché en direct sur l'aperçu caméra ────────────
 # Activable indépendamment du tag automatique ci-dessus (voir admin_tags.html,
 # case "live_overlay") : pendant que le visiteur cadre sa prise (accueil,
@@ -754,6 +799,7 @@ def api_qr_live():
     if frame is None:
         return jsonify({'ok': True, 'enabled': True, 'boxes': []})
     h, w = frame.shape[:2]
+    too_small_enabled = get_setting('qrcode.too_small_message_enabled', '1') == '1'
     try:
         found, decoded_texts, points, _straight = _qr_detector_aruco.detectAndDecodeMulti(frame)
     except Exception:
@@ -766,20 +812,29 @@ def api_qr_live():
         for i, pts in enumerate(points):
             text = (texts[i] if i < len(texts) else '') or ''
             text = text.strip().replace('\n', ' ').replace('\r', ' ')
+            if not text:
+                # Détecté mais pas décodé au premier passage : nouvelle
+                # tentative sur un recadrage agrandi avant de conclure que
+                # le code est réellement trop petit à lire.
+                text = _qr_retry_decode_upscaled(frame, pts)
             xs = [float(p[0]) for p in pts]
             ys = [float(p[1]) for p in pts]
-            box = {'x0': min(xs), 'y0': min(ys), 'x1': max(xs), 'y1': max(ys)}
             if text:
+                box = {'x0': min(xs), 'y0': min(ys), 'x1': max(xs), 'y1': max(ys)}
                 box['text'] = text if len(text) <= 80 else text[:80] + '…'
                 box['too_small'] = False
-            else:
+                boxes.append(box)
+            elif too_small_enabled:
                 # Marqueurs du QR-code repérés, mais code trop petit dans
-                # l'image pour être décodé (voir commentaire sur
-                # _qr_detector_aruco) — signalé au visiteur plutôt que
-                # silencieusement ignoré.
+                # l'image pour être décodé même après agrandissement —
+                # signalé au visiteur (désactivable depuis /admin/tags),
+                # plutôt que silencieusement ignoré.
+                box = {'x0': min(xs), 'y0': min(ys), 'x1': max(xs), 'y1': max(ys)}
                 box['text'] = None
                 box['too_small'] = True
-            boxes.append(box)
+                boxes.append(box)
+            # sinon (trop petit + message désactivé) : zone ignorée, comme
+            # si rien n'avait été détecté.
     return jsonify({'ok': True, 'enabled': True, 'frame_width': w, 'frame_height': h, 'boxes': boxes})
 
 
@@ -2099,6 +2154,8 @@ def admin_tags():
         if action == 'qrcode_settings':
             set_setting('qrcode.enabled', '1' if request.form.get('enabled') else '0')
             set_setting('qrcode.live_overlay', '1' if request.form.get('live_overlay') else '0')
+            set_setting('qrcode.too_small_message_enabled',
+                        '1' if request.form.get('too_small_message_enabled') else '0')
             return redirect(url_for('admin_tags', ok='Réglages QR-code mis à jour.'))
 
         if action == 'qrcode_live_style':
