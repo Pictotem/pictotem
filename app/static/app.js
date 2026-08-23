@@ -143,7 +143,26 @@ function showQrDetectedBadge(show, count = 0) {
 // coordonnées pixel de la frame scannée en position à l'écran.
 const QR_LIVE_POLL_MS = 600;
 const QR_TOO_SMALL_TEXT = 'QR-code détecté mais trop petit';
+const QR_LIVE_GAP_PX = 10;
 let qrLivePollTimer = null;
+
+// Position de l'étiquette relative au QR-code détecté — réglable depuis
+// /admin/tags (cfg.qrLivePosition). Calcule le point d'ancrage (x, y) en
+// coordonnées écran + la classe CSS d'ancrage correspondante (voir
+// .qr-live-label.anchor-* dans style.css, translate() y amène l'étiquette
+// du bon côté de ce point).
+function computeQrLabelAnchor(position, screenX0, screenY0, screenX1, screenY1) {
+  const cx = (screenX0 + screenX1) / 2;
+  const cy = (screenY0 + screenY1) / 2;
+  switch (position) {
+    case 'below':  return { x: cx, y: screenY1 + QR_LIVE_GAP_PX, cls: 'anchor-top' };
+    case 'left':   return { x: screenX0 - QR_LIVE_GAP_PX, y: cy, cls: 'anchor-right' };
+    case 'right':  return { x: screenX1 + QR_LIVE_GAP_PX, y: cy, cls: 'anchor-left' };
+    case 'center': return { x: cx, y: cy, cls: 'anchor-center' };
+    case 'above':
+    default:       return { x: cx, y: Math.max(0, screenY0 - QR_LIVE_GAP_PX), cls: 'anchor-bottom' };
+  }
+}
 
 function renderQrLiveBoxes(boxes, frameW, frameH) {
   if (!qrLiveOverlayLayer) return;
@@ -155,6 +174,8 @@ function renderQrLiveBoxes(boxes, frameW, frameH) {
   const scale = Math.max(containerW / frameW, containerH / frameH);
   const offsetX = (containerW - frameW * scale) / 2;
   const offsetY = (containerH - frameH * scale) / 2;
+  const position = cfg.qrLivePosition || 'above';
+  const useBgImage = cfg.qrLiveBgMode === 'image' && !!cfg.qrLiveBgImageUrl;
   boxes.forEach((b) => {
     // b.text = null + b.too_small = true : marqueurs du QR-code repérés
     // (détecteur ArUco, plus sensible) mais code trop petit dans l'image
@@ -166,11 +187,16 @@ function renderQrLiveBoxes(boxes, frameW, frameH) {
     const screenX0 = b.x0 * scale + offsetX;
     const screenX1 = b.x1 * scale + offsetX;
     const screenY0 = b.y0 * scale + offsetY;
+    const screenY1 = b.y1 * scale + offsetY;
+    const anchor = computeQrLabelAnchor(position, screenX0, screenY0, screenX1, screenY1);
     const el = document.createElement('div');
-    el.className = 'qr-live-label' + (b.too_small ? ' too-small' : '');
+    let cls = 'qr-live-label ' + anchor.cls;
+    if (b.too_small) cls += ' too-small';
+    else if (useBgImage) cls += ' bg-image';
+    el.className = cls;
     el.textContent = label;
-    el.style.left = `${(screenX0 + screenX1) / 2}px`;
-    el.style.top = `${Math.max(0, screenY0 - 10)}px`;
+    el.style.left = `${anchor.x}px`;
+    el.style.top = `${anchor.y}px`;
     qrLiveOverlayLayer.appendChild(el);
   });
 }

@@ -373,6 +373,7 @@ def index():
         kiosk_unlock_taps=_kiosk_unlock_settings()['taps'],
         photostrip_step=_photostrip_step_settings(),
         qrcode=_qrcode_settings(),
+        qrcode_live_style=_qr_live_style_settings(),
     )
 
 
@@ -648,6 +649,49 @@ def _qrcode_settings() -> dict:
     return {
         'enabled': get_setting('qrcode.enabled', '0') == '1',
         'live_overlay': get_setting('qrcode.live_overlay', '0') == '1',
+    }
+
+
+# ── Apparence du texte QR-code affiché en direct (réglable depuis /admin/tags) ─
+QR_LIVE_DIR = BASE_DIR / 'app' / 'static' / 'qr_live'
+_QR_LIVE_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp'}
+_QR_LIVE_SHAPES = [
+    ('pill', 'Pilule (arrondi complet)'),
+    ('rounded', 'Coins arrondis'),
+    ('square', 'Rectangle (angles droits)'),
+]
+_QR_LIVE_SHAPE_RADIUS = {'pill': '999px', 'rounded': '14px', 'square': '0px'}
+_QR_LIVE_POSITIONS = [
+    ('above', 'Au-dessus du QR-code'),
+    ('below', 'En dessous du QR-code'),
+    ('left', 'À gauche du QR-code'),
+    ('right', 'À droite du QR-code'),
+    ('center', 'Superposé (centré sur le QR-code)'),
+]
+
+
+def _qr_live_style_settings() -> dict:
+    bg_mode = get_setting('qrcode.live_style.bg_mode', '') or 'shape'
+    if bg_mode not in ('shape', 'image'):
+        bg_mode = 'shape'
+    bg_shape = get_setting('qrcode.live_style.bg_shape', '') or 'pill'
+    if bg_shape not in _QR_LIVE_SHAPE_RADIUS:
+        bg_shape = 'pill'
+    position = get_setting('qrcode.live_style.position', '') or 'above'
+    if position not in dict(_QR_LIVE_POSITIONS):
+        position = 'above'
+    bg_image_filename = get_setting('qrcode.live_style.bg_image_filename', '')
+    return {
+        'bg_mode': bg_mode,
+        'bg_shape': bg_shape,
+        'bg_radius_css': _QR_LIVE_SHAPE_RADIUS[bg_shape],
+        'bg_color': get_setting('qrcode.live_style.bg_color', '') or '#0d8b8f',
+        'bg_image_filename': bg_image_filename,
+        'bg_image_url': f'/static/qr_live/{bg_image_filename}' if bg_image_filename else '',
+        'font': get_setting('qrcode.live_style.font', '') or _PROMO_FONTS[0][0],
+        'font_size': int(get_setting('qrcode.live_style.font_size', '') or '15'),
+        'text_color': get_setting('qrcode.live_style.text_color', '') or '#ffffff',
+        'position': position,
     }
 
 
@@ -2057,11 +2101,54 @@ def admin_tags():
             set_setting('qrcode.live_overlay', '1' if request.form.get('live_overlay') else '0')
             return redirect(url_for('admin_tags', ok='Réglages QR-code mis à jour.'))
 
+        if action == 'qrcode_live_style':
+            bg_mode = request.form.get('bg_mode', 'shape')
+            set_setting('qrcode.live_style.bg_mode', bg_mode if bg_mode in ('shape', 'image') else 'shape')
+            bg_shape = request.form.get('bg_shape', 'pill')
+            set_setting('qrcode.live_style.bg_shape', bg_shape if bg_shape in _QR_LIVE_SHAPE_RADIUS else 'pill')
+            bg_color = (request.form.get('bg_color') or '').strip()
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
+                set_setting('qrcode.live_style.bg_color', bg_color)
+            font_value = request.form.get('font', '')
+            if font_value in dict(_PROMO_FONTS):
+                set_setting('qrcode.live_style.font', font_value)
+            raw_size = (request.form.get('font_size') or '').strip()
+            if raw_size.isdigit() and int(raw_size) >= 8:
+                set_setting('qrcode.live_style.font_size', raw_size)
+            text_color = (request.form.get('text_color') or '').strip()
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', text_color):
+                set_setting('qrcode.live_style.text_color', text_color)
+            position = request.form.get('position', 'above')
+            set_setting('qrcode.live_style.position', position if position in dict(_QR_LIVE_POSITIONS) else 'above')
+
+            file = request.files.get('bg_image')
+            if file and file.filename:
+                ext = Path(file.filename).suffix.lower()
+                if ext not in _QR_LIVE_ALLOWED_EXT:
+                    return redirect(url_for('admin_tags', err="Format non supporté pour l'image de fond (PNG, JPG, WEBP)."))
+                QR_LIVE_DIR.mkdir(parents=True, exist_ok=True)
+                old = get_setting('qrcode.live_style.bg_image_filename', '')
+                if old:
+                    (QR_LIVE_DIR / old).unlink(missing_ok=True)
+                safe = f'qr-live-bg-{int(datetime.now().timestamp() * 1000)}{ext}'
+                file.save(str(QR_LIVE_DIR / safe))
+                set_setting('qrcode.live_style.bg_image_filename', safe)
+            elif request.form.get('bg_image_delete'):
+                old = get_setting('qrcode.live_style.bg_image_filename', '')
+                if old:
+                    (QR_LIVE_DIR / old).unlink(missing_ok=True)
+                    set_setting('qrcode.live_style.bg_image_filename', '')
+
+            return redirect(url_for('admin_tags', ok='Apparence du texte QR-code mise à jour.'))
+
     return render_template(
         'admin_tags.html', config=CONFIG,
         settings=_tags_settings(), media_id=_media_id_settings(), tags=list_tags(),
         assignments=list_capture_tags_with_media(), tags_fonts=_PROMO_FONTS,
         qrcode_settings=_qrcode_settings(),
+        qrcode_live_style=_qr_live_style_settings(),
+        qrcode_live_positions=_QR_LIVE_POSITIONS,
+        qrcode_live_shapes=_QR_LIVE_SHAPES,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )

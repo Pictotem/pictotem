@@ -741,8 +741,10 @@ button, input, a { font: inherit; }
    le visiteur le présente devant l'objectif (avant capture) — voir
    pollQrLive()/renderQrLiveBoxes() dans app.js, activable depuis
    /admin/tags (add-on QR-code, case "live_overlay"). Calque plein écran,
-   une étiquette positionnée dynamiquement (style.left/top en JS) par
-   QR-code détecté. */
+   une étiquette positionnée dynamiquement (style.left/top + classe
+   d'ancrage en JS) par QR-code détecté. Texte/taille/police/couleur/fond/
+   position réglables depuis /admin/tags (voir _qr_live_style_settings dans
+   app.py) — variables CSS injectées dans le :root de index.html. */
 .qr-live-overlay-layer {
   position: absolute;
   inset: 0;
@@ -751,13 +753,13 @@ button, input, a { font: inherit; }
 }
 .qr-live-label {
   position: absolute;
-  transform: translate(-50%, -100%);
   max-width: min(70vw, 420px);
   padding: 7px 14px;
-  border-radius: 999px;
-  background: rgba(13,139,143,.92);
-  color: #ffffff;
-  font-size: 15px;
+  border-radius: var(--qr-live-radius, 999px);
+  background: var(--qr-live-bg-color, rgba(13,139,143,.92));
+  color: var(--qr-live-text-color, #ffffff);
+  font-family: var(--qr-live-font, inherit);
+  font-size: var(--qr-live-font-size, 15px);
   font-weight: 700;
   line-height: 1.25;
   text-align: center;
@@ -768,8 +770,32 @@ button, input, a { font: inherit; }
   box-shadow: 0 10px 30px rgba(0,0,0,.28);
   backdrop-filter: blur(8px);
 }
+/* Position de l'étiquette relative au QR-code détecté (voir cfg.qrLivePosition
+   et computeQrLabelPos() dans app.js) — le point ancré via style.left/top
+   correspond au bord concerné du QR-code, translate() amène l'étiquette du
+   bon côté de ce point. */
+.qr-live-label.anchor-bottom { transform: translate(-50%, -100%); } /* au-dessus */
+.qr-live-label.anchor-top    { transform: translate(-50%, 0); }     /* en dessous */
+.qr-live-label.anchor-right  { transform: translate(-100%, -50%); } /* à gauche */
+.qr-live-label.anchor-left   { transform: translate(0, -50%); }     /* à droite */
+.qr-live-label.anchor-center { transform: translate(-50%, -50%); }  /* superposé */
+/* Fond image (au lieu de forme + couleur unie) — voir --qr-live-bg-image,
+   injecté seulement si bg_mode = "image" et une image est enregistrée. */
+.qr-live-label.bg-image {
+  background-image: var(--qr-live-bg-image);
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  background-color: transparent;
+  border: none;
+  backdrop-filter: none;
+}
+/* QR-code repéré mais trop petit pour être décodé : toujours un style fixe
+   (ambre), indépendant de l'apparence configurée ci-dessus, pour rester
+   clairement distinct d'un contenu réellement lu. */
 .qr-live-label.too-small {
-  background: rgba(178,110,10,.92);
+  background: rgba(178,110,10,.92) !important;
+  background-image: none !important;
+  color: #ffffff !important;
 }
 
 .login-body,

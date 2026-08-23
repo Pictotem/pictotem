@@ -57,6 +57,15 @@
       --strip-step-right: {{ photostrip_step.css_right }};
       --strip-step-bottom: {{ photostrip_step.css_bottom }};
       --strip-step-transform: {{ photostrip_step.css_transform }};
+
+      /* Étiquette QR-code affichée en direct — réglable depuis /admin/tags
+         (voir _qr_live_style_settings dans app.py). */
+      --qr-live-font: {{ qrcode_live_style.font|safe }};
+      --qr-live-font-size: {{ qrcode_live_style.font_size }}px;
+      --qr-live-text-color: {{ qrcode_live_style.text_color }};
+      --qr-live-bg-color: {{ qrcode_live_style.bg_color }};
+      --qr-live-radius: {{ qrcode_live_style.bg_radius_css }};
+      {% if qrcode_live_style.bg_mode == 'image' and qrcode_live_style.bg_image_url %}--qr-live-bg-image: url('{{ qrcode_live_style.bg_image_url }}');{% endif %}
     }
 
     /* Grand chiffre d'étape du photo strip (1, 2, 3...) affiché plein écran
@@ -483,6 +492,9 @@
       kioskUnlockTaps:           {{ kiosk_unlock_taps }},
       photoStripStepText:        {{ photostrip_step.text | tojson }},
       qrLiveOverlayEnabled:      {{ 'true' if qrcode.live_overlay else 'false' }},
+      qrLiveBgMode:              {{ qrcode_live_style.bg_mode | tojson }},
+      qrLiveBgImageUrl:          {{ qrcode_live_style.bg_image_url | tojson }},
+      qrLivePosition:            {{ qrcode_live_style.position | tojson }},
     };
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>

@@ -196,6 +196,118 @@
     <button class="btn-primary" type="submit">Enregistrer</button>
   </form>
 
+  <!-- Apparence du texte QR-code affiché en direct -->
+  <form method="post" enctype="multipart/form-data" style="margin-top:24px">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="qrcode_live_style">
+
+    <div class="form-card">
+      <p class="section-title">Apparence du texte affiché en direct</p>
+      <p class="section-hint">
+        Style de l'étiquette qui affiche le contenu décodé (ou le message « trop petit »)
+        au-dessus du QR-code présenté devant l'objectif.
+      </p>
+
+      <div class="field">
+        <label>Position relative au QR-code</label>
+        <select name="position" id="qr_live_position">
+          {% for value, label in qrcode_live_positions %}
+          <option value="{{ value }}" {% if qrcode_live_style.position == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Police</label>
+          <select name="font" id="qr_live_font">
+            {% for value, label in tags_fonts %}
+            <option value="{{ value }}" {% if qrcode_live_style.font == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Taille du texte (px)</label>
+          <input type="number" name="font_size" id="qr_live_font_size" min="8" max="72" value="{{ qrcode_live_style.font_size }}">
+        </div>
+        <div class="field">
+          <label>Couleur du texte</label>
+          <div class="color-row">
+            <input type="color" id="cp_qr_text" value="{{ qrcode_live_style.text_color }}"
+                   oninput="document.getElementById('qr_live_text_color').value=this.value; updateQrLivePreview()">
+            <input type="text" id="qr_live_text_color" name="text_color" class="color-hex"
+                   value="{{ qrcode_live_style.text_color }}" maxlength="7"
+                   oninput="document.getElementById('cp_qr_text').value=this.value; updateQrLivePreview()">
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Arrière-plan</label>
+        <div class="field-row" style="gap:14px;align-items:center;margin-bottom:14px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:14px;font-weight:400;color:var(--text);cursor:pointer">
+            <input type="radio" name="bg_mode" value="shape" id="qr_bg_mode_shape"
+                   {% if qrcode_live_style.bg_mode == 'shape' %}checked{% endif %}
+                   onchange="updateQrLiveBgModeUi()" style="width:16px;height:16px;accent-color:var(--accent)">
+            Forme + couleur
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:14px;font-weight:400;color:var(--text);cursor:pointer">
+            <input type="radio" name="bg_mode" value="image" id="qr_bg_mode_image"
+                   {% if qrcode_live_style.bg_mode == 'image' %}checked{% endif %}
+                   onchange="updateQrLiveBgModeUi()" style="width:16px;height:16px;accent-color:var(--accent)">
+            Image de fond
+          </label>
+        </div>
+
+        <div id="qr_bg_shape_fields" class="field-row">
+          <div class="field">
+            <label>Forme</label>
+            <select name="bg_shape" id="qr_live_bg_shape" onchange="updateQrLivePreview()">
+              {% for value, label in qrcode_live_shapes %}
+              <option value="{{ value }}" {% if qrcode_live_style.bg_shape == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>Couleur de fond</label>
+            <div class="color-row">
+              <input type="color" id="cp_qr_bg" value="{{ qrcode_live_style.bg_color }}"
+                     oninput="document.getElementById('qr_live_bg_color').value=this.value; updateQrLivePreview()">
+              <input type="text" id="qr_live_bg_color" name="bg_color" class="color-hex"
+                     value="{{ qrcode_live_style.bg_color }}" maxlength="7"
+                     oninput="document.getElementById('cp_qr_bg').value=this.value; updateQrLivePreview()">
+            </div>
+          </div>
+        </div>
+
+        <div id="qr_bg_image_fields" class="field">
+          <label>Image de fond (PNG, JPG, WEBP)</label>
+          {% if qrcode_live_style.bg_image_url %}
+          <div style="margin-bottom:10px;display:flex;align-items:center;gap:12px">
+            <img src="{{ qrcode_live_style.bg_image_url }}" alt="Fond actuel"
+                 style="max-height:50px;border-radius:8px;border:1px solid var(--border)">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" name="bg_image_delete" style="width:16px;height:16px;accent-color:var(--accent)">
+              Supprimer cette image
+            </label>
+          </div>
+          {% endif %}
+          <input type="file" name="bg_image" accept=".png,.jpg,.jpeg,.webp">
+          <p class="field-hint">Envoyer un nouveau fichier remplace l'image actuelle. Laisser vide pour la conserver.</p>
+        </div>
+      </div>
+
+      <div class="tags-preview-wrap">
+        <p class="tags-preview-label">Aperçu</p>
+        <div class="tags-preview-box" style="justify-content:center">
+          <span class="tag-preview-chip" id="qrLivePreviewChip">https://exemple.fr/ma-galerie</span>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+
   <!-- ID unique média -->
   <form method="post" style="margin-top:24px">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -409,6 +521,51 @@
   document.getElementById('style_font')?.addEventListener('change', updateTagsPreview);
   document.getElementById('style_font_size')?.addEventListener('input', updateTagsPreview);
   updateTagsPreview();
+
+  // Aperçu de l'étiquette QR-code affichée en direct — même principe que
+  // l'aperçu des tags ci-dessus. L'image de fond n'est prévisualisable que
+  // si une image est déjà enregistrée (un nouveau fichier tout juste
+  // sélectionné n'est visible qu'après enregistrement).
+  const QR_LIVE_SHAPE_RADIUS = { pill: '999px', rounded: '14px', square: '0px' };
+  const QR_LIVE_EXISTING_BG_IMAGE_URL = {{ (qrcode_live_style.bg_image_url or '') | tojson }};
+
+  function updateQrLivePreview() {
+    const chip = document.getElementById('qrLivePreviewChip');
+    if (!chip) return;
+    const font = document.getElementById('qr_live_font')?.value || '';
+    const size = document.getElementById('qr_live_font_size')?.value || 15;
+    const textColor = document.getElementById('qr_live_text_color')?.value || '#ffffff';
+    const bgMode = document.querySelector('input[name="bg_mode"]:checked')?.value || 'shape';
+    chip.style.fontFamily = font;
+    chip.style.fontSize = size + 'px';
+    chip.style.color = textColor;
+    if (bgMode === 'image' && QR_LIVE_EXISTING_BG_IMAGE_URL) {
+      chip.style.backgroundImage = `url('${QR_LIVE_EXISTING_BG_IMAGE_URL}')`;
+      chip.style.backgroundSize = '100% 100%';
+      chip.style.backgroundColor = 'transparent';
+      chip.style.borderRadius = '14px';
+    } else {
+      const shape = document.getElementById('qr_live_bg_shape')?.value || 'pill';
+      const bgColor = document.getElementById('qr_live_bg_color')?.value || '#0d8b8f';
+      chip.style.backgroundImage = 'none';
+      chip.style.backgroundColor = bgColor;
+      chip.style.borderRadius = QR_LIVE_SHAPE_RADIUS[shape] || '999px';
+    }
+  }
+
+  function updateQrLiveBgModeUi() {
+    const mode = document.querySelector('input[name="bg_mode"]:checked')?.value || 'shape';
+    const shapeFields = document.getElementById('qr_bg_shape_fields');
+    const imageFields = document.getElementById('qr_bg_image_fields');
+    if (shapeFields) shapeFields.style.display = mode === 'shape' ? '' : 'none';
+    if (imageFields) imageFields.style.display = mode === 'image' ? '' : 'none';
+    updateQrLivePreview();
+  }
+
+  document.getElementById('qr_live_font')?.addEventListener('change', updateQrLivePreview);
+  document.getElementById('qr_live_font_size')?.addEventListener('input', updateQrLivePreview);
+  document.getElementById('qr_live_position')?.addEventListener('change', updateQrLivePreview);
+  updateQrLiveBgModeUi();
 </script>
 </body>
 </html>
