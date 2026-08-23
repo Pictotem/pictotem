@@ -160,6 +160,31 @@
     <button class="btn-primary" type="submit">Enregistrer</button>
   </form>
 
+  <!-- Add-on : détection de QR-codes → tags automatiques -->
+  <form method="post" style="margin-top:24px">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="qrcode_settings">
+
+    <div class="form-card">
+      <p class="section-title">Add-on — Détection de QR-codes</p>
+      <p class="section-hint">
+        À chaque photo (capture simple ou photo strip), scanne l'image à la recherche de
+        QR-codes et ajoute automatiquement chaque code détecté comme tag libre sur le média —
+        sans action de l'invité. Utilise les mêmes règles (longueur, nombre max. par média) que
+        le tag libre ci-dessus. Nécessite que « Activer les tags sur les captures » soit coché
+        pour que ces tags soient visibles (galerie, journal, /bestof).
+      </p>
+      <div class="field">
+        <div class="check-row">
+          <input type="checkbox" id="qrcode_enabled" name="enabled" {% if qrcode_settings.enabled %}checked{% endif %}>
+          <span>Activer la détection automatique de QR-codes</span>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+
   <!-- ID unique média -->
   <form method="post" style="margin-top:24px">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">

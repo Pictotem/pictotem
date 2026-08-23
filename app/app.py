@@ -430,6 +430,7 @@ def capture_photo():
     make_thumb(filepath, THUMBS_DIR / thumb_name)
     capture_id, media_uid = record_capture('photo', filename, thumb_name)
     logger.info('Photo capturée %s (cadre=%s)', filename, frame_id)
+    _scan_and_tag_qr_codes(capture_id, display_frame)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
                     'filename': filename,
                     'url': f'/media/photo/{filename}', 'message': message_text()})
@@ -614,6 +615,68 @@ def _media_id_settings():
     }
 
 
+# ── Add-on : détection de QR-codes → tags automatiques ────────────────────────
+# Activable depuis /admin/tags (section dédiée). À chaque photo (capture
+# simple ou photo strip), si activé, on scanne l'image finale (avec cadre
+# déjà appliqué) à la recherche de QR-codes via cv2.QRCodeDetector — déjà
+# une dépendance du projet (camera.py), donc aucun paquet supplémentaire à
+# installer sur la distribution Python portable du Pi/PC. Chaque QR-code
+# décodé devient un tag libre sur la capture, avec les mêmes bornes que les
+# tags libres saisis à la main (tags.free_min_length/free_max_length/
+# max_per_capture, voir _tags_settings()) pour rester cohérent avec le
+# reste de la fonctionnalité tags. Ne s'applique pas aux vidéos (détection
+# sur une image fixe uniquement). N'affecte jamais le succès de la
+# capture : toute erreur de détection est journalisée et ignorée.
+
+_qr_detector = cv2.QRCodeDetector()
+
+
+def _qrcode_settings() -> dict:
+    return {
+        'enabled': get_setting('qrcode.enabled', '0') == '1',
+    }
+
+
+def _scan_and_tag_qr_codes(capture_id: int, image) -> list:
+    """Détecte les QR-codes présents dans `image` (tableau BGR déjà composé
+    avec son cadre) et les ajoute comme tags libres sur `capture_id`.
+    Retourne la liste des textes ajoutés (peut être vide). No-op immédiat
+    si l'add-on est désactivé."""
+    if get_setting('qrcode.enabled', '0') != '1':
+        return []
+    try:
+        found, decoded_texts, _points, _straight = _qr_detector.detectAndDecodeMulti(image)
+    except Exception:
+        logger.exception('QR-code : détection échouée pour la capture #%d.', capture_id)
+        return []
+    if not found or not decoded_texts:
+        return []
+
+    tags_cfg = _tags_settings()
+    added, seen = [], set()
+    for text in decoded_texts:
+        text = (text or '').strip().replace('\n', ' ').replace('\r', ' ')
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        if len(text) < tags_cfg['free_min_length']:
+            continue
+        if len(text) > tags_cfg['free_max_length']:
+            text = text[:tags_cfg['free_max_length']]
+        if count_capture_tags(capture_id) >= tags_cfg['max_per_capture']:
+            break
+        try:
+            add_capture_tag(capture_id, tag_id=None, label=text)
+            added.append(text)
+        except Exception:
+            logger.exception('QR-code : échec ajout du tag "%s" sur la capture #%d.', text, capture_id)
+
+    if added:
+        logger.info('QR-code(s) détecté(s) sur la capture #%d, ajouté(s) comme tag(s) : %s',
+                    capture_id, ', '.join(added))
+    return added
+
+
 @app.route('/api/capture/<int:capture_id>/tags', methods=['GET', 'POST'])
 @require_main_auth
 def api_capture_tags(capture_id):
@@ -733,6 +796,7 @@ def capture_photostrip():
     make_thumb(filepath, THUMBS_DIR / thumb_name)
     capture_id, media_uid = record_capture('photo', filename, thumb_name)
     logger.info('Photo strip capturé %s (%d prises, cadre=%s)', filename, shots, frame_id)
+    _scan_and_tag_qr_codes(capture_id, strip_img)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
                     'filename': filename,
                     'url': f'/media/photo/{filename}', 'message': message_text()})
@@ -1784,10 +1848,15 @@ def admin_tags():
                 return redirect(url_for('admin_tags', ok=f"Tag « {row['label']} » retiré du média."))
             return redirect(url_for('admin_tags', err='Assignation introuvable.'))
 
+        if action == 'qrcode_settings':
+            set_setting('qrcode.enabled', '1' if request.form.get('enabled') else '0')
+            return redirect(url_for('admin_tags', ok='Réglages QR-code mis à jour.'))
+
     return render_template(
         'admin_tags.html', config=CONFIG,
         settings=_tags_settings(), media_id=_media_id_settings(), tags=list_tags(),
         assignments=list_capture_tags_with_media(), tags_fonts=_PROMO_FONTS,
+        qrcode_settings=_qrcode_settings(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )
