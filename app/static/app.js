@@ -31,6 +31,8 @@ const btnBackPhoto     = document.getElementById('btnBackPhoto');
 const btnBackVideo     = document.getElementById('btnBackVideo');
 const btnRetakePhoto   = document.getElementById('btnRetakePhoto');
 const btnRetakeVideo   = document.getElementById('btnRetakeVideo');
+const btnValiderPhoto  = document.getElementById('btnValiderPhoto');
+const btnValiderVideo  = document.getElementById('btnValiderVideo');
 const btnPrintPhoto    = document.getElementById('btnPrintPhoto');
 const lookHereLabel    = document.getElementById('lookHereLabel');
 const btnFramePickerBack  = document.getElementById('btnFramePickerBack');
@@ -804,6 +806,18 @@ async function doRetake() {
 }
 btnRetakePhoto?.addEventListener('click', doRetake);
 btnRetakeVideo?.addEventListener('click', doRetake);
+
+// — Valider et reprendre : garde la capture tout juste prise telle quelle
+// (déjà enregistrée par record_capture() côté serveur au moment de la
+// prise de vue — rien à faire ici) et relance immédiatement une nouvelle
+// prise avec le même mode/cadre. Contrairement à doRetake() ci-dessus,
+// aucun appel réseau : pas de suppression.
+function doValiderReprendre() {
+  const mode = captureMode;
+  applyFrameStepUi(mode || 'photo');
+}
+btnValiderPhoto?.addEventListener('click', doValiderReprendre);
+btnValiderVideo?.addEventListener('click', doValiderReprendre);
 
 btnPrintPhoto?.addEventListener('click', async () => {
   if (!replayCapture) return;

@@ -119,7 +119,8 @@ TEXT_DEFAULTS: dict[str, str] = {
     'btn_retour':         'Retour',
     'btn_appliquer':      'Appliquer',
     'btn_imprimer':       'Imprimer',
-    'btn_recommencer':    'Recommencer',
+    'btn_recommencer':    'Annuler et reprendre',
+    'btn_valider_reprendre': 'Valider et reprendre',
     'btn_photo_strip':    'Photo strip',
     'btn_tags':           'Tags',
     'processing_title':   'Traitement',
@@ -190,11 +191,12 @@ def get_bottom_bar_sizes() -> dict:
 
 _BUTTON_SHAPES = {'pill': 999, 'rounded': 16, 'square': 6}
 _BUTTON_ROLES = [
-    ('pri',    'Bouton principal (ex. Prendre une photo, Appliquer)', '#16f062'),
-    ('sec',    'Bouton secondaire (ex. Prendre une vidéo, Imprimer)',  '#32c1f9'),
-    ('ter',    'Bouton tertiaire (ex. Photo strip, Retour)',           '#ffd726'),
-    ('retake', 'Recommencer',                                          '#6c7a89'),
-    ('tags',   'Tags',                                                 '#9b59b6'),
+    ('pri',     'Bouton principal (ex. Prendre une photo, Appliquer)', '#16f062'),
+    ('sec',     'Bouton secondaire (ex. Prendre une vidéo, Imprimer)',  '#32c1f9'),
+    ('ter',     'Bouton tertiaire (ex. Photo strip, Retour)',           '#ffd726'),
+    ('retake',  'Annuler et reprendre',                                 '#6c7a89'),
+    ('valider', 'Valider et reprendre',                                 '#f2994a'),
+    ('tags',    'Tags',                                                 '#9b59b6'),
 ]
 
 

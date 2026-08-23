@@ -40,6 +40,9 @@
       --btn-bg-retake: {{ buttons.roles.retake.bg }};
       --btn-text-retake: {{ buttons.roles.retake.text }};
       --btn-weight-retake: {{ '800' if buttons.roles.retake.bold else '400' }};
+      --btn-bg-valider: {{ buttons.roles.valider.bg }};
+      --btn-text-valider: {{ buttons.roles.valider.text }};
+      --btn-weight-valider: {{ '800' if buttons.roles.valider.bold else '400' }};
       --btn-bg-tags: {{ buttons.roles.tags.bg }};
       --btn-text-tags: {{ buttons.roles.tags.text }};
       --btn-weight-tags: {{ '800' if buttons.roles.tags.bold else '400' }};
@@ -328,6 +331,7 @@
           <div class="bottom-bar-buttons hidden" id="replayPhotoBtns">
             <button class="action-btn pri" id="btnBackPhoto">{{ texts.btn_retour }}</button>
             <button class="action-btn retake" id="btnRetakePhoto">{{ texts.btn_recommencer }}</button>
+            <button class="action-btn valider" id="btnValiderPhoto">{{ texts.btn_valider_reprendre }}</button>
             {% if tags_enabled %}
             <button class="action-btn tags" id="btnTagsPhoto">{{ texts.btn_tags }}</button>
             {% endif %}
@@ -338,6 +342,7 @@
           <div class="bottom-bar-buttons hidden" id="replayVideoBtns">
             <button class="action-btn pri" id="btnBackVideo">{{ texts.btn_retour }}</button>
             <button class="action-btn retake" id="btnRetakeVideo">{{ texts.btn_recommencer }}</button>
+            <button class="action-btn valider" id="btnValiderVideo">{{ texts.btn_valider_reprendre }}</button>
             {% if tags_enabled %}
             <button class="action-btn tags" id="btnTagsVideo">{{ texts.btn_tags }}</button>
             {% endif %}

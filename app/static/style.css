@@ -363,6 +363,13 @@ button, input, a { font: inherit; }
   font-weight: var(--btn-weight-retake, 800);
 }
 
+.action-btn.valider {
+  background: var(--btn-bg-valider, #f2994a);
+  border-color: transparent;
+  color: var(--btn-text-valider, #111111);
+  font-weight: var(--btn-weight-valider, 800);
+}
+
 .action-btn.tags {
   background: var(--btn-bg-tags, #9b59b6);
   border-color: transparent;

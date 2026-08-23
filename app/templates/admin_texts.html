@@ -128,9 +128,16 @@
           </label>
         </div>
         <div class="text-field">
-          <label class="field-label" for="t_btn_recommencer">Recommencer</label>
+          <label class="field-label" for="t_btn_recommencer">Annuler et reprendre</label>
           <input type="text" id="t_btn_recommencer" name="text_btn_recommencer" value="{{ texts.btn_recommencer }}" placeholder="{{ defaults.btn_recommencer }}">
           <p class="field-default">Défaut : {{ defaults.btn_recommencer }}</p>
+          <p class="field-default">N'enregistre pas la capture ; permet d'en reprendre une autre avec le même cadre.</p>
+        </div>
+        <div class="text-field">
+          <label class="field-label" for="t_btn_valider_reprendre">Valider et reprendre</label>
+          <input type="text" id="t_btn_valider_reprendre" name="text_btn_valider_reprendre" value="{{ texts.btn_valider_reprendre }}" placeholder="{{ defaults.btn_valider_reprendre }}">
+          <p class="field-default">Défaut : {{ defaults.btn_valider_reprendre }}</p>
+          <p class="field-default">Enregistre la capture ; permet d'en reprendre une autre avec le même cadre.</p>
         </div>
         <div class="text-field">
           <label class="field-label" for="t_btn_retour">Retour</label>
