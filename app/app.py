@@ -2827,6 +2827,8 @@ _ADMIN_BLOCKS = {
     'frames_welcome':      {'title': "Cadre d'accueil",                         'default_page': 'frames',      'template': 'blocks/frames_welcome.html',      'context_fn': '_block_ctx_frames_welcome'},
     'frames_import':       {'title': "Importer un pack",                        'default_page': 'frames',      'template': 'blocks/frames_import.html',       'context_fn': None},
     'frames_new':          {'title': "Ajouter un cadre",                        'default_page': 'frames',      'template': 'blocks/frames_new.html',          'context_fn': None},
+    'votes_activation':    {'title': "Activation",                              'default_page': 'votes',       'template': 'blocks/votes_activation.html',    'context_fn': '_block_ctx_votes_activation'},
+    'votes_thresholds_colors': {'title': "Seuils & couleurs",                   'default_page': 'votes',       'template': 'blocks/votes_thresholds_colors.html', 'context_fn': '_block_ctx_votes_thresholds_colors'},
 }
 # (slug, libellé affiché dans le menu « Déplacer vers », endpoint Flask) —
 # seulement les tuiles qui exécutent déjà la boucle de rendu de blocs
@@ -2840,6 +2842,7 @@ _ADMIN_PAGES = [
     ('system',      'Caméra & écran',       'admin_system'),
     ('gallery',     'Galerie',              'admin_gallery'),
     ('frames',      'Cadres',               'admin_frames'),
+    ('votes',       'Votes',                'admin_votes'),
 ]
 _ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
 
@@ -2961,6 +2964,14 @@ def _block_ctx_gallery_text() -> dict:
 def _block_ctx_frames_welcome() -> dict:
     welcome_fn = get_setting('welcome_frame_filename', '')
     return {'welcome_frame_url': f'/static/frames/{welcome_fn}' if welcome_fn else ''}
+
+
+def _block_ctx_votes_activation() -> dict:
+    return {'vote_enabled': get_setting('vote.enabled', '1') == '1'}
+
+
+def _block_ctx_votes_thresholds_colors() -> dict:
+    return {'cfg': _vote_cfg()}
 
 
 @app.route('/admin/ui/block_collapse', methods=['POST'])
@@ -3541,28 +3552,45 @@ def admin_vote_adjust(capture_id):
     return jsonify({'ok': True, 'score': new_score})
 
 
-@app.route('/admin/votes', methods=['GET', 'POST'])
+@app.route('/admin/votes')
 @require_admin_auth
-@csrf_protect
 def admin_votes():
-    if request.method == 'POST':
-        set_setting('vote.enabled',       '1' if request.form.get('enabled') else '0')
-        set_setting('vote.blue_max',      str(max(1, int(request.form.get('blue_max',  '10') or '10'))))
-        set_setting('vote.green_max',     str(max(1, int(request.form.get('green_max', '10') or '10'))))
-        set_setting('vote.red_max',       str(max(1, int(request.form.get('red_max',   '20') or '20'))))
-        for key in ('color_neg_max', 'color_neg_mid', 'color_zero', 'color_pos_mid', 'color_pos_max'):
-            val = request.form.get(key, '').strip()
-            if val.startswith('#') and len(val) == 7:
-                set_setting(f'vote.{key}', val)
-        return redirect(url_for('admin_votes', ok='Paramètres mis à jour.'))
-    cfg = _vote_cfg()
+    """Tuile « Votes ». Pas de POST ici : chacun des 2 blocs poste vers sa
+    propre route dédiée ci-dessous. « Seuils » et « Couleurs aux points
+    clés » restent un SEUL bloc (et non 2) car l'aperçu du gradient en JS
+    lit en direct les deux ensembles de champs — les séparer sur des
+    tuiles différentes casserait cet aperçu (voir templates/blocks/
+    votes_thresholds_colors.html)."""
+    blocks, block_context = _admin_render_blocks('votes')
     return render_template(
         'admin_votes.html', config=CONFIG,
-        vote_enabled=get_setting('vote.enabled', '1') == '1',
-        cfg=cfg,
+        blocks=blocks, current_page='votes', admin_pages=_ADMIN_PAGES,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
+
+
+@app.route('/admin/votes/activation', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_votes_set_activation():
+    set_setting('vote.enabled', '1' if request.form.get('enabled') else '0')
+    return _admin_block_redirect('votes_activation', ok='Paramètres mis à jour.')
+
+
+@app.route('/admin/votes/thresholds_colors', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_votes_set_thresholds_colors():
+    set_setting('vote.blue_max',      str(max(1, int(request.form.get('blue_max',  '10') or '10'))))
+    set_setting('vote.green_max',     str(max(1, int(request.form.get('green_max', '10') or '10'))))
+    set_setting('vote.red_max',       str(max(1, int(request.form.get('red_max',   '20') or '20'))))
+    for key in ('color_neg_max', 'color_neg_mid', 'color_zero', 'color_pos_mid', 'color_pos_max'):
+        val = request.form.get(key, '').strip()
+        if val.startswith('#') and len(val) == 7:
+            set_setting(f'vote.{key}', val)
+    return _admin_block_redirect('votes_thresholds_colors', ok='Paramètres mis à jour.')
 
 
 # ── Admin — tags & ID média ───────────────────────────────────────────────────

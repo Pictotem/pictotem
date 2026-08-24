@@ -106,3 +106,43 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
    "danger" d'un bloc entier, ex. archive_cleanup). */
 .action-btn.danger { background: rgba(180,40,40,.7) !important; border-color: rgba(255,100,100,.3) !important; color: #fff !important; }
 .action-btn.danger:hover { background: rgba(220,50,50,.9) !important; }
+
+/* Blocs « Activation » / « Seuils & couleurs » (votes_activation,
+   votes_thresholds_colors) — dupliqué depuis admin_votes.html, qui reste
+   la source visuelle "native". .field/.field label/.field input[type=
+   number] sont aussi la convention native de plusieurs autres tuiles pas
+   encore migrées (buttons, tags, screensaver, slideshow, guest_codes,
+   guest_uploads) — valeurs identiques partout, dupliquées ici une fois
+   pour toutes. */
+.section-title { font-size: 17px; font-weight: 700; margin: 0 0 18px; }
+.field { margin-bottom: 18px; }
+.field label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.field input[type=number] {
+  width: 110px; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px;
+}
+.check-row  { display: flex; align-items: center; gap: 10px; }
+.check-row input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent); }
+.check-row span { font-size: 14px; }
+.btn-primary { background: var(--accent); color: #000; font-weight: 700; border: none;
+               border-radius: 10px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
+.btn-primary:hover { opacity: .85; }
+.color-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.color-field { display: flex; flex-direction: column; gap: 6px; }
+.color-field label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.color-row { display: flex; align-items: center; gap: 8px; }
+.color-row input[type=color] {
+  width: 44px; height: 34px; padding: 2px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface-2); cursor: pointer;
+}
+.color-hex { font-family: monospace; font-size: 13px; color: var(--text);
+             background: var(--surface-2); border: 1px solid var(--border);
+             border-radius: 8px; padding: 6px 10px; width: 88px; }
+.gp-wrap { margin-top: 28px; }
+.gp-label { font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.gp-bar { height: 32px; border-radius: 10px; display: flex; overflow: hidden; }
+.gp-numbers { display: flex; justify-content: space-between;
+              font-size: 11px; color: var(--muted); margin-top: 4px; padding: 0 2px; }
+.gp-example { display: flex; gap: 16px; margin-top: 14px; flex-wrap: wrap; }
+.gp-ex { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.gp-ex-dot { width: 14px; height: 14px; border-radius: 50%; }

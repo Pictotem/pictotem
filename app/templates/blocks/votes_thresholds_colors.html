@@ -1,0 +1,146 @@
+<form method="post" action="{{ url_for('admin_votes_set_thresholds_colors') }}" id="voteThresholdsColorsForm">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <p class="section-title">Seuils</p>
+  <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:18px;">
+    <div class="field">
+      <label>Seuil négatif max (bleu foncé à −N)</label>
+      <input type="number" name="blue_max" id="blue_max" min="1" max="100" value="{{ cfg.blue_max }}">
+    </div>
+    <div class="field">
+      <label>Seuil positif médian (orange à +N)</label>
+      <input type="number" name="green_max" id="green_max" min="1" max="100" value="{{ cfg.green_max }}">
+    </div>
+    <div class="field">
+      <label>Seuil positif max (rouge à +N)</label>
+      <input type="number" name="red_max" id="red_max" min="1" max="100" value="{{ cfg.red_max }}">
+    </div>
+  </div>
+
+  <p class="section-title">Couleurs aux points clés</p>
+  <div class="color-grid">
+    {% set color_fields = [
+      ('color_neg_max', 'Négatif max (−' ~ cfg.blue_max ~ ')',  cfg.color_neg_max),
+      ('color_neg_mid', 'Négatif médian (−' ~ (cfg.blue_max//2) ~ ')', cfg.color_neg_mid),
+      ('color_zero',    'Zéro (0)',             cfg.color_zero),
+      ('color_pos_mid', 'Positif médian (+' ~ cfg.green_max ~ ')', cfg.color_pos_mid),
+      ('color_pos_max', 'Positif max (+' ~ cfg.red_max ~ ')',   cfg.color_pos_max),
+    ] %}
+    {% for name, label, value in color_fields %}
+    <div class="color-field">
+      <label>{{ label }}</label>
+      <div class="color-row">
+        <input type="color" id="cp_{{ name }}" value="{{ value }}"
+               oninput="voteSyncHex(this,'hex_{{ name }}'); voteBuildPreview()">
+        <input type="text"  id="hex_{{ name }}" name="{{ name }}"
+               class="color-hex" value="{{ value }}" maxlength="7"
+               oninput="voteSyncPicker(this,'cp_{{ name }}'); voteBuildPreview()">
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Aperçu -->
+  <div class="gp-wrap">
+    <p class="gp-label">Aperçu du gradient</p>
+    <div class="gp-bar" id="gpBar"></div>
+    <div class="gp-numbers" id="gpNumbers"></div>
+    <div class="gp-example" id="gpExample"></div>
+  </div>
+
+  <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
+</form>
+
+<script>
+  // « Seuils » et « Couleurs aux points clés » restent volontairement UN
+  // SEUL bloc (voir admin_votes() dans app.py) : cet aperçu lit en direct
+  // les champs des deux sections, qui doivent donc toujours cohabiter sur
+  // la même page — les séparer casserait cet aperçu.
+  (function () {
+    function voteSyncHexImpl(picker, hexId) {
+      document.getElementById(hexId).value = picker.value;
+    }
+    function voteSyncPickerImpl(hexInput, pickerId) {
+      if (/^#[0-9a-fA-F]{6}$/.test(hexInput.value))
+        document.getElementById(pickerId).value = hexInput.value;
+    }
+    window.voteSyncHex = voteSyncHexImpl;
+    window.voteSyncPicker = voteSyncPickerImpl;
+
+    function getColors() {
+      return {
+        negMax: document.getElementById('hex_color_neg_max').value || '#00008b',
+        negMid: document.getElementById('hex_color_neg_mid').value || '#add8e6',
+        zero:   document.getElementById('hex_color_zero').value    || '#888888',
+        posMid: document.getElementById('hex_color_pos_mid').value || '#ffa500',
+        posMax: document.getElementById('hex_color_pos_max').value || '#cc0000',
+      };
+    }
+    function getCfg() {
+      return {
+        blueMax:  parseInt(document.getElementById('blue_max').value)  || 10,
+        greenMax: parseInt(document.getElementById('green_max').value) || 10,
+        redMax:   parseInt(document.getElementById('red_max').value)   || 20,
+      };
+    }
+
+    function hexRgb(h) {
+      const s = h.replace('#','');
+      return [parseInt(s.slice(0,2),16), parseInt(s.slice(2,4),16), parseInt(s.slice(4,6),16)];
+    }
+    function lerpColor(h1, h2, t) {
+      t = Math.max(0, Math.min(1, t));
+      const [r1,g1,b1] = hexRgb(h1), [r2,g2,b2] = hexRgb(h2);
+      return `rgb(${Math.round(r1+(r2-r1)*t)},${Math.round(g1+(g2-g1)*t)},${Math.round(b1+(b2-b1)*t)})`;
+    }
+    function scoreColor(score, C, T) {
+      if (score === 0) return C.zero;
+      if (score < 0) {
+        const half = T.blueMax / 2, abs = Math.abs(score);
+        if (abs <= half) return lerpColor(C.zero, C.negMid, abs / half);
+        return lerpColor(C.negMid, C.negMax, Math.min(1, (abs - half) / half));
+      }
+      if (score <= T.greenMax) return lerpColor(C.zero, C.posMid, score / T.greenMax);
+      return lerpColor(C.posMid, C.posMax, Math.min(1, (score - T.greenMax) / Math.max(1, T.redMax - T.greenMax)));
+    }
+
+    function voteBuildPreviewImpl() {
+      const C = getColors(), T = getCfg();
+      const bar = document.getElementById('gpBar');
+      const nums = document.getElementById('gpNumbers');
+      const ex   = document.getElementById('gpExample');
+      bar.innerHTML = nums.innerHTML = ex.innerHTML = '';
+
+      const steps = [];
+      for (let s = -T.blueMax; s <= T.redMax; s++) steps.push(s);
+
+      steps.forEach(s => {
+        const seg = document.createElement('div');
+        seg.style.cssText = `flex:1;background:${scoreColor(s,C,T)}`;
+        bar.appendChild(seg);
+      });
+
+      [-T.blueMax, -Math.round(T.blueMax/2), 0, T.greenMax, T.redMax].forEach(v => {
+        const sp = document.createElement('span');
+        sp.textContent = v > 0 ? '+'+v : v;
+        nums.appendChild(sp);
+      });
+
+      [[-T.blueMax,'Négatif max'], [-Math.round(T.blueMax/2),'Négatif médian'],
+       [0,'Zéro'], [T.greenMax,'Positif médian'], [T.redMax,'Positif max']].forEach(([v,lbl]) => {
+        const d = document.createElement('div');
+        d.className = 'gp-ex';
+        d.innerHTML = `<span class="gp-ex-dot" style="background:${scoreColor(v,C,T)}"></span>
+                       <span style="color:${scoreColor(v,C,T)};font-weight:700">${v>0?'+'+v:v}</span>
+                       <span style="color:var(--muted)">${lbl}</span>`;
+        ex.appendChild(d);
+      });
+    }
+    window.voteBuildPreview = voteBuildPreviewImpl;
+
+    ['blue_max','green_max','red_max'].forEach(id =>
+      document.getElementById(id).addEventListener('input', voteBuildPreviewImpl)
+    );
+    voteBuildPreviewImpl();
+  })();
+</script>

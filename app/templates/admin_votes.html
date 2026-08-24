@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Votes — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
+  <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
   <style>
     .admin-wrap  { max-width: 740px; margin: 0 auto; padding: 40px 20px 60px; }
     .back-link   { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
@@ -15,48 +18,12 @@
     .alert { padding: 12px 16px; border-radius: 10px; margin-bottom: 24px; font-size: 14px; }
     .alert-ok  { background: rgba(50,200,100,.15); border:1px solid rgba(50,200,100,.3); color:#4ecca0; }
     .alert-err { background: rgba(200,50,50,.15);  border:1px solid rgba(200,50,50,.3);  color:#e57373; }
-    .form-card  { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-                  padding: 24px; margin-bottom: 24px; }
-    .section-title { font-size: 17px; font-weight: 700; margin: 0 0 18px; }
-    .field { margin-bottom: 18px; }
-    .field label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
-    .field input[type=number] {
-      width: 110px; background: var(--surface-2); border: 1px solid var(--border);
-      color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px;
-    }
-    .field-hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
-    .check-row  { display: flex; align-items: center; gap: 10px; }
-    .check-row input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent); }
-    .check-row span { font-size: 14px; }
-    .btn-primary { background: var(--accent); color: #000; font-weight: 700; border: none;
-                   border-radius: 10px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
-    .btn-primary:hover { opacity: .85; }
-
-    /* Grille couleurs */
-    .color-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
-    .color-field { display: flex; flex-direction: column; gap: 6px; }
-    .color-field label { font-size: 12px; font-weight: 600; color: var(--muted); }
-    .color-row { display: flex; align-items: center; gap: 8px; }
-    .color-row input[type=color] {
-      width: 44px; height: 34px; padding: 2px; border-radius: 8px;
-      border: 1px solid var(--border); background: var(--surface-2); cursor: pointer;
-    }
-    .color-hex { font-family: monospace; font-size: 13px; color: var(--text);
-                 background: var(--surface-2); border: 1px solid var(--border);
-                 border-radius: 8px; padding: 6px 10px; width: 88px; }
-
-    /* Aperçu gradient */
-    .gp-wrap { margin-top: 28px; }
-    .gp-label { font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
-    .gp-bar { height: 32px; border-radius: 10px; display: flex; overflow: hidden; }
-    .gp-numbers { display: flex; justify-content: space-between;
-                  font-size: 11px; color: var(--muted); margin-top: 4px; padding: 0 2px; }
-    .gp-example { display: flex; gap: 16px; margin-top: 14px; flex-wrap: wrap; }
-    .gp-ex { display: flex; align-items: center; gap: 6px; font-size: 13px; }
-    .gp-ex-dot { width: 14px; height: 14px; border-radius: 50%; }
+    .text-section { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+                    padding: 24px; margin-bottom: 24px; }
+    .text-section h2 { font-size: 17px; font-weight: 700; margin: 0 0 18px; }
   </style>
 </head>
-<body class="gallery-body">
+<body class="gallery-body" data-admin-page="votes">
 <div class="admin-wrap">
 
   <a class="back-link" href="{{ url_for('admin_home') }}">← Administration</a>
@@ -66,161 +33,30 @@
   {% if alert_success %}<div class="alert alert-ok">{{ alert_success }}</div>{% endif %}
   {% if alert_error   %}<div class="alert alert-err">{{ alert_error }}</div>{% endif %}
 
-  <form method="post" id="voteForm">
-    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-
-    <!-- Activation -->
-    <div class="form-card">
-      <p class="section-title">Activation</p>
-      <div class="field">
-        <div class="check-row">
-          <input type="checkbox" id="enabled" name="enabled"
-                 {% if vote_enabled %}checked{% endif %}>
-          <span>Afficher les boutons de vote sur la galerie publique</span>
-        </div>
-      </div>
+  {% for block in blocks %}
+  <div class="text-section{% if block.variant %} {{ block.variant }}{% endif %}{% if block.collapsed %} block-collapsed{% endif %}" data-block-id="{{ block.id }}">
+    <div class="block-header-row">
+      <span class="block-drag-handle" title="Glisser pour réordonner">⠿</span>
+      <h2>{{ block.title }}</h2>
+      <button type="button" class="block-collapse-toggle" aria-label="Replier / déplier">▾</button>
     </div>
-
-    <!-- Seuils -->
-    <div class="form-card">
-      <p class="section-title">Seuils</p>
-      <div style="display:flex;gap:24px;flex-wrap:wrap;">
-        <div class="field">
-          <label>Seuil négatif max (bleu foncé à −N)</label>
-          <input type="number" name="blue_max" id="blue_max" min="1" max="100" value="{{ cfg.blue_max }}">
-        </div>
-        <div class="field">
-          <label>Seuil positif médian (orange à +N)</label>
-          <input type="number" name="green_max" id="green_max" min="1" max="100" value="{{ cfg.green_max }}">
-        </div>
-        <div class="field">
-          <label>Seuil positif max (rouge à +N)</label>
-          <input type="number" name="red_max" id="red_max" min="1" max="100" value="{{ cfg.red_max }}">
-        </div>
-      </div>
+    <div class="admin-block-body">
+      {% include block.template %}
     </div>
-
-    <!-- Couleurs clés -->
-    <div class="form-card">
-      <p class="section-title">Couleurs aux points clés</p>
-      <div class="color-grid">
-        {% set color_fields = [
-          ('color_neg_max', 'Négatif max (−' ~ cfg.blue_max ~ ')',  cfg.color_neg_max),
-          ('color_neg_mid', 'Négatif médian (−' ~ (cfg.blue_max//2) ~ ')', cfg.color_neg_mid),
-          ('color_zero',    'Zéro (0)',             cfg.color_zero),
-          ('color_pos_mid', 'Positif médian (+' ~ cfg.green_max ~ ')', cfg.color_pos_mid),
-          ('color_pos_max', 'Positif max (+' ~ cfg.red_max ~ ')',   cfg.color_pos_max),
-        ] %}
-        {% for name, label, value in color_fields %}
-        <div class="color-field">
-          <label>{{ label }}</label>
-          <div class="color-row">
-            <input type="color" id="cp_{{ name }}" value="{{ value }}"
-                   oninput="syncHex(this,'hex_{{ name }}'); buildPreview()">
-            <input type="text"  id="hex_{{ name }}" name="{{ name }}"
-                   class="color-hex" value="{{ value }}" maxlength="7"
-                   oninput="syncPicker(this,'cp_{{ name }}'); buildPreview()">
-          </div>
-        </div>
+    <form method="post" action="{{ url_for('admin_move_block') }}" class="block-move-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="block_id" value="{{ block.id }}">
+      <label>Déplacer vers</label>
+      <select name="target_page">
+        {% for slug, label, _ep in admin_pages %}
+        <option value="{{ slug }}" {% if slug == current_page %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
-      </div>
+      </select>
+      <button type="submit">Déplacer</button>
+    </form>
+  </div>
+  {% endfor %}
 
-      <!-- Aperçu -->
-      <div class="gp-wrap">
-        <p class="gp-label">Aperçu du gradient</p>
-        <div class="gp-bar" id="gpBar"></div>
-        <div class="gp-numbers" id="gpNumbers"></div>
-        <div class="gp-example" id="gpExample"></div>
-      </div>
-    </div>
-
-    <button class="btn-primary" type="submit">Enregistrer</button>
-  </form>
 </div>
-
-<script>
-  function syncHex(picker, hexId) {
-    document.getElementById(hexId).value = picker.value;
-  }
-  function syncPicker(hexInput, pickerId) {
-    if (/^#[0-9a-fA-F]{6}$/.test(hexInput.value))
-      document.getElementById(pickerId).value = hexInput.value;
-  }
-
-  function getColors() {
-    return {
-      negMax: document.getElementById('hex_color_neg_max').value || '#00008b',
-      negMid: document.getElementById('hex_color_neg_mid').value || '#add8e6',
-      zero:   document.getElementById('hex_color_zero').value    || '#888888',
-      posMid: document.getElementById('hex_color_pos_mid').value || '#ffa500',
-      posMax: document.getElementById('hex_color_pos_max').value || '#cc0000',
-    };
-  }
-  function getCfg() {
-    return {
-      blueMax:  parseInt(document.getElementById('blue_max').value)  || 10,
-      greenMax: parseInt(document.getElementById('green_max').value) || 10,
-      redMax:   parseInt(document.getElementById('red_max').value)   || 20,
-    };
-  }
-
-  function hexRgb(h) {
-    const s = h.replace('#','');
-    return [parseInt(s.slice(0,2),16), parseInt(s.slice(2,4),16), parseInt(s.slice(4,6),16)];
-  }
-  function lerpColor(h1, h2, t) {
-    t = Math.max(0, Math.min(1, t));
-    const [r1,g1,b1] = hexRgb(h1), [r2,g2,b2] = hexRgb(h2);
-    return `rgb(${Math.round(r1+(r2-r1)*t)},${Math.round(g1+(g2-g1)*t)},${Math.round(b1+(b2-b1)*t)})`;
-  }
-  function scoreColor(score, C, T) {
-    if (score === 0) return C.zero;
-    if (score < 0) {
-      const half = T.blueMax / 2, abs = Math.abs(score);
-      if (abs <= half) return lerpColor(C.zero, C.negMid, abs / half);
-      return lerpColor(C.negMid, C.negMax, Math.min(1, (abs - half) / half));
-    }
-    if (score <= T.greenMax) return lerpColor(C.zero, C.posMid, score / T.greenMax);
-    return lerpColor(C.posMid, C.posMax, Math.min(1, (score - T.greenMax) / Math.max(1, T.redMax - T.greenMax)));
-  }
-
-  function buildPreview() {
-    const C = getColors(), T = getCfg();
-    const bar = document.getElementById('gpBar');
-    const nums = document.getElementById('gpNumbers');
-    const ex   = document.getElementById('gpExample');
-    bar.innerHTML = nums.innerHTML = ex.innerHTML = '';
-
-    const steps = [];
-    for (let s = -T.blueMax; s <= T.redMax; s++) steps.push(s);
-
-    steps.forEach(s => {
-      const seg = document.createElement('div');
-      seg.style.cssText = `flex:1;background:${scoreColor(s,C,T)}`;
-      bar.appendChild(seg);
-    });
-
-    [-T.blueMax, -Math.round(T.blueMax/2), 0, T.greenMax, T.redMax].forEach(v => {
-      const sp = document.createElement('span');
-      sp.textContent = v > 0 ? '+'+v : v;
-      nums.appendChild(sp);
-    });
-
-    [[-T.blueMax,'Négatif max'], [-Math.round(T.blueMax/2),'Négatif médian'],
-     [0,'Zéro'], [T.greenMax,'Positif médian'], [T.redMax,'Positif max']].forEach(([v,lbl]) => {
-      const d = document.createElement('div');
-      d.className = 'gp-ex';
-      d.innerHTML = `<span class="gp-ex-dot" style="background:${scoreColor(v,C,T)}"></span>
-                     <span style="color:${scoreColor(v,C,T)};font-weight:700">${v>0?'+'+v:v}</span>
-                     <span style="color:var(--muted)">${lbl}</span>`;
-      ex.appendChild(d);
-    });
-  }
-
-  ['blue_max','green_max','red_max'].forEach(id =>
-    document.getElementById(id).addEventListener('input', buildPreview)
-  );
-  buildPreview();
-</script>
 </body>
 </html>
