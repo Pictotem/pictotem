@@ -500,6 +500,7 @@
       qrLiveBgImageUrl:          {{ qrcode_live_style.bg_image_url | tojson }},
       qrLivePosition:            {{ qrcode_live_style.position | tojson }},
       qrLiveBgProportional:      {{ 'true' if qrcode_live_style.bg_proportional else 'false' }},
+      qrLiveBgProportionalAdjustPct: {{ qrcode_live_style.bg_proportional_adjust_pct }},
       qrLiveFontSize:            {{ qrcode_live_style.font_size }},
     };
   </script>

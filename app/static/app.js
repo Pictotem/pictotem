@@ -182,6 +182,11 @@ function renderQrLiveBoxes(boxes, frameW, frameH) {
   // chaque frame à partir de la boîte réellement détectée, pour que la
   // forme d'arrière-plan recouvre le QR-code repéré sans le dépasser.
   const proportional = !!cfg.qrLiveBgProportional;
+  // Ajustement (%) de la taille auto, réglable depuis /admin/tags (-50 à
+  // +50) : facteur multiplicatif appliqué à la largeur/hauteur/police
+  // calculées ci-dessous à partir de la boîte détectée. Sans effet si le
+  // mode proportionnel est désactivé.
+  const proportionalScale = 1 + Math.max(-50, Math.min(50, Number(cfg.qrLiveBgProportionalAdjustPct) || 0)) / 100;
   boxes.forEach((b) => {
     // b.text = null + b.too_small = true : marqueurs du QR-code repérés
     // (détecteur ArUco, plus sensible) mais code trop petit dans l'image
@@ -207,8 +212,8 @@ function renderQrLiveBoxes(boxes, frameW, frameH) {
     // la boîte détectée y est par définition trop petite pour y caler
     // une étiquette lisible.
     if (proportional && !b.too_small) {
-      const qrW = Math.max(0, screenX1 - screenX0);
-      const qrH = Math.max(0, screenY1 - screenY0);
+      const qrW = Math.max(0, screenX1 - screenX0) * proportionalScale;
+      const qrH = Math.max(0, screenY1 - screenY0) * proportionalScale;
       if (qrW > 0 && qrH > 0) {
         el.style.width = `${qrW}px`;
         el.style.height = `${qrH}px`;

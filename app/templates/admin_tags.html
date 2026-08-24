@@ -326,6 +326,18 @@
           à la taille du QR-code repéré devant l'objectif (pour le recouvrir sans le dépasser) —
           les valeurs « Taille (%) », « Largeur » et « Hauteur » ci-dessus sont alors ignorées.
         </p>
+
+        <div class="field" id="qr_live_bg_proportional_adjust_field" style="max-width:260px;margin-top:-6px;margin-bottom:14px">
+          <label>Ajustement de la taille automatique (%)</label>
+          <input type="number" name="bg_proportional_adjust_pct" id="qr_live_bg_proportional_adjust_pct"
+                 min="-50" max="50" step="5"
+                 value="{{ qrcode_live_style.bg_proportional_adjust_pct }}" oninput="updateQrLivePreview()">
+          <p class="field-hint">
+            De -50 % à +50 %. Défaut : 0 %. Rétrécit ou agrandit la taille calculée
+            automatiquement (forme et texte ensemble) — actif uniquement si
+            « Proportionnel » ci-dessus est coché.
+          </p>
+        </div>
         <p class="field-hint" style="margin-top:-6px;margin-bottom:14px">
           La forme s'applique aussi en mode « Image de fond » ci-dessous (découpe l'image
           selon le contour choisi). Cercle, ovale et étoile conviennent mieux à un texte
@@ -614,6 +626,8 @@
     const bgMode = document.querySelector('input[name="bg_mode"]:checked')?.value || 'shape';
     const shape = document.getElementById('qr_live_bg_shape')?.value || 'pill';
     const proportional = document.getElementById('qr_live_bg_proportional')?.checked || false;
+    const proportionalAdjustPct = Math.max(-50, Math.min(50,
+      Number(document.getElementById('qr_live_bg_proportional_adjust_pct')?.value || 0) || 0));
     const sizePct = Number(document.getElementById('qr_live_bg_size_pct')?.value || 100) || 100;
     const widthPx = Number(document.getElementById('qr_live_bg_width_px')?.value || 0) || 0;
     const heightPx = Number(document.getElementById('qr_live_bg_height_px')?.value || 0) || 0;
@@ -633,7 +647,7 @@
       // ici, on retombe sur l'ajustement automatique au texte.
       chip.style.width = 'auto';
       chip.style.height = 'auto';
-      chip.style.padding = scaleQrLivePadding(shapeCss.padding, 1);
+      chip.style.padding = scaleQrLivePadding(shapeCss.padding, 1 + proportionalAdjustPct / 100);
     } else {
       chip.style.width = widthPx ? widthPx + 'px' : 'auto';
       chip.style.height = heightPx ? heightPx + 'px' : 'auto';
@@ -674,6 +688,13 @@
       el.readOnly = proportional;
       el.closest('.field')?.classList.toggle('field-inactive', proportional);
     });
+    // Inverse des 3 champs ci-dessus : l'ajustement (%) n'a d'effet QUE si
+    // le mode proportionnel est actif.
+    const adjustEl = document.getElementById('qr_live_bg_proportional_adjust_pct');
+    if (adjustEl) {
+      adjustEl.readOnly = !proportional;
+      adjustEl.closest('.field')?.classList.toggle('field-inactive', !proportional);
+    }
     updateQrLivePreview();
   }
 

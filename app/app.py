@@ -759,6 +759,15 @@ def _qr_live_style_settings() -> dict:
     # ceci remplace bg_size_pct/bg_width_px/bg_height_px/font_size ci-dessus,
     # qui restent néanmoins enregistrés comme valeurs de repli.
     bg_proportional = get_setting('qrcode.live_style.bg_proportional', '0') == '1'
+    # Ajustement (%) de cette taille automatique — appliqué comme facteur
+    # multiplicatif (1 + pct/100) à la largeur/hauteur/police calculées en
+    # direct depuis la boîte détectée (voir renderQrLiveBoxes dans app.js).
+    # Sans effet si bg_proportional est désactivé.
+    raw_prop_adjust = get_setting('qrcode.live_style.bg_proportional_adjust_pct', '') or '0'
+    try:
+        bg_proportional_adjust_pct = max(-50, min(50, int(raw_prop_adjust)))
+    except ValueError:
+        bg_proportional_adjust_pct = 0
     position = get_setting('qrcode.live_style.position', '') or 'above'
     if position not in dict(_QR_LIVE_POSITIONS):
         position = 'above'
@@ -772,6 +781,7 @@ def _qr_live_style_settings() -> dict:
         'bg_width_css': f'{bg_width_px}px' if bg_width_px else 'auto',
         'bg_height_css': f'{bg_height_px}px' if bg_height_px else 'auto',
         'bg_proportional': bg_proportional,
+        'bg_proportional_adjust_pct': bg_proportional_adjust_pct,
         'bg_radius_css': shape_css['radius'],
         'bg_clip_css': shape_css['clip'],
         'bg_padding_css': _scale_padding_css(shape_css['padding'], bg_size_pct / 100),
@@ -2342,6 +2352,12 @@ def admin_tags():
                         str(max(20, min(800, int(raw_bg_height)))) if raw_bg_height.isdigit() else '')
             set_setting('qrcode.live_style.bg_proportional',
                         '1' if request.form.get('bg_proportional') else '0')
+            raw_prop_adjust = (request.form.get('bg_proportional_adjust_pct') or '0').strip()
+            try:
+                prop_adjust = max(-50, min(50, int(raw_prop_adjust)))
+            except ValueError:
+                prop_adjust = 0
+            set_setting('qrcode.live_style.bg_proportional_adjust_pct', str(prop_adjust))
             bg_color = (request.form.get('bg_color') or '').strip()
             if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
                 set_setting('qrcode.live_style.bg_color', bg_color)
