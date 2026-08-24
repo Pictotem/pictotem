@@ -238,6 +238,22 @@ def init_db():
         )
         """)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_guest_codes_code ON guest_codes(code)')
+
+        # Polices personnalisées (voir /admin/texts) : fichier .ttf/.otf
+        # uploadé par l'admin, disponible ensuite dans tous les sélecteurs de
+        # police de l'app (app.py : _all_fonts()). `family` est l'identifiant
+        # CSS unique généré à l'ajout (voir app.py : _slugify_font_family) —
+        # utilisé à la fois comme nom de la règle @font-face et comme valeur
+        # de réglage stockée pour chaque fonction utilisant cette police.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS custom_fonts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            family TEXT NOT NULL UNIQUE,
+            label TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """)
         conn.commit()
 
 
@@ -621,6 +637,54 @@ def delete_wallpaper_image_db(image_id):
         conn.execute('DELETE FROM wallpaper_images WHERE id = ?', (image_id,))
         conn.commit()
     return img
+
+
+# ── Polices personnalisées (voir /admin/texts et app.py : _all_fonts(),
+# _qr_live_burn_font) ────────────────────────────────────────────────────────
+
+def list_custom_fonts():
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            'SELECT * FROM custom_fonts ORDER BY created_at ASC'
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_custom_font_by_id(font_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM custom_fonts WHERE id = ?', (font_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_custom_font(label, base_family, filename):
+    """Insère une police personnalisée, en garantissant l'unicité de
+    `family` (contrainte UNIQUE en base) : si `base_family` (slug déjà
+    calculé par _slugify_font_family) existe déjà, ajoute un suffixe
+    -2, -3... jusqu'à trouver un identifiant libre."""
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        family = base_family
+        suffix = 2
+        while conn.execute('SELECT 1 FROM custom_fonts WHERE family = ?', (family,)).fetchone():
+            family = f'{base_family}-{suffix}'
+            suffix += 1
+        cur = conn.execute(
+            'INSERT INTO custom_fonts(family, label, filename, created_at) VALUES(?,?,?,?)',
+            (family, label, filename, created_at)
+        )
+        conn.commit()
+        return dict(id=cur.lastrowid, family=family, label=label, filename=filename, created_at=created_at)
+
+
+def delete_custom_font_db(font_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM custom_fonts WHERE id = ?', (font_id,)).fetchone()
+        if not row:
+            return None
+        font = dict(row)
+        conn.execute('DELETE FROM custom_fonts WHERE id = ?', (font_id,))
+        conn.commit()
+    return font
 
 
 # ── Upload invités (partage depuis smartphone) ───────────────────────────────

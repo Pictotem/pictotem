@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('custom_fonts_css') }}">
   <style>
     /* Tailles réglables depuis /admin/texts (texte de droite + QR code de la
        barre du bas ; hauteur/couleur de la barre de progression tout en haut)

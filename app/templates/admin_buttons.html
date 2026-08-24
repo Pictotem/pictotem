@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Boutons — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('custom_fonts_css') }}">
   <style>
     .admin-wrap  { max-width: 860px; margin: 0 auto; padding: 40px 20px 60px; }
     .back-link   { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);

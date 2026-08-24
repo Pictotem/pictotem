@@ -71,7 +71,8 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_guest_codes, get_guest_code_by_id, get_guest_code_text,
                 create_guest_code, update_guest_code_texte, regenerate_guest_code,
                 delete_guest_code_db, upsert_guest_code, purge_guest_codes_by_date,
-                purge_guest_codes_first_n, generate_guest_code)
+                purge_guest_codes_first_n, generate_guest_code,
+                list_custom_fonts, create_custom_font, delete_custom_font_db)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, get_network_info,
                    is_autostart_enabled, make_thumb, message_text, print_photo,
@@ -1026,16 +1027,76 @@ def _hex_to_rgb(hex_color: str, default: tuple = (13, 139, 143)) -> tuple:
         return default
 
 
+# ── Polices personnalisées (voir /admin/texts, brique « Polices
+# personnalisées ») ──────────────────────────────────────────────────────────
+# Une police uploadée (.ttf/.otf) par l'admin s'ajoute à la liste des 6
+# polices intégrées (_PROMO_FONTS) et apparaît, comme elles, dans TOUS les
+# sélecteurs de police de l'app (boutons, tags, QR-codes live + export,
+# chiffre d'étape photo strip, slide promo) — voir _all_fonts() ci-dessous,
+# qui remplace _PROMO_FONTS partout où une liste d'options est construite ou
+# une valeur soumise est validée. Fichier conservé tel quel sur disque, sans
+# transformation (pas de variante grasse générée : contrairement aux polices
+# Windows intégrées, l'admin fournit directement le fichier qu'il souhaite).
+CUSTOM_FONTS_DIR = BASE_DIR / 'app' / 'static' / 'fonts'
+_CUSTOM_FONT_ALLOWED_EXT = {'.ttf', '.otf'}
+
+
+def _custom_font_value(row: dict) -> str:
+    """Valeur `font-family` CSS stockée dans les réglages pour une police
+    personnalisée — même rôle que le 1er élément des tuples _PROMO_FONTS.
+    `row['family']` est un identifiant CSS déjà sûr (voir _slugify_font_family),
+    donc pas besoin de guillemets, mais on les ajoute par cohérence avec les
+    valeurs _PROMO_FONTS existantes et par sécurité si le slug contenait un
+    espace."""
+    return f'"{row["family"]}", sans-serif'
+
+
+def _all_fonts() -> list:
+    """Liste complète (valeur CSS, libellé) des polices disponibles partout
+    où une police peut être choisie dans l'app : les 6 polices intégrées
+    (_PROMO_FONTS) suivies des polices personnalisées ajoutées depuis
+    /admin/texts, dans leur ordre d'ajout. À utiliser à la place de
+    _PROMO_FONTS pour peupler un <select> ou valider une valeur soumise —
+    _PROMO_FONTS reste la source de vérité pour les 6 polices intégrées
+    elles-mêmes (résolution de fichier Windows, valeur par défaut...)."""
+    return _PROMO_FONTS + [(_custom_font_value(row), f"{row['label']} (police perso)")
+                            for row in list_custom_fonts()]
+
+
+def _slugify_font_family(label: str) -> str:
+    """Construit un identifiant CSS sûr (lettres/chiffres/tirets ASCII) à
+    partir du libellé saisi par l'admin, préfixé pf- (Pictotem Font) pour ne
+    jamais entrer en collision avec un nom de police système existant.
+    L'unicité vis-à-vis des polices déjà en base est garantie par l'appelant
+    (create_custom_font, avec suffixe -2/-3/... en cas de collision — voir
+    db.py)."""
+    normalized = unicodedata.normalize('NFKD', label or '').encode('ascii', 'ignore').decode('ascii')
+    slug = re.sub(r'[^a-zA-Z0-9]+', '-', normalized).strip('-').lower()
+    return f'pf-{slug}' if slug else 'pf-police'
+
+
 def _qr_live_burn_font(font_family: str, size_px: int):
-    """Charge (avec cache) la police TrueType Windows correspondant à
-    `font_family` (valeur brute de qrcode.live_style.font) à la taille
-    `size_px`. Repli sur la police par défaut de Pillow (bitmap, taille
-    fixe) si le fichier est introuvable — n'empêche jamais la capture."""
+    """Charge (avec cache) la police TrueType correspondant à `font_family`
+    (valeur brute de qrcode.live_style.font, ou de tout autre réglage de
+    police de l'app) à la taille `size_px`. Cherche d'abord parmi les
+    polices personnalisées uploadées (fichier fourni tel quel par l'admin),
+    puis parmi les 6 polices Windows intégrées (_PROMO_FONTS). Repli sur la
+    police par défaut de Pillow (bitmap, taille fixe) si rien ne correspond
+    ou si le fichier est introuvable — n'empêche jamais la capture."""
     size_px = max(6, int(size_px))
     cache_key = (font_family, size_px)
     cached = _qr_live_burn_font_cache.get(cache_key)
     if cached is not None:
         return cached
+    for row in list_custom_fonts():
+        if _custom_font_value(row) != font_family:
+            continue
+        try:
+            font = ImageFont.truetype(str(CUSTOM_FONTS_DIR / row['filename']), size_px)
+        except Exception:
+            break  # fichier introuvable/corrompu : repli sur les polices intégrées ci-dessous
+        _qr_live_burn_font_cache[cache_key] = font
+        return font
     filename = _QR_LIVE_BURN_FONT_FILES_BY_INDEX[0]
     for i, (fam, _label) in enumerate(_PROMO_FONTS):
         if fam == font_family and i < len(_QR_LIVE_BURN_FONT_FILES_BY_INDEX):
@@ -2491,14 +2552,6 @@ def admin_texts():
         for key in TEXT_DEFAULTS:
             value = (request.form.get(f'text_{key}') or '').strip()
             set_setting(f'text.{key}', value)
-        set_setting('idle_timer_enabled', '1' if request.form.get('idle_timer_enabled') else '0')
-        raw_secs = (request.form.get('idle_timer_seconds') or '30').strip()
-        set_setting('idle_timer_seconds', str(max(5, int(raw_secs))) if raw_secs.isdigit() else '30')
-        badge_text = (request.form.get('idle_timer_badge_text') or 'Retour dans {n}s').strip()
-        set_setting('idle_timer_badge_text', badge_text)
-        for key, default in [('idle_timer_font_size', '13'), ('idle_timer_padding_y', '5'), ('idle_timer_padding_x', '13')]:
-            raw = (request.form.get(key) or default).strip()
-            set_setting(key, str(max(1, int(raw))) if raw.isdigit() else default)
 
         set_setting('ui.hide_print_button', '1' if request.form.get('hide_print_button') else '0')
         raw_rfs = (request.form.get('bottom_right_font_size') or '').strip()
@@ -2535,21 +2588,82 @@ def admin_texts():
     return render_template('admin_texts.html', config=CONFIG,
                            texts=get_ui_texts(),
                            defaults=TEXT_DEFAULTS,
-                           idle_timer_enabled=get_setting('idle_timer_enabled', '0') == '1',
-                           idle_timer_seconds=int(get_setting('idle_timer_seconds', '30')),
-                           idle_timer_badge_text=get_setting('idle_timer_badge_text', 'Retour dans {n}s'),
-                           idle_timer_font_size=int(get_setting('idle_timer_font_size', '13')),
-                           idle_timer_padding_y=int(get_setting('idle_timer_padding_y', '5')),
-                           idle_timer_padding_x=int(get_setting('idle_timer_padding_x', '13')),
                            hide_print_button=get_setting('ui.hide_print_button', '0') == '1',
                            bottom_bar_sizes=get_bottom_bar_sizes(),
                            top_bar=get_top_bar_settings(),
                            about=_about_settings(),
                            photostrip_step=_photostrip_step_settings(),
-                           photostrip_step_fonts=_PROMO_FONTS,
+                           photostrip_step_fonts=_all_fonts(),
                            photostrip_step_positions=_PHOTOSTRIP_STEP_POSITION_LABELS,
+                           custom_fonts=list_custom_fonts(),
                            alert_success=request.args.get('ok'),
                            alert_error=request.args.get('err'))
+
+
+@app.route('/admin/texts/fonts/upload', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_font_upload():
+    """Ajoute une police personnalisée (.ttf/.otf), immédiatement disponible
+    dans tous les sélecteurs de police de l'app — voir _all_fonts()."""
+    file = request.files.get('font_file')
+    if not file or not file.filename:
+        return redirect(url_for('admin_texts', err='Aucun fichier sélectionné.'))
+    ext = Path(file.filename).suffix.lower()
+    if ext not in _CUSTOM_FONT_ALLOWED_EXT:
+        return redirect(url_for('admin_texts', err='Format non supporté (TTF ou OTF uniquement).'))
+    label = (request.form.get('font_label') or '').strip() or Path(file.filename).stem
+    label = label[:80]
+    CUSTOM_FONTS_DIR.mkdir(parents=True, exist_ok=True)
+    base_family = _slugify_font_family(label)
+    safe_filename = f'{base_family}-{int(datetime.now().timestamp() * 1000)}{ext}'
+    file.save(str(CUSTOM_FONTS_DIR / safe_filename))
+    try:
+        ImageFont.truetype(str(CUSTOM_FONTS_DIR / safe_filename), 24)
+    except Exception:
+        (CUSTOM_FONTS_DIR / safe_filename).unlink(missing_ok=True)
+        return redirect(url_for('admin_texts', err='Fichier de police invalide ou illisible.'))
+    create_custom_font(label, base_family, safe_filename)
+    return redirect(url_for('admin_texts', ok=f'Police « {label} » ajoutée.'))
+
+
+@app.route('/admin/texts/fonts/delete', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_font_delete():
+    """Retire une police personnalisée (fichier + entrée DB). Les fonctions
+    qui l'utilisaient actuellement basculent silencieusement sur la police
+    par défaut de Pillow/du navigateur, comme pour toute police invalide —
+    aucune erreur bloquante, à corriger manuellement si besoin depuis la
+    page concernée."""
+    try:
+        font_id = int(request.form.get('font_id', ''))
+    except ValueError:
+        return redirect(url_for('admin_texts', err='Police invalide.'))
+    font = delete_custom_font_db(font_id)
+    if not font:
+        return redirect(url_for('admin_texts', err='Police introuvable.'))
+    (CUSTOM_FONTS_DIR / font['filename']).unlink(missing_ok=True)
+    _qr_live_burn_font_cache.clear()
+    return redirect(url_for('admin_texts', ok=f"Police « {font['label']} » supprimée."))
+
+
+@app.route('/fonts.css')
+def custom_fonts_css():
+    """Feuille de style dynamique déclarant une règle @font-face pour
+    chaque police personnalisée ajoutée depuis /admin/texts — incluse par
+    toutes les pages (kiosque + back office) qui affichent ou proposent une
+    police afin que le navigateur puisse effectivement la charger et
+    l'afficher (les 6 polices intégrées, elles, n'en ont pas besoin :
+    system-ui/Georgia/etc. sont déjà connues du navigateur). Pas
+    d'authentification requise : lue par l'interface principale du kiosque,
+    non protégée par mot de passe admin ; ne révèle rien de sensible (juste
+    des noms de fichiers de polices)."""
+    parts = []
+    for row in list_custom_fonts():
+        url = url_for('static', filename=f"fonts/{row['filename']}")
+        parts.append(f"@font-face {{ font-family: '{row['family']}'; src: url('{url}'); font-display: swap; }}")
+    return Response('\n'.join(parts), mimetype='text/css')
 
 
 @app.route('/admin/gallery', methods=['GET', 'POST'])
@@ -2664,9 +2778,34 @@ def admin_application():
         autostart_enabled=is_autostart_enabled(),
         wallpaper_images=_wallpaper_images_view(),
         network_info_taps=_kiosk_network_info_settings()['taps'],
+        idle_timer_enabled=get_setting('idle_timer_enabled', '0') == '1',
+        idle_timer_seconds=int(get_setting('idle_timer_seconds', '30')),
+        idle_timer_badge_text=get_setting('idle_timer_badge_text', 'Retour dans {n}s'),
+        idle_timer_font_size=int(get_setting('idle_timer_font_size', '13')),
+        idle_timer_padding_y=int(get_setting('idle_timer_padding_y', '5')),
+        idle_timer_padding_x=int(get_setting('idle_timer_padding_x', '13')),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )
+
+
+@app.route('/admin/application/idle_timer', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_set_idle_timer():
+    """Timer de retour automatique à l'accueil (barre de progression +
+    décompte sur les écrans intermédiaires) — déplacé depuis la tuile
+    « Textes » : c'est un comportement de l'application (minuterie,
+    retour à l'accueil) plutôt qu'un texte affiché."""
+    set_setting('idle_timer_enabled', '1' if request.form.get('idle_timer_enabled') else '0')
+    raw_secs = (request.form.get('idle_timer_seconds') or '30').strip()
+    set_setting('idle_timer_seconds', str(max(5, int(raw_secs))) if raw_secs.isdigit() else '30')
+    badge_text = (request.form.get('idle_timer_badge_text') or 'Retour dans {n}s').strip()
+    set_setting('idle_timer_badge_text', badge_text)
+    for key, default in [('idle_timer_font_size', '13'), ('idle_timer_padding_y', '5'), ('idle_timer_padding_x', '13')]:
+        raw = (request.form.get(key) or default).strip()
+        set_setting(key, str(max(1, int(raw))) if raw.isdigit() else default)
+    return redirect(url_for('admin_application', ok='Mise en veille automatique mise à jour.'))
 
 
 @app.route('/admin/access')
@@ -3184,7 +3323,7 @@ def admin_tags():
         if action == 'display_settings':
             set_setting('tags.show_on_bestof', '1' if request.form.get('show_on_bestof') else '0')
             font_value = request.form.get('style_font', '')
-            if font_value in dict(_PROMO_FONTS):
+            if font_value in dict(_all_fonts()):
                 set_setting('tags.style_font', font_value)
             bg_value = request.form.get('style_bg_color', '').strip()
             if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_value):
@@ -3233,7 +3372,7 @@ def admin_tags():
     return render_template(
         'admin_tags.html', config=CONFIG,
         settings=_tags_settings(), media_id=_media_id_settings(), tags=list_tags(),
-        assignments=list_capture_tags_with_media(), tags_fonts=_PROMO_FONTS,
+        assignments=list_capture_tags_with_media(), tags_fonts=_all_fonts(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )
@@ -3442,7 +3581,7 @@ def _guest_code_qr_layout(code: str, texte: str, settings: dict) -> dict:
     layout = {
         'dpi': dpi, 'matrix': matrix, 'module_px': module_px, 'qr_size_px': qr_size_px,
         'text': text, 'bg_color': settings['bg_color'], 'code_color': settings['code_color'],
-        'text_color': settings['text_color'],
+        'text_color': settings['text_color'], 'text_position': settings['text_position'],
     }
 
     if not text:
@@ -3527,7 +3666,11 @@ def _render_guest_code_qr_svg(layout: dict) -> str:
     dans un éditeur vectoriel), rendu avec la police installée sur la
     machine qui ouvre le fichier — pas nécessairement identique au rendu
     PNG/JPG (polices Windows résolues côté serveur, voir _qr_live_burn_font)
-    si cette police n'est pas installée chez le lecteur du SVG."""
+    si cette police n'est pas installée chez le lecteur du SVG ; l'espacement
+    (marge texte/QR) peut donc varier légèrement. Le centrage, lui, reste
+    correct quelle que soit la police effectivement utilisée par le lecteur
+    puisqu'il repose sur text-anchor/dominant-baseline (voir plus bas) plutôt
+    que sur des coordonnées figées calculées pour une police précise."""
     from xml.sax.saxutils import escape
     dpi = layout['dpi']
     canvas_w_mm = _px_to_mm(layout['canvas_w'], dpi)
@@ -3548,16 +3691,38 @@ def _render_guest_code_qr_svg(layout: dict) -> str:
         parts.append(f'<rect x="{x:.3f}" y="{y:.3f}" width="{w:.3f}" height="{module_mm:.3f}" '
                      f'fill="{layout["code_color"]}"/>')
     if layout['text']:
-        text_x_mm = _px_to_mm(layout['text_x'], dpi)
-        text_y_mm = _px_to_mm(layout['text_y'], dpi)
-        # dominant-baseline="hanging" : ancre proche du haut du texte, même
-        # principe que l'ancrage top-left utilisé côté raster (PIL) — voir
-        # limite de correspondance exacte entre formats dans la docstring.
+        position = layout['text_position']
+        # Ancrage self-centrant côté SVG plutôt que des coordonnées figées
+        # calculées à partir de la largeur/hauteur mesurée côté serveur
+        # (police Windows via PIL, voir _qr_live_burn_font) : le lecteur du
+        # SVG peut ne pas avoir cette police installée et la substituer par
+        # une autre, de largeur différente. Avec un x/y figé (ancien
+        # comportement), tout écart de largeur décale visiblement le texte
+        # par rapport au centre du QR-code — c'est ce qui produisait un
+        # texte "au-dessus"/"en dessous" non centré signalé par l'utilisateur.
+        # text-anchor="middle" (centrage horizontal) et dominant-baseline=
+        # "central" (centrage vertical) laissent le moteur de rendu SVG
+        # centrer lui-même les glyphes réellement affichés, quelle que soit
+        # leur largeur/hauteur effective — donc toujours centré même si la
+        # police diffère de celle utilisée pour le calcul de mise en page.
+        if position in ('above', 'below'):
+            text_anchor, text_x_mm = 'middle', canvas_w_mm / 2
+        else:
+            text_anchor, text_x_mm = 'start', _px_to_mm(layout['text_x'], dpi)
+        if position in ('left', 'right'):
+            dominant_baseline, text_y_mm = 'central', canvas_h_mm / 2
+        else:
+            dominant_baseline, text_y_mm = 'hanging', _px_to_mm(layout['text_y'], dpi)
+        # font-weight="bold" : aligné sur le rendu PNG/JPG, qui utilise
+        # toujours la variante grasse des polices Windows (voir
+        # _QR_LIVE_BURN_FONT_FILES_BY_INDEX) — sans quoi le texte SVG,
+        # rendu en graisse normale, serait plus étroit que prévu.
         parts.append(
             f"<text x=\"{text_x_mm:.3f}\" y=\"{text_y_mm:.3f}\" "
-            f"font-family='{layout['text_font_family']}' font-size=\"{layout['text_size_mm']:.3f}mm\" "
-            f"fill=\"{layout['text_color']}\" dominant-baseline=\"hanging\" text-anchor=\"start\">"
-            f"{escape(layout['text'])}</text>"
+            f"font-family='{layout['text_font_family']}' font-weight=\"bold\" "
+            f"font-size=\"{layout['text_size_mm']:.3f}mm\" "
+            f"fill=\"{layout['text_color']}\" dominant-baseline=\"{dominant_baseline}\" "
+            f"text-anchor=\"{text_anchor}\">{escape(layout['text'])}</text>"
         )
     parts.append('</svg>')
     return '\n'.join(parts)
@@ -3786,7 +3951,7 @@ def admin_guest_codes():
             if text_position in dict(_GUEST_CODES_QR_TEXT_POSITIONS):
                 set_setting('guest_codes.qr_export.text_position', text_position)
             text_font = request.form.get('text_font', '')
-            if text_font in dict(_PROMO_FONTS):
+            if text_font in dict(_all_fonts()):
                 set_setting('guest_codes.qr_export.text_font', text_font)
             raw_text_size = (request.form.get('text_size_mm') or '').strip()
             try:
@@ -3842,7 +4007,7 @@ def admin_guest_codes():
             if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
                 set_setting('qrcode.live_style.bg_color', bg_color)
             font_value = request.form.get('font', '')
-            if font_value in dict(_PROMO_FONTS):
+            if font_value in dict(_all_fonts()):
                 set_setting('qrcode.live_style.font', font_value)
             raw_size = (request.form.get('font_size') or '').strip()
             if raw_size.isdigit() and int(raw_size) >= 8:
@@ -3881,7 +4046,7 @@ def admin_guest_codes():
             error_text = (request.form.get('error_text') or '').strip()
             set_setting('qrcode.live_error_style.text', error_text or 'QR-code détecté mais illisible')
             error_font_value = request.form.get('error_font', '')
-            if error_font_value in dict(_PROMO_FONTS):
+            if error_font_value in dict(_all_fonts()):
                 set_setting('qrcode.live_error_style.font', error_font_value)
             raw_error_size = (request.form.get('error_font_size') or '').strip()
             if raw_error_size.isdigit() and int(raw_error_size) >= 8:
@@ -3930,7 +4095,7 @@ def admin_guest_codes():
         guest_codes_qr_size_units=_GUEST_CODES_QR_SIZE_UNITS,
         guest_codes_sort=list_sort,
         guest_codes_q=list_q,
-        tags_fonts=_PROMO_FONTS,
+        tags_fonts=_all_fonts(),
         qrcode_settings=_qrcode_settings(),
         qrcode_burn_settings=_qr_burn_settings(),
         qrcode_live_style=_qr_live_style_settings(),
@@ -3973,7 +4138,7 @@ def admin_buttons():
         if shape in _BUTTON_SHAPES:
             set_setting('buttons.shape', shape)
         font_value = request.form.get('font', '')
-        if font_value in dict(_PROMO_FONTS):
+        if font_value in dict(_all_fonts()):
             set_setting('buttons.font', font_value)
         raw_fs = (request.form.get('font_size') or '').strip()
         if raw_fs.isdigit() and int(raw_fs) >= 10:
@@ -3993,7 +4158,7 @@ def admin_buttons():
 
     return render_template(
         'admin_buttons.html', config=CONFIG,
-        settings=_buttons_settings(), fonts=_PROMO_FONTS,
+        settings=_buttons_settings(), fonts=_all_fonts(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )
@@ -4215,7 +4380,7 @@ def admin_slideshow():
             if raw_tsize.isdigit() and int(raw_tsize) >= 10:
                 set_setting('slideshow.promo_text_size', raw_tsize)
             font_value = request.form.get('promo_text_font', '')
-            if font_value in dict(_PROMO_FONTS):
+            if font_value in dict(_all_fonts()):
                 set_setting('slideshow.promo_text_font', font_value)
             color_value = request.form.get('promo_text_color', '').strip()
             if re.fullmatch(r'#[0-9a-fA-F]{6}', color_value):
@@ -4278,7 +4443,7 @@ def admin_slideshow():
     return render_template(
         'admin_slideshow.html', config=CONFIG,
         settings=s, images=images,
-        promo=_promo_settings(), promo_fonts=_PROMO_FONTS,
+        promo=_promo_settings(), promo_fonts=_all_fonts(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )
