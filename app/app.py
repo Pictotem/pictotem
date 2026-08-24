@@ -2011,6 +2011,56 @@ def admin_restart_app():
     ))
 
 
+@app.route('/admin/system/restart_update', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_restart_update_app():
+    """Redémarre l'application en récupérant d'abord la dernière version
+    depuis le dépôt Git (branche main) — même mécanisme que le double-clic
+    manuel sur update.bat (voir update.ps1) : arrête l'instance en cours,
+    'git fetch' + 'git reset --hard origin/main' (config.toml local
+    préservé via sauvegarde/restauration), puis relance via run.bat.
+
+    Contrairement à admin_restart_app ci-dessus, on ne relance PAS
+    directement le processus courant ici (pas de _do_restart_app) :
+    update.ps1 s'en charge lui-même (il cherche puis arrête le python.exe
+    en cours d'exécution sur CE app\\app.py), une fois la mise à jour
+    terminée — inutile et plus fragile de dupliquer cette logique ici.
+
+    Lancé dans une fenêtre de commande VISIBLE (CREATE_NEW_CONSOLE, pas
+    détaché) et non en arrière-plan silencieux : update.ps1 peut se
+    terminer sur une pause interactive en cas d'échec (pas de connexion
+    internet, etc.) — invisible et donc bloquée indéfiniment sans console,
+    alors qu'une fenêtre visible sur la borne permet de constater l'échec
+    et de la fermer."""
+    if not (BASE_DIR / '.git').is_dir():
+        return redirect(url_for(
+            'admin_application',
+            err="Ce dossier n'est pas un dépôt Git (pas de sous-dossier .git) — mise à jour impossible.",
+        ))
+    update_bat = BASE_DIR / 'update.bat'
+    if not update_bat.exists():
+        return redirect(url_for('admin_application', err='update.bat introuvable.'))
+    logger.info('Mise à jour Git + redémarrage programmés depuis /admin/application (back office).')
+    try:
+        subprocess.Popen(
+            ['cmd', '/c', str(update_bat)],
+            cwd=str(BASE_DIR),
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            close_fds=True,
+        )
+    except Exception:
+        logger.exception("Échec du lancement de update.bat depuis le back office.")
+        return redirect(url_for(
+            'admin_application',
+            err="Échec du lancement de la mise à jour (voir logs\\app.log).",
+        ))
+    return redirect(url_for(
+        'admin_application',
+        ok="Mise à jour en cours (fenêtre ouverte sur la borne)... l'application redémarrera automatiquement.",
+    ))
+
+
 @app.route('/admin/frames')
 @require_admin_auth
 def admin_frames():
