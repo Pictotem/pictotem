@@ -936,20 +936,24 @@ def _qr_live_style_settings() -> dict:
 # visuellement fidèle : même forme, même texte, mêmes couleurs, même
 # position relative au QR-code.
 
-# Police système Windows correspondant à chaque option de _PROMO_FONTS
-# (police web CSS -> fichier .ttf réel), toujours en gras quand une variante
-# existe (font-weight:700 sur .qr-live-label). Chemin Windows en dur :
-# l'application ne tourne que sous Windows (comme set_windows_wallpaper,
-# _get_local_ip...) — voir C:\Windows\Fonts.
+# Police système Windows correspondant à chaque option de _PROMO_FONTS, dans
+# le même ordre (police web CSS -> fichier .ttf réel), toujours en gras
+# quand une variante existe (font-weight:700 sur .qr-live-label). Chemin
+# Windows en dur : l'application ne tourne que sous Windows (comme
+# set_windows_wallpaper, _get_local_ip...) — voir C:\Windows\Fonts.
+# Volontairement une simple liste (et non un dict indexé par _PROMO_FONTS[i][0])
+# : _PROMO_FONTS n'est défini que plus loin dans ce fichier (section
+# "Slide promo"), la résolution nom -> fichier doit donc se faire à l'appel
+# (_qr_live_burn_font ci-dessous), pas à l'import du module.
 _QR_LIVE_BURN_FONT_DIR = Path('C:/Windows/Fonts')
-_QR_LIVE_BURN_FONT_FILES = {
-    _PROMO_FONTS[0][0]: 'segoeuib.ttf',   # Segoe UI (gras)
-    _PROMO_FONTS[1][0]: 'georgiab.ttf',   # Georgia (gras)
-    _PROMO_FONTS[2][0]: 'trebucbd.ttf',   # Trebuchet MS (gras)
-    _PROMO_FONTS[3][0]: 'impact.ttf',     # Impact (pas de variante gras)
-    _PROMO_FONTS[4][0]: 'courbd.ttf',     # Courier New (gras)
-    _PROMO_FONTS[5][0]: 'comicbd.ttf',    # Comic Sans MS (gras)
-}
+_QR_LIVE_BURN_FONT_FILES_BY_INDEX = [
+    'segoeuib.ttf',   # Segoe UI (gras)
+    'georgiab.ttf',   # Georgia (gras)
+    'trebucbd.ttf',   # Trebuchet MS (gras)
+    'impact.ttf',     # Impact (pas de variante gras)
+    'courbd.ttf',     # Courier New (gras)
+    'comicbd.ttf',    # Comic Sans MS (gras)
+]
 _qr_live_burn_font_cache: dict = {}
 
 # Largeur de référence utilisée pour mettre à l'échelle les valeurs pensées
@@ -983,7 +987,11 @@ def _qr_live_burn_font(font_family: str, size_px: int):
     cached = _qr_live_burn_font_cache.get(cache_key)
     if cached is not None:
         return cached
-    filename = _QR_LIVE_BURN_FONT_FILES.get(font_family, 'segoeuib.ttf')
+    filename = _QR_LIVE_BURN_FONT_FILES_BY_INDEX[0]
+    for i, (fam, _label) in enumerate(_PROMO_FONTS):
+        if fam == font_family and i < len(_QR_LIVE_BURN_FONT_FILES_BY_INDEX):
+            filename = _QR_LIVE_BURN_FONT_FILES_BY_INDEX[i]
+            break
     try:
         font = ImageFont.truetype(str(_QR_LIVE_BURN_FONT_DIR / filename), size_px)
     except Exception:
