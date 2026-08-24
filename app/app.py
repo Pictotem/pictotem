@@ -67,7 +67,8 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_wallpaper_images, add_wallpaper_image, delete_wallpaper_image_db,
                 list_guest_codes, get_guest_code_by_id, get_guest_code_text,
                 create_guest_code, update_guest_code_texte, regenerate_guest_code,
-                delete_guest_code_db)
+                delete_guest_code_db, upsert_guest_code, purge_guest_codes_by_date,
+                purge_guest_codes_first_n, generate_guest_code)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, get_network_info,
                    is_autostart_enabled, make_thumb, message_text, print_photo,
@@ -3249,25 +3250,59 @@ def _guest_codes_settings() -> dict:
     return {'code_length': length}
 
 
+# Clés/libellés (FR) de tri de la liste des codes invités — voir
+# db.GUEST_CODES_SORT_SQL pour le SQL associé à chaque clé (seule source de
+# vérité pour la validité d'une clé). Réutilisée telle quelle comme liste
+# d'ordres possibles pour la purge « N premiers » (même sémantique : les N
+# premiers de la liste triée ainsi).
+_GUEST_CODES_SORTS = [
+    ('created_desc', 'Date de création (récent → ancien)'),
+    ('created_asc',  'Date de création (ancien → récent)'),
+    ('texte_asc',    'Texte (A → Z)'),
+    ('texte_desc',   'Texte (Z → A)'),
+    ('code_asc',     'Code (croissant)'),
+    ('code_desc',    'Code (décroissant)'),
+    ('length_asc',   'Longueur du texte (court → long)'),
+    ('length_desc',  'Longueur du texte (long → court)'),
+]
+
+
+def _admin_guest_codes_redirect(success=None, error=None, sort='created_desc', q=''):
+    """Redirection standard des actions CRUD/import/purge de cette page —
+    préserve le tri et le filtre en cours (mêmes principe que
+    _admin_emails_redirect ci-dessus), pour ne pas perdre la vue en cours
+    après une action sur un très grand nombre de codes."""
+    params = {'sort': sort}
+    if q:
+        params['q'] = q
+    if success:
+        params['ok'] = success
+    if error:
+        params['err'] = error
+    return redirect(url_for('admin_guest_codes', **params))
+
+
 @app.route('/admin/guest_codes', methods=['GET', 'POST'])
 @require_admin_auth
 @csrf_protect
 def admin_guest_codes():
     if request.method == 'POST':
         action = request.form.get('action', 'code_settings')
+        sort = request.form.get('sort', 'created_desc')
+        q = request.form.get('q', '')
 
         if action == 'code_settings':
             raw_len = (request.form.get('code_length') or '').strip()
             if raw_len.isdigit() and 2 <= int(raw_len) <= 10:
                 set_setting('guest_codes.code_length', raw_len)
-            return redirect(url_for('admin_guest_codes', ok='Réglages mis à jour.'))
+            return _admin_guest_codes_redirect(success='Réglages mis à jour.', sort=sort, q=q)
 
         if action == 'guest_code_new':
             texte = (request.form.get('texte') or '').strip()[:250]
             if not texte:
-                return redirect(url_for('admin_guest_codes', err='Le texte est obligatoire.'))
+                return _admin_guest_codes_redirect(error='Le texte est obligatoire.', sort=sort, q=q)
             row = create_guest_code(texte, _guest_codes_settings()['code_length'])
-            return redirect(url_for('admin_guest_codes', ok=f"Code « {row['code']} » créé."))
+            return _admin_guest_codes_redirect(success=f"Code « {row['code']} » créé.", sort=sort, q=q)
 
         if action == 'guest_code_edit':
             guest_code_id = int(request.form.get('guest_code_id', 0))
@@ -3275,23 +3310,85 @@ def admin_guest_codes():
                 abort(404)
             texte = (request.form.get('texte') or '').strip()[:250]
             if not texte:
-                return redirect(url_for('admin_guest_codes', err='Le texte est obligatoire.'))
+                return _admin_guest_codes_redirect(error='Le texte est obligatoire.', sort=sort, q=q)
             update_guest_code_texte(guest_code_id, texte)
-            return redirect(url_for('admin_guest_codes', ok='Code invité mis à jour.'))
+            return _admin_guest_codes_redirect(success='Code invité mis à jour.', sort=sort, q=q)
 
         if action == 'guest_code_regenerate':
             guest_code_id = int(request.form.get('guest_code_id', 0))
             new_code = regenerate_guest_code(guest_code_id, _guest_codes_settings()['code_length'])
             if new_code is None:
-                return redirect(url_for('admin_guest_codes', err='Code introuvable.'))
-            return redirect(url_for('admin_guest_codes', ok=f'Nouveau code généré : {new_code}.'))
+                return _admin_guest_codes_redirect(error='Code introuvable.', sort=sort, q=q)
+            return _admin_guest_codes_redirect(success=f'Nouveau code généré : {new_code}.', sort=sort, q=q)
 
         if action == 'guest_code_delete':
             guest_code_id = int(request.form.get('guest_code_id', 0))
             row = delete_guest_code_db(guest_code_id)
             if row:
-                return redirect(url_for('admin_guest_codes', ok=f"Code « {row['code']} » supprimé."))
-            return redirect(url_for('admin_guest_codes', err='Code introuvable.'))
+                return _admin_guest_codes_redirect(success=f"Code « {row['code']} » supprimé.", sort=sort, q=q)
+            return _admin_guest_codes_redirect(error='Code introuvable.', sort=sort, q=q)
+
+        if action == 'guest_codes_import':
+            file = request.files.get('csv_file')
+            if not file or not file.filename:
+                return _admin_guest_codes_redirect(error='Aucun fichier CSV sélectionné.', sort=sort, q=q)
+            try:
+                raw = file.read().decode('utf-8-sig')
+            except UnicodeDecodeError:
+                return _admin_guest_codes_redirect(
+                    error="Fichier illisible : encodage non reconnu (attendu UTF-8).", sort=sort, q=q)
+            reader = csv.DictReader(io.StringIO(raw))
+            fieldnames = [(name or '').strip().lower() for name in (reader.fieldnames or [])]
+            if 'texte' not in fieldnames:
+                return _admin_guest_codes_redirect(
+                    error="CSV invalide : colonne « texte » manquante (attendu : texte,code,created_at).",
+                    sort=sort, q=q)
+            length = _guest_codes_settings()['code_length']
+            created = updated = skipped = 0
+            for raw_row in reader:
+                row = {(k or '').strip().lower(): v for k, v in raw_row.items()}
+                texte = (row.get('texte') or '').strip()[:250]
+                if not texte:
+                    skipped += 1
+                    continue
+                code = (row.get('code') or '').strip()
+                created_at = (row.get('created_at') or '').strip() or None
+                if code:
+                    if not re.fullmatch(r'\d{2,10}', code):
+                        skipped += 1  # code non conforme (pas uniquement des chiffres, ou longueur hors 2-10)
+                        continue
+                    _id, kind = upsert_guest_code(code, texte, created_at)
+                else:
+                    code = generate_guest_code(length)
+                    upsert_guest_code(code, texte, created_at)
+                    kind = 'created'
+                if kind == 'created':
+                    created += 1
+                else:
+                    updated += 1
+            logger.info('Codes invités : import CSV — %d créé(s), %d mis à jour, %d ignoré(s).',
+                        created, updated, skipped)
+            msg = f'Import terminé : {created} créé(s), {updated} mis à jour, {skipped} ignoré(s).'
+            return _admin_guest_codes_redirect(success=msg, sort=sort, q=q)
+
+        if action == 'guest_codes_purge_date':
+            date_from = (request.form.get('purge_date_from') or '').strip()
+            date_to = (request.form.get('purge_date_to') or '').strip()
+            if not date_from and not date_to:
+                return _admin_guest_codes_redirect(
+                    error='Indiquez au moins une date (début ou fin).', sort=sort, q=q)
+            count = purge_guest_codes_by_date(date_from, date_to)
+            return _admin_guest_codes_redirect(success=f'{count} code(s) supprimé(s).', sort=sort, q=q)
+
+        if action == 'guest_codes_purge_first_n':
+            raw_n = (request.form.get('purge_n') or '').strip()
+            purge_sort = request.form.get('purge_sort', 'created_asc')
+            if purge_sort not in dict(_GUEST_CODES_SORTS):
+                purge_sort = 'created_asc'
+            if not raw_n.isdigit() or int(raw_n) < 1:
+                return _admin_guest_codes_redirect(error='Nombre invalide.', sort=sort, q=q)
+            count = purge_guest_codes_first_n(int(raw_n), purge_sort)
+            return _admin_guest_codes_redirect(success=f'{count} code(s) supprimé(s).', sort=sort, q=q)
 
         if action == 'qrcode_settings':
             set_setting('qrcode.enabled', '1' if request.form.get('enabled') else '0')
@@ -3401,10 +3498,17 @@ def admin_guest_codes():
 
             return redirect(url_for('admin_guest_codes', ok="Message d'erreur QR-code mis à jour."))
 
+    list_sort = request.args.get('sort', 'created_desc')
+    if list_sort not in dict(_GUEST_CODES_SORTS):
+        list_sort = 'created_desc'
+    list_q = request.args.get('q', '')
     return render_template(
         'admin_guest_codes.html', config=CONFIG,
         guest_codes_settings=_guest_codes_settings(),
-        guest_codes=list_guest_codes(),
+        guest_codes=list_guest_codes(sort=list_sort, q=list_q),
+        guest_codes_sorts=_GUEST_CODES_SORTS,
+        guest_codes_sort=list_sort,
+        guest_codes_q=list_q,
         tags_fonts=_PROMO_FONTS,
         qrcode_settings=_qrcode_settings(),
         qrcode_burn_settings=_qr_burn_settings(),
@@ -3415,6 +3519,26 @@ def admin_guest_codes():
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )
+
+
+@app.route('/admin/guest_codes/export/csv')
+@require_admin_auth
+def admin_guest_codes_export_csv():
+    """Export CSV des codes invités — mêmes tri/filtre que la liste
+    actuellement affichée (query params sort/q), même principe que
+    admin_emails_export_csv ci-dessus. Colonnes réimportables telles
+    quelles par l'action 'guest_codes_import'."""
+    sort = request.args.get('sort', 'created_desc')
+    if sort not in dict(_GUEST_CODES_SORTS):
+        sort = 'created_desc'
+    q = request.args.get('q', '')
+    rows = list_guest_codes(sort=sort, q=q)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=['texte', 'code', 'created_at'])
+    writer.writeheader()
+    writer.writerows({'texte': r['texte'], 'code': r['code'], 'created_at': r['created_at']} for r in rows)
+    return Response(output.getvalue(), mimetype='text/csv',
+                    headers={'Content-Disposition': 'attachment; filename=codes-invites.csv'})
 
 
 # ── Admin — boutons d'action (kiosque) ────────────────────────────────────────

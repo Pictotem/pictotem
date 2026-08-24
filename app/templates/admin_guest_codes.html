@@ -56,6 +56,7 @@
     }
     .code-table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.05); vertical-align: middle; }
     .code-table .col-code { width: 110px; }
+    .code-table .col-date { width: 150px; font-size: 12px; color: var(--muted); }
     .code-table .col-act  { width: 190px; text-align: right; }
     .code-badge {
       font-family: monospace; font-weight: 700; font-size: 14px; letter-spacing: .04em;
@@ -141,8 +142,29 @@
     <form class="add-form" method="post">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="action" value="guest_code_new">
+      <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+      <input type="hidden" name="q" value="{{ guest_codes_q }}">
       <input type="text" name="texte" maxlength="250" placeholder="Texte associé (ex. Julie &amp; Marc)" required>
       <button class="action-btn primary small" type="submit">Ajouter (code généré automatiquement)</button>
+    </form>
+
+    <!-- Tri + filtre : GET, recharge la page avec sort/q en query string.
+         Préservés à travers les actions CRUD/import/purge ci-dessous (champs
+         cachés sort/q dans chaque formulaire) pour ne pas perdre la vue en
+         cours après une action. -->
+    <form class="add-form" method="get" action="{{ url_for('admin_guest_codes') }}" style="margin-top:10px">
+      <select name="sort" onchange="this.form.submit()">
+        {% for value, label in guest_codes_sorts %}
+        <option value="{{ value }}" {% if guest_codes_sort == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="q" value="{{ guest_codes_q }}" placeholder="Filtrer (texte ou code)" style="flex:1;min-width:180px">
+      <button class="action-btn small" type="submit">Filtrer</button>
+      {% if guest_codes_q %}
+      <a href="{{ url_for('admin_guest_codes', sort=guest_codes_sort) }}" class="btn-icon" title="Effacer le filtre">✕</a>
+      {% endif %}
+      <a href="{{ url_for('admin_guest_codes_export_csv', sort=guest_codes_sort, q=guest_codes_q) }}"
+         class="btn-icon" style="margin-left:auto" title="Exporter la vue actuelle en CSV">⬇ Export CSV</a>
     </form>
 
     {% if guest_codes %}
@@ -151,6 +173,7 @@
         <tr>
           <th>Texte</th>
           <th class="col-code">Code</th>
+          <th class="col-date">Créé le</th>
           <th class="col-act">Actions</th>
         </tr>
       </thead>
@@ -162,16 +185,21 @@
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="action" value="guest_code_edit">
               <input type="hidden" name="guest_code_id" value="{{ gc.id }}">
+              <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+              <input type="hidden" name="q" value="{{ guest_codes_q }}">
               <input type="text" name="texte" value="{{ gc.texte }}" maxlength="250" required style="flex:1">
               <button class="btn-icon save" type="submit" title="Enregistrer">✓</button>
             </form>
           </td>
           <td><span class="code-badge">{{ gc.code }}</span></td>
+          <td class="col-date">{{ gc.created_at | format_dt }}</td>
           <td class="col-act">
             <form method="post" style="display:inline">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="action" value="guest_code_regenerate">
               <input type="hidden" name="guest_code_id" value="{{ gc.id }}">
+              <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+              <input type="hidden" name="q" value="{{ guest_codes_q }}">
               <button class="btn-icon" type="submit" title="Régénérer le code">↻ Régénérer</button>
             </form>
             <form method="post" style="display:inline"
@@ -179,6 +207,8 @@
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="action" value="guest_code_delete">
               <input type="hidden" name="guest_code_id" value="{{ gc.id }}">
+              <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+              <input type="hidden" name="q" value="{{ guest_codes_q }}">
               <button class="btn-icon del" type="submit" title="Supprimer">✕</button>
             </form>
           </td>
@@ -187,8 +217,93 @@
       </tbody>
     </table>
     {% else %}
-    <p style="text-align:center;color:var(--muted);padding:24px 0;">Aucun code invité pour le moment.</p>
+    <p style="text-align:center;color:var(--muted);padding:24px 0;">
+      {% if guest_codes_q %}Aucun code invité ne correspond au filtre.{% else %}Aucun code invité pour le moment.{% endif %}
+    </p>
     {% endif %}
+
+    <!-- Import CSV : colonnes texte,code,created_at (code/created_at optionnels
+         — mêmes en-têtes que l'export ci-dessus, réimportable tel quel).
+         Sans code fourni (ou code non conforme) : nouveau code généré
+         automatiquement. Code déjà existant : le texte associé est mis à
+         jour (upsert), la date de création d'origine est conservée. -->
+    <form method="post" enctype="multipart/form-data" style="margin-top:18px;padding-top:18px;border-top:1px solid var(--border)">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="guest_codes_import">
+      <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+      <input type="hidden" name="q" value="{{ guest_codes_q }}">
+      <div class="field">
+        <label>Importer un CSV (colonnes : texte, code, created_at — code et created_at optionnels)</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="file" name="csv_file" accept=".csv,text/csv" required>
+          <button class="action-btn small" type="submit">Importer</button>
+        </div>
+        <p class="field-hint">
+          Une ligne dont le code est déjà présent met à jour le texte associé (la date de
+          création d'origine est conservée). Une ligne sans code (ou avec un code non conforme —
+          chiffres uniquement, 2 à 10 caractères) crée une nouvelle entrée avec un code généré
+          automatiquement.
+        </p>
+      </div>
+    </form>
+  </div>
+
+  <!-- Purge filtrée -->
+  <div class="form-card" style="margin-top:24px">
+    <p class="section-title">Purger des codes invités</p>
+    <p class="section-hint">Suppression définitive et irréversible — n'affecte que la table des codes invités, jamais les captures ou les tags déjà posés.</p>
+
+    <form method="post" style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)"
+          onsubmit="return confirm('Supprimer définitivement tous les codes invités créés dans cette plage de dates ?')">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="guest_codes_purge_date">
+      <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+      <input type="hidden" name="q" value="{{ guest_codes_q }}">
+      <p class="section-title" style="font-size:14px;margin-bottom:10px">Par plage de dates de création</p>
+      <div class="field-row" style="align-items:end">
+        <div class="field">
+          <label>Du</label>
+          <input type="date" name="purge_date_from">
+        </div>
+        <div class="field">
+          <label>Au</label>
+          <input type="date" name="purge_date_to">
+        </div>
+        <div class="field">
+          <button class="btn-primary" type="submit" style="background:#c84040">Purger cette plage</button>
+        </div>
+      </div>
+      <p class="field-hint">Au moins une des deux dates est requise. Borne « Au » incluse (jusqu'à 23:59:59 ce jour-là).</p>
+    </form>
+
+    <form method="post"
+          onsubmit="return confirm('Supprimer définitivement les N premiers codes invités selon l\'ordre choisi ?')">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="guest_codes_purge_first_n">
+      <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+      <input type="hidden" name="q" value="{{ guest_codes_q }}">
+      <p class="section-title" style="font-size:14px;margin-bottom:10px">Les N premiers selon un ordre</p>
+      <div class="field-row" style="align-items:end">
+        <div class="field">
+          <label>Nombre</label>
+          <input type="number" name="purge_n" min="1" step="1" placeholder="ex. 50">
+        </div>
+        <div class="field">
+          <label>Ordre (« premiers » = début de cet ordre)</label>
+          <select name="purge_sort">
+            {% for value, label in guest_codes_sorts %}
+            <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <button class="btn-primary" type="submit" style="background:#c84040">Purger</button>
+        </div>
+      </div>
+      <p class="field-hint">
+        Ex. « Date de création (ancien → récent) » + 50 supprime les 50 codes les plus anciens.
+      </p>
+    </form>
   </div>
 
   <!-- Add-on : détection de QR-codes → tags automatiques -->

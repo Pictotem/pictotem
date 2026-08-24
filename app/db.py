@@ -843,9 +843,38 @@ def get_media_by_uid(media_uid):
 # (voir _qr_detect_boxes_robust, app.py), donc s'applique uniformément à
 # l'aperçu en direct, à l'incrustation sur le média et au tag automatique.
 
-def list_guest_codes():
+# Clés de tri autorisées pour list_guest_codes()/purge_guest_codes_first_n()
+# (whitelist : la clé vient du formulaire admin, jamais interpolée telle
+# quelle dans le SQL). Les libellés affichés (FR) vivent côté app.py
+# (_GUEST_CODES_SORTS), cette table est la seule source de vérité pour le
+# SQL correspondant à chaque clé.
+GUEST_CODES_SORT_SQL = {
+    'created_desc': 'created_at DESC',
+    'created_asc':  'created_at ASC',
+    'texte_asc':    'texte COLLATE NOCASE ASC',
+    'texte_desc':   'texte COLLATE NOCASE DESC',
+    'code_asc':     'code ASC',
+    'code_desc':    'code DESC',
+    'length_asc':   'LENGTH(texte) ASC, texte COLLATE NOCASE ASC',
+    'length_desc':  'LENGTH(texte) DESC, texte COLLATE NOCASE ASC',
+}
+
+
+def list_guest_codes(sort='created_desc', q=''):
+    """`sort` : une clé de GUEST_CODES_SORT_SQL (repli sur 'created_desc' si
+    inconnue). `q` : filtre optionnel, recherche partielle sur texte OU
+    code."""
+    order_sql = GUEST_CODES_SORT_SQL.get(sort, GUEST_CODES_SORT_SQL['created_desc'])
+    q = (q or '').strip()
     with closing(db_conn()) as conn:
-        rows = conn.execute('SELECT * FROM guest_codes ORDER BY created_at DESC').fetchall()
+        if q:
+            like = f'%{q}%'
+            rows = conn.execute(
+                f'SELECT * FROM guest_codes WHERE texte LIKE ? OR code LIKE ? ORDER BY {order_sql}',
+                (like, like)
+            ).fetchall()
+        else:
+            rows = conn.execute(f'SELECT * FROM guest_codes ORDER BY {order_sql}').fetchall()
     return [dict(r) for r in rows]
 
 
@@ -930,6 +959,74 @@ def delete_guest_code_db(guest_code_id):
         conn.execute('DELETE FROM guest_codes WHERE id = ?', (guest_code_id,))
         conn.commit()
     return dict(row)
+
+
+def upsert_guest_code(code, texte, created_at=None):
+    """Insère ou met à jour (par `code`, déjà validé par l'appelant — voir
+    import CSV, app.py) un code invité. Si `code` existe déjà, seul `texte`
+    est mis à jour (la date de création d'origine est conservée). Sinon,
+    crée une nouvelle ligne avec `created_at` fourni (réimport d'un export
+    CSV, pour préserver la date d'origine) ou l'instant présent. Retourne
+    (id, 'created'|'updated')."""
+    with closing(db_conn()) as conn:
+        existing = conn.execute('SELECT id FROM guest_codes WHERE code = ?', (code,)).fetchone()
+        if existing:
+            conn.execute('UPDATE guest_codes SET texte=? WHERE id=?', (texte, existing['id']))
+            conn.commit()
+            return existing['id'], 'updated'
+        cur = conn.execute(
+            'INSERT INTO guest_codes(code, texte, created_at) VALUES(?,?,?)',
+            (code, texte, created_at or datetime.now().isoformat(timespec='seconds'))
+        )
+        conn.commit()
+        return cur.lastrowid, 'created'
+
+
+def purge_guest_codes_by_date(date_from='', date_to=''):
+    """Supprime les codes invités dont `created_at` tombe dans
+    [date_from, date_to] (bornes 'YYYY-MM-DD', l'une des deux pouvant être
+    vide pour une borne ouverte — mais pas les deux, voir appelant).
+    Retourne le nombre de lignes supprimées. Même convention de bornage que
+    le filtre date du diaporama (voir _slideshow_settings, app.py) :
+    date_to est étendu à 23:59:59 pour inclure toute la journée."""
+    date_from = (date_from or '').strip()
+    date_to = (date_to or '').strip()
+    conditions, params = [], []
+    if date_from:
+        conditions.append('created_at >= ?')
+        params.append(date_from)
+    if date_to:
+        conditions.append('created_at <= ?')
+        params.append(date_to + 'T23:59:59')
+    if not conditions:
+        return 0
+    where = ' AND '.join(conditions)
+    with closing(db_conn()) as conn:
+        cur = conn.execute(f'DELETE FROM guest_codes WHERE {where}', params)
+        conn.commit()
+        return cur.rowcount
+
+
+def purge_guest_codes_first_n(n, sort='created_asc'):
+    """Supprime les `n` premiers codes invités selon l'ordre `sort` (voir
+    GUEST_CODES_SORT_SQL) — p.ex. 'created_asc' = les plus anciens,
+    'length_desc' = les textes les plus longs. Retourne le nombre de lignes
+    effectivement supprimées (peut être < n s'il y a moins de n lignes)."""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return 0
+    if n < 1:
+        return 0
+    order_sql = GUEST_CODES_SORT_SQL.get(sort, GUEST_CODES_SORT_SQL['created_asc'])
+    with closing(db_conn()) as conn:
+        rows = conn.execute(f'SELECT id FROM guest_codes ORDER BY {order_sql} LIMIT ?', (n,)).fetchall()
+        ids = [r['id'] for r in rows]
+        if ids:
+            placeholders = ','.join('?' * len(ids))
+            conn.execute(f'DELETE FROM guest_codes WHERE id IN ({placeholders})', ids)
+            conn.commit()
+        return len(ids)
 
 
 # ── Tags ──────────────────────────────────────────────────────────────────────
