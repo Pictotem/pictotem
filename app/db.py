@@ -159,6 +159,13 @@ def init_db():
         )
         """)
         conn.execute("""
+        CREATE TABLE IF NOT EXISTS wallpaper_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute("""
         CREATE TABLE IF NOT EXISTS guest_uploads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             filename TEXT NOT NULL,
@@ -560,6 +567,42 @@ def delete_screensaver_image_db(image_id):
             return None
         img = dict(row)
         conn.execute('DELETE FROM screensaver_images WHERE id = ?', (image_id,))
+        conn.commit()
+    return img
+
+
+# ── Fond d'écran Windows (images disponibles) ────────────────────────────────
+# Images uploadées depuis /admin/application, parmi lesquelles l'admin choisit
+# celle à appliquer comme fond d'écran Windows (voir utils.set_windows_wallpaper
+# et app.py admin_wallpaper_apply). Réglage 'application.wallpaper_current_filename'
+# (table settings) retient laquelle est actuellement appliquée.
+
+def list_wallpaper_images():
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            'SELECT * FROM wallpaper_images ORDER BY created_at DESC'
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_wallpaper_image(filename):
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            'INSERT INTO wallpaper_images(filename, created_at) VALUES(?,?)',
+            (filename, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def delete_wallpaper_image_db(image_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM wallpaper_images WHERE id = ?', (image_id,)).fetchone()
+        if not row:
+            return None
+        img = dict(row)
+        conn.execute('DELETE FROM wallpaper_images WHERE id = ?', (image_id,))
         conn.commit()
     return img
 

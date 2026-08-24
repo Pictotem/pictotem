@@ -304,6 +304,27 @@
     </div>
   </div>
 
+  <!-- Zone discrète : plusieurs appuis rapides (cfg.networkInfoTaps, réglable
+       depuis /admin/application) affichent l'IP + le port en écoute —
+       diagnostic réseau sur place, sans mot de passe. Voir static/app.js
+       setupNetworkInfoTaps(). Coin bas-gauche, distinct du coin haut-gauche
+       déjà utilisé par le déverrouillage plein écran (#kioskUnlockZone). -->
+  <div id="networkInfoZone" aria-hidden="true"
+       style="position:fixed;bottom:0;left:0;width:64px;height:64px;z-index:9999;background:transparent;"></div>
+
+  <div id="networkInfoModal" class="version-modal hidden">
+    <div class="version-modal-box">
+      <div class="version-modal-title">Informations réseau</div>
+      <div class="version-modal-text">
+        Adresse IP : <strong id="networkInfoIp">—</strong><br>
+        Port en écoute : <strong id="networkInfoPort">—</strong>
+      </div>
+      <div class="version-modal-actions">
+        <button class="action-btn ter" id="networkInfoModalClose" type="button">Fermer</button>
+      </div>
+    </div>
+  </div>
+
   <div class="preview-shell" id="previewShell">
     <img class="preview-stream" src="{{ url_for('stream_mjpg') }}" alt="Prévisualisation" />
     <div class="overlay">
@@ -516,6 +537,9 @@
       qrLiveErrorMode:           {{ qrcode_live_error_style.mode | tojson }},
       qrLiveErrorText:           {{ qrcode_live_error_style.text | tojson }},
       qrLiveErrorImageUrl:       {{ qrcode_live_error_style.image_url | tojson }},
+      networkInfoTaps:           {{ kiosk_network_info_taps }},
+      networkIp:                 {{ network_info.ip | tojson }},
+      networkPort:               {{ network_info.port }},
     };
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>

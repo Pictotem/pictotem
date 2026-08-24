@@ -54,6 +54,8 @@ const idleTimerBadge = document.getElementById('idleTimerBadge');
 const versionBadge      = document.getElementById('versionBadge');
 const versionModal      = document.getElementById('versionModal');
 const versionModalClose = document.getElementById('versionModalClose');
+const networkInfoModal      = document.getElementById('networkInfoModal');
+const networkInfoModalClose = document.getElementById('networkInfoModalClose');
 const topCountdownBar     = document.getElementById('topCountdownBar');
 const topCountdownBarFill = document.getElementById('topCountdownBarFill');
 const photoStripStepEl    = document.getElementById('photoStripStep');
@@ -1399,6 +1401,24 @@ versionModal?.addEventListener('click', (e) => {
   if (e.target === versionModal) _closeVersionModal();
 });
 
+// — Informations réseau (IP + port en écoute) — diagnostic sur place, sans
+// mot de passe (cfg.networkIp/networkPort injectés au chargement de la page
+// depuis get_network_info(), voir utils.py — pas d'appel réseau ici).
+function _openNetworkInfoModal() {
+  const ipEl = document.getElementById('networkInfoIp');
+  const portEl = document.getElementById('networkInfoPort');
+  if (ipEl) ipEl.textContent = cfg.networkIp || '—';
+  if (portEl) portEl.textContent = cfg.networkPort || '—';
+  networkInfoModal?.classList.remove('hidden');
+}
+function _closeNetworkInfoModal() {
+  networkInfoModal?.classList.add('hidden');
+}
+networkInfoModalClose?.addEventListener('click', _closeNetworkInfoModal);
+networkInfoModal?.addEventListener('click', (e) => {
+  if (e.target === networkInfoModal) _closeNetworkInfoModal();
+});
+
 (function setupKioskUnlock() {
   const zone = document.getElementById('kioskUnlockZone');
   const TAP_COUNT = cfg.kioskUnlockTaps || 5;
@@ -1418,6 +1438,24 @@ versionModal?.addEventListener('click', (e) => {
     if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'k') {
       e.preventDefault();
       _openUnlockModal();
+    }
+  });
+})();
+
+// Zone coin bas-gauche, même principe que setupKioskUnlock() ci-dessus mais
+// sans PIN — cfg.networkInfoTaps réglable depuis /admin/application.
+(function setupNetworkInfoTaps() {
+  const zone = document.getElementById('networkInfoZone');
+  const TAP_COUNT = cfg.networkInfoTaps || 7;
+  const TAP_WINDOW_MS = 3000;
+  let taps = [];
+  zone?.addEventListener('click', () => {
+    const now = Date.now();
+    taps = taps.filter(t => now - t < TAP_WINDOW_MS);
+    taps.push(now);
+    if (taps.length >= TAP_COUNT) {
+      taps = [];
+      _openNetworkInfoModal();
     }
   });
 })();

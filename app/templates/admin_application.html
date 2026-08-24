@@ -30,7 +30,7 @@
   <div class="admin-header">
     <div>
       <h1>Application</h1>
-      <p>Plein écran, redémarrage et démarrage automatique de l'application sur la borne.</p>
+      <p>Plein écran, redémarrage, démarrage automatique, fond d'écran Windows et informations réseau de la borne.</p>
     </div>
     <nav class="admin-nav">
       <a class="action-btn" href="{{ url_for('admin_home') }}">← Admin</a>
@@ -104,7 +104,7 @@
     </div>
   </div>
 
-  <div class="text-section" style="margin-bottom:0">
+  <div class="text-section">
     <h2>Démarrage automatique Windows</h2>
     <div class="text-fields">
       <div class="text-field" style="grid-column:1/-1">
@@ -122,6 +122,76 @@
           <button type="submit" class="action-btn{% if not autostart_enabled %} primary{% endif %}">
             {% if autostart_enabled %}Désactiver le démarrage automatique{% else %}Activer le démarrage automatique{% endif %}
           </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="text-section">
+    <h2>Fond d'écran Windows</h2>
+    <div class="text-fields">
+      <div class="text-field" style="grid-column:1/-1">
+        <p class="field-default" style="margin:0 0 12px">
+          Change immédiatement le fond d'écran du Bureau Windows de la borne (même effet qu'un
+          changement fait depuis les Paramètres Windows — persiste après redémarrage). Utile par
+          exemple hors des heures d'utilisation, pour un Bureau visible entre deux événements.
+          Ajoutez une ou plusieurs images ci-dessous, puis choisissez celle à appliquer.
+        </p>
+
+        <form method="post" enctype="multipart/form-data" action="{{ url_for('admin_wallpaper_upload') }}"
+              style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:{% if wallpaper_images %}18px{% else %}0{% endif %}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="file" name="wallpaper_images" accept=".png,.jpg,.jpeg,.bmp" multiple>
+          <button type="submit" class="action-btn">Ajouter</button>
+        </form>
+
+        {% if wallpaper_images %}
+        <div class="frame-gallery">
+          {% for img in wallpaper_images %}
+          <div class="frame-card{% if img.is_current %} active{% endif %}">
+            <div class="frame-thumb"><img src="{{ img.url }}" alt=""></div>
+            <div class="frame-label">{% if img.is_current %}Fond d'écran actuel{% else %}&nbsp;{% endif %}</div>
+            <div style="display:flex;gap:6px;margin-top:8px">
+              <form method="post" action="{{ url_for('admin_wallpaper_apply') }}" style="flex:1">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="image_id" value="{{ img.id }}">
+                <button type="submit" class="action-btn{% if not img.is_current %} primary{% endif %}"
+                        style="width:100%" {% if img.is_current %}disabled{% endif %}>
+                  {% if img.is_current %}Actif{% else %}Appliquer{% endif %}
+                </button>
+              </form>
+              <form method="post" action="{{ url_for('admin_wallpaper_delete') }}"
+                    onsubmit="return confirm('Supprimer cette image de la liste ?')">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="image_id" value="{{ img.id }}">
+                <button type="submit" class="action-btn ter" aria-label="Supprimer">✕</button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="text-section" style="margin-bottom:0">
+    <h2>Informations réseau (interface principale)</h2>
+    <div class="text-fields">
+      <div class="text-field" style="grid-column:1/-1">
+        <p class="field-default" style="margin:0 0 12px">
+          Sur l'interface principale (kiosque), plusieurs appuis rapides dans le coin bas-gauche
+          de l'écran affichent l'adresse IP et le port en écoute de l'application — utile pour un
+          dépannage réseau sur place, sans avoir à ouvrir le back office. Aucun mot de passe n'est
+          demandé : purement informatif, aucune action n'est accessible depuis cette fenêtre.
+        </p>
+        <form method="post" action="{{ url_for('admin_set_network_info_taps') }}"
+              style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <label style="font-size:13px;color:var(--muted)">Nombre d'appuis</label>
+          <input type="number" name="network_info_taps" min="2" max="15" value="{{ network_info_taps }}"
+                 style="width:70px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;font-size:14px">
+          <button type="submit" class="action-btn">Enregistrer</button>
         </form>
       </div>
     </div>

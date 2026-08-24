@@ -31,6 +31,18 @@ def _get_local_ip() -> str:
         return '127.0.0.1'
 
 
+def get_network_info() -> dict:
+    """IP locale + port d'écoute de l'application, pour l'affichage de
+    diagnostic sur l'interface principale (voir kiosk.network_info_taps
+    dans app.py, réglable depuis /admin/application) — même détection d'IP
+    que build_gallery_url() ci-dessous, sans se limiter au repli 127.0.0.1
+    (affiché tel quel si la détection échoue, plutôt que masqué)."""
+    return {
+        'ip': _get_local_ip(),
+        'port': int(CONFIG['server'].get('port', 80)),
+    }
+
+
 def build_gallery_url() -> str:
     """Construit l'URL de la galerie avec l'IP réseau courante.
 
@@ -216,3 +228,39 @@ def disable_autostart() -> tuple[bool, str]:
         return False, f'Suppression du raccourci échouée : {exc}'
     logger.info('Démarrage automatique Windows désactivé.')
     return True, 'Démarrage automatique désactivé.'
+
+
+# ── Fond d'écran Windows ─────────────────────────────────────────────────────
+# Change le fond d'écran du Bureau Windows via l'API native
+# SystemParametersInfoW (ctypes, aucune dépendance supplémentaire) — même
+# effet qu'un changement fait depuis les Paramètres Windows : immédiat et
+# persistant après redémarrage. Voir /admin/application (gestion des images
+# et bouton "Appliquer" — app.py admin_wallpaper_apply).
+
+_SPI_SETDESKWALLPAPER = 20
+_SPIF_UPDATEINIFILE = 0x01
+_SPIF_SENDCHANGE = 0x02
+
+
+def set_windows_wallpaper(image_path: Path) -> tuple[bool, str]:
+    if os.name != 'nt':
+        return False, 'Fond d\'écran indisponible sur cette plateforme (Windows requis).'
+    if not image_path.exists():
+        return False, 'Image introuvable.'
+    try:
+        import ctypes
+        # SystemParametersInfoW attend un chemin absolu ; les formats PNG/JPG
+        # sont acceptés nativement depuis Windows 7 (pas besoin de convertir
+        # en BMP), le BMP restant accepté aussi pour compatibilité.
+        ok = ctypes.windll.user32.SystemParametersInfoW(
+            _SPI_SETDESKWALLPAPER, 0, str(image_path.resolve()),
+            _SPIF_UPDATEINIFILE | _SPIF_SENDCHANGE,
+        )
+    except Exception as exc:
+        logger.warning('Échec changement de fond d\'écran : %s', exc)
+        return False, f'Échec du changement de fond d\'écran : {exc}'
+    if not ok:
+        logger.warning('Échec changement de fond d\'écran (SystemParametersInfoW a retourné 0) : %s', image_path)
+        return False, 'Échec du changement de fond d\'écran (Windows a refusé la demande).'
+    logger.info('Fond d\'écran Windows changé : %s', image_path)
+    return True, 'Fond d\'écran changé.'

@@ -63,10 +63,12 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_tags, get_tag_by_id, create_tag, update_tag, delete_tag_db,
                 list_capture_tags, count_capture_tags, add_capture_tag, delete_capture_tag,
                 get_media_by_uid, get_tags_for_captures, list_distinct_tag_labels,
-                list_capture_tags_with_media)
+                list_capture_tags_with_media,
+                list_wallpaper_images, add_wallpaper_image, delete_wallpaper_image_db)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
-                   enable_autostart, generate_qr_png, is_autostart_enabled,
-                   make_thumb, message_text, print_photo, validate_printer)
+                   enable_autostart, generate_qr_png, get_network_info,
+                   is_autostart_enabled, make_thumb, message_text, print_photo,
+                   set_windows_wallpaper, validate_printer)
 
 # ── Application Flask ─────────────────────────────────────────────────────────
 
@@ -167,6 +169,19 @@ def _kiosk_unlock_settings() -> dict:
     return {
         'pin':  get_setting('kiosk.unlock_pin', '') or '1234',
         'taps': int(raw_taps) if raw_taps.isdigit() and 2 <= int(raw_taps) <= 15 else 5,
+    }
+
+
+def _kiosk_network_info_settings() -> dict:
+    """Nombre d'appuis rapides (zone dédiée, coin bas-gauche de l'interface
+    principale) affichant l'IP + le port en écoute — réglable depuis
+    /admin/application, SANS mot de passe (contrairement au déverrouillage
+    plein écran ci-dessus) : purement informatif, aucune action sensible
+    n'est accessible depuis cette fenêtre. Voir get_network_info() (utils.py)
+    et setupNetworkInfoTaps() dans static/app.js."""
+    raw_taps = get_setting('kiosk.network_info_taps', '')
+    return {
+        'taps': int(raw_taps) if raw_taps.isdigit() and 2 <= int(raw_taps) <= 15 else 7,
     }
 
 
@@ -377,6 +392,8 @@ def index():
         qrcode=_qrcode_settings(),
         qrcode_live_style=_qr_live_style_settings(),
         qrcode_live_error_style=_qr_live_error_style_settings(),
+        network_info=get_network_info(),
+        kiosk_network_info_taps=_kiosk_network_info_settings()['taps'],
     )
 
 
@@ -1985,18 +2002,37 @@ def admin_system():
     )
 
 
+# ── Fond d'écran Windows (réglable depuis la tuile « Application ») ───────────
+WALLPAPER_DIR = BASE_DIR / 'app' / 'static' / 'wallpapers'
+_WALLPAPER_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.bmp'}
+
+
+def _wallpaper_images_view() -> list:
+    """Images disponibles pour le fond d'écran Windows, avec leur URL et un
+    marqueur is_current (comparé au réglage application.wallpaper_current_filename,
+    mis à jour uniquement par admin_wallpaper_apply lors d'une application
+    réussie — voir /admin/application)."""
+    current = get_setting('application.wallpaper_current_filename', '')
+    images = list_wallpaper_images()
+    for img in images:
+        img['url'] = f"/static/wallpapers/{img['filename']}"
+        img['is_current'] = img['filename'] == current
+    return images
+
+
 @app.route('/admin/application')
 @require_admin_auth
 def admin_application():
     """Tuile « Application » du back office — actions liées au processus de
     l'application lui-même (plein écran, redémarrage, démarrage automatique
-    Windows), séparées des réglages caméra/écran de /admin/system. Pas de
-    POST ici : chaque action poste vers sa propre route dédiée ci-dessous,
-    déjà existante avant cette page (admin_toggle_fullscreen,
-    admin_restart_app, admin_toggle_autostart)."""
+    Windows, fond d'écran Windows, informations réseau sur le kiosque),
+    séparées des réglages caméra/écran de /admin/system. Pas de POST ici :
+    chaque action poste vers sa propre route dédiée ci-dessous."""
     return render_template(
         'admin_application.html', config=CONFIG,
         autostart_enabled=is_autostart_enabled(),
+        wallpaper_images=_wallpaper_images_view(),
+        network_info_taps=_kiosk_network_info_settings()['taps'],
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )
@@ -2154,6 +2190,95 @@ def admin_restart_update_app():
         'admin_application',
         ok="Mise à jour en cours (fenêtre ouverte sur la borne)... l'application redémarrera automatiquement.",
     ))
+
+
+@app.route('/admin/application/wallpaper/upload', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_wallpaper_upload():
+    """Ajoute une ou plusieurs images à la liste des fonds d'écran Windows
+    disponibles (voir /admin/application) — ne les applique pas
+    automatiquement, c'est admin_wallpaper_apply ci-dessous qui s'en charge,
+    sur une image déjà présente dans cette liste."""
+    files = [f for f in request.files.getlist('wallpaper_images') if f and f.filename]
+    if not files:
+        return redirect(url_for('admin_application', err='Aucun fichier sélectionné.'))
+    WALLPAPER_DIR.mkdir(parents=True, exist_ok=True)
+    added = 0
+    for i, file in enumerate(files):
+        ext = Path(file.filename).suffix.lower()
+        if ext not in _WALLPAPER_ALLOWED_EXT:
+            continue
+        safe = f'wallpaper-{int(datetime.now().timestamp() * 1000)}-{i}{ext}'
+        file.save(str(WALLPAPER_DIR / safe))
+        add_wallpaper_image(safe)
+        added += 1
+    if not added:
+        return redirect(url_for('admin_application', err='Format non supporté (PNG, JPG, BMP).'))
+    skipped = len(files) - added
+    msg = f"{added} image(s) ajoutée(s)."
+    if skipped:
+        msg += f' {skipped} ignorée(s) (format non supporté).'
+    return redirect(url_for('admin_application', ok=msg))
+
+
+@app.route('/admin/application/wallpaper/apply', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_wallpaper_apply():
+    """Applique immédiatement l'une des images déjà ajoutées comme fond
+    d'écran du Bureau Windows (voir utils.set_windows_wallpaper — API
+    native SystemParametersInfoW, effet immédiat et persistant)."""
+    try:
+        image_id = int(request.form.get('image_id', ''))
+    except ValueError:
+        return redirect(url_for('admin_application', err='Image invalide.'))
+    images = {img['id']: img for img in list_wallpaper_images()}
+    img = images.get(image_id)
+    if not img:
+        return redirect(url_for('admin_application', err='Image introuvable.'))
+    ok, msg = set_windows_wallpaper(WALLPAPER_DIR / img['filename'])
+    if not ok:
+        return redirect(url_for('admin_application', err=msg))
+    set_setting('application.wallpaper_current_filename', img['filename'])
+    logger.info('Fond d\'écran Windows changé depuis /admin/application : %s', img['filename'])
+    return redirect(url_for('admin_application', ok=msg))
+
+
+@app.route('/admin/application/wallpaper/delete', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_wallpaper_delete():
+    """Retire une image de la liste (fichier + entrée DB). N'affecte pas le
+    fond d'écran Windows actuellement appliqué si c'est une autre image —
+    si c'est CELLE-LÀ, le réglage application.wallpaper_current_filename est
+    simplement effacé (Windows garde l'image en place jusqu'au prochain
+    changement, rien n'est fait côté Bureau ici)."""
+    try:
+        image_id = int(request.form.get('image_id', ''))
+    except ValueError:
+        return redirect(url_for('admin_application', err='Image invalide.'))
+    img = delete_wallpaper_image_db(image_id)
+    if not img:
+        return redirect(url_for('admin_application', err='Image introuvable.'))
+    (WALLPAPER_DIR / img['filename']).unlink(missing_ok=True)
+    if get_setting('application.wallpaper_current_filename', '') == img['filename']:
+        set_setting('application.wallpaper_current_filename', '')
+    return redirect(url_for('admin_application', ok='Image supprimée.'))
+
+
+@app.route('/admin/application/network_info_taps', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_set_network_info_taps():
+    """Nombre d'appuis (zone dédiée, coin bas-gauche de l'interface
+    principale) déclenchant l'affichage de l'IP + du port en écoute — voir
+    _kiosk_network_info_settings() et setupNetworkInfoTaps() dans
+    static/app.js. Aucun mot de passe : purement informatif."""
+    raw_taps = (request.form.get('network_info_taps') or '').strip()
+    set_setting('kiosk.network_info_taps',
+                raw_taps if raw_taps.isdigit() and 2 <= int(raw_taps) <= 15 else '')
+    return redirect(url_for('admin_application', ok='Réglage mis à jour.'))
 
 
 @app.route('/admin/frames')
