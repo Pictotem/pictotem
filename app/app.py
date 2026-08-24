@@ -468,10 +468,12 @@ def capture_photo():
 
 
 def _ffmpeg_overlay_pass(input_path: Path, overlay_png_path: Path, output_path: Path, w: int, h: int):
-    """Une passe ffmpeg 'overlay' (image statique composée sur toutes les
-    frames d'une vidéo) — factorise le motif déjà utilisé pour le cadre
-    décoratif dans capture_video, réutilisé tel quel pour l'incrustation
-    QR-code (voir _qr_burn_settings). Retourne (ok: bool, message_erreur)."""
+    """Une passe ffmpeg 'overlay' (image STATIQUE composée sur toutes les
+    frames d'une vidéo) — utilisée pour le cadre décoratif dans
+    capture_video (toujours statique sur toute la durée). L'incrustation
+    QR-code, elle, doit suivre le mouvement du QR-code : voir
+    _qr_video_burn_track, qui grave une position différente par frame plutôt
+    que de passer par cette fonction. Retourne (ok: bool, message_erreur)."""
     try:
         proc = subprocess.run([
             FFMPEG_EXE, '-y', '-i', str(input_path), '-i', str(overlay_png_path),
@@ -485,6 +487,26 @@ def _ffmpeg_overlay_pass(input_path: Path, overlay_png_path: Path, output_path: 
     if proc.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
         logger.error('ffmpeg overlay échoué : %s', proc.stderr)
         return False, 'Application du cadre vidéo échouée'
+    return True, ''
+
+
+def _ffmpeg_transcode_to_mp4(input_avi_path: Path, output_path: Path, fps: float):
+    """Transcodage AVI (MJPG, produit par cv2.VideoWriter) -> MP4 (H.264) —
+    factorise le motif utilisé à la fois pour le transcodage initial de la
+    capture et pour la vidéo réincrustée image par image par
+    _qr_video_burn_track. Retourne (ok: bool, message_erreur)."""
+    try:
+        proc = subprocess.run([
+            FFMPEG_EXE, '-y', '-r', f'{fps:.3f}', '-i', str(input_avi_path),
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart', str(output_path),
+        ], capture_output=True, text=True)
+    except FileNotFoundError:
+        logger.error('ffmpeg introuvable (%s) — voir logs\\launcher.log (setup_ffmpeg.ps1).', FFMPEG_EXE)
+        return False, "ffmpeg introuvable sur cette machine (nécessaire pour les vidéos)."
+    if proc.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+        logger.error('ffmpeg transcode échoué : %s', proc.stderr)
+        return False, 'Transcodage vidéo échoué'
     return True, ''
 
 
@@ -521,19 +543,6 @@ def capture_video():
         if ov is not None:
             thumb_frame = composite_frame_overlay(first, ov)
 
-    # Incrustation QR-code sur la vidéo : détection sur la seule 1ère frame
-    # (le visiteur tient généralement le QR-code immobile devant l'objectif
-    # le temps de l'enregistrement) — le calque forme+texte qui en résulte
-    # est ensuite gravé sur TOUTES les frames via ffmpeg (même principe que
-    # le cadre décoratif ci-dessus, lui aussi statique sur toute la durée).
-    qr_burn_png_path = None
-    if _qr_burn_settings()['video']:
-        qr_detections = _qr_detect_for_capture(thumb_frame, 'la vidéo')
-        qr_burn_layer = _render_qr_burn_layer(thumb_frame, qr_detections)
-        if qr_burn_layer is not None:
-            thumb_frame = _apply_qr_burn_layer_bgr(thumb_frame, qr_burn_layer)
-            qr_burn_png_path = VIDEO_DIR / f'video-{stamp}-qrburn.png'
-            qr_burn_layer.save(qr_burn_png_path)
     cv2.imwrite(str(thumb_path), thumb_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
 
     writer = cv2.VideoWriter(str(avi_path), cv2.VideoWriter_fourcc(*'MJPG'), configured_fps, (w, h))
@@ -582,54 +591,69 @@ def capture_video():
                 duration, actual_duration, frames_written, effective_fps, frame_id)
 
     # Transcodage AVI → MP4 (Point 4 : args en liste, pas de shell=True)
-    try:
-        proc = subprocess.run([
-            FFMPEG_EXE, '-y', '-r', f'{effective_fps:.3f}', '-i', str(avi_path),
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
-            '-movflags', '+faststart', str(raw_mp4_path),
-        ], capture_output=True, text=True)
-    except FileNotFoundError:
-        avi_path.unlink(missing_ok=True)
-        logger.error('ffmpeg introuvable (%s) — voir logs\\launcher.log (setup_ffmpeg.ps1).', FFMPEG_EXE)
-        return jsonify({'ok': False, 'error': "ffmpeg introuvable sur cette machine (nécessaire pour les vidéos)."}), 500
+    ok, err = _ffmpeg_transcode_to_mp4(avi_path, raw_mp4_path, effective_fps)
     avi_path.unlink(missing_ok=True)
-    if proc.returncode != 0 or not raw_mp4_path.exists() or raw_mp4_path.stat().st_size == 0:
-        logger.error('ffmpeg transcode échoué : %s', proc.stderr)
-        return jsonify({'ok': False, 'error': 'Transcodage vidéo échoué'}), 500
+    if not ok:
+        return jsonify({'ok': False, 'error': err}), 500
 
-    if (has_overlay or qr_burn_png_path is not None) and CONFIG['capture']['video'].get('save_raw', False):
+    qr_burn_enabled = _qr_burn_settings()['video']
+    if (has_overlay or qr_burn_enabled) and CONFIG['capture']['video'].get('save_raw', False):
         RAW_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(raw_mp4_path), str(RAW_VIDEO_DIR / final_filename))
         logger.info('Vidéo brute sauvegardée : %s', final_filename)
 
-    # Chaîne 0, 1 ou 2 passes ffmpeg 'overlay' selon ce qui est actif : cadre
-    # décoratif (has_overlay) puis/ou incrustation QR-code (qr_burn_png_path,
-    # calculée plus haut sur la 1ère frame). La sortie de chaque passe sert
-    # d'entrée à la suivante ; seule la dernière passe active écrit
-    # directement dans final_path.
-    pending_overlays = []
+    # Cadre décoratif : passe ffmpeg 'overlay' statique (inchangé). Écrit
+    # directement dans final_path SAUF si l'incrustation QR-code (suivie,
+    # voir plus bas) doit encore s'appliquer par-dessus, auquel cas elle
+    # écrit dans un fichier intermédiaire que cette dernière consommera.
+    path_for_qr = raw_mp4_path
     if has_overlay:
-        pending_overlays.append(overlay_path)
-    if qr_burn_png_path is not None:
-        pending_overlays.append(qr_burn_png_path)
-
-    if not pending_overlays:
+        step_output = final_path if not qr_burn_enabled else VIDEO_DIR / f'video-{stamp}-frame.mp4'
+        ok, err = _ffmpeg_overlay_pass(raw_mp4_path, overlay_path, step_output, w, h)
+        raw_mp4_path.unlink(missing_ok=True)
+        if not ok:
+            return jsonify({'ok': False, 'error': err}), 500
+        path_for_qr = step_output
+    elif not qr_burn_enabled:
         raw_mp4_path.rename(final_path)
-    else:
-        current_path = raw_mp4_path
-        for i, ov_png in enumerate(pending_overlays):
-            is_last = (i == len(pending_overlays) - 1)
-            step_output = final_path if is_last else VIDEO_DIR / f'video-{stamp}-step{i}.mp4'
-            ok, err = _ffmpeg_overlay_pass(current_path, ov_png, step_output, w, h)
-            current_path.unlink(missing_ok=True)
-            if not ok:
-                if qr_burn_png_path is not None:
-                    qr_burn_png_path.unlink(missing_ok=True)
-                return jsonify({'ok': False, 'error': err}), 500
-            current_path = step_output
+        path_for_qr = final_path
 
-    if qr_burn_png_path is not None:
-        qr_burn_png_path.unlink(missing_ok=True)
+    # Incrustation QR-code : suivi du mouvement (voir le commentaire au-dessus
+    # de _qr_video_detect_keyframes) — 2 passes après l'enregistrement, sans
+    # impact sur la fluidité/cadence de la capture elle-même. No-op (fichier
+    # simplement renommé) si aucun QR-code n'a jamais été décodé dans la
+    # vidéo — cas le plus fréquent quand l'option est activée « au cas où ».
+    if qr_burn_enabled:
+        keyframes, frame_count = _qr_video_detect_keyframes(path_for_qr, _QR_VIDEO_TRACK_SAMPLE_INTERVAL)
+        if not keyframes:
+            if path_for_qr != final_path:
+                path_for_qr.rename(final_path)
+        else:
+            qr_track = _qr_video_build_track(frame_count, keyframes, _QR_VIDEO_TRACK_SAMPLE_INTERVAL)
+            tracked_avi_path = VIDEO_DIR / f'video-{stamp}-qrtrack.avi'
+            if not _qr_video_burn_track(path_for_qr, qr_track, w, h, effective_fps, tracked_avi_path):
+                path_for_qr.unlink(missing_ok=True)
+                tracked_avi_path.unlink(missing_ok=True)
+                return jsonify({'ok': False, 'error': 'Incrustation QR-code (vidéo) échouée'}), 500
+            path_for_qr.unlink(missing_ok=True)
+            ok, err = _ffmpeg_transcode_to_mp4(tracked_avi_path, final_path, effective_fps)
+            tracked_avi_path.unlink(missing_ok=True)
+            if not ok:
+                return jsonify({'ok': False, 'error': err}), 500
+
+            # Miniature : si un QR-code est suivi dès la 1ère frame, la
+            # graver aussi sur la miniature pour qu'elle reflète ce que
+            # montre réellement le début de la vidéo finale.
+            if qr_track and qr_track[0] is not None:
+                box0, text0 = qr_track[0]
+                synth_pts0 = [(box0[0], box0[1]), (box0[2], box0[1]), (box0[2], box0[3]), (box0[0], box0[3])]
+                try:
+                    layer0 = _render_qr_burn_layer(thumb_frame, [{'text': text0, 'points': synth_pts0}])
+                    if layer0 is not None:
+                        thumb_burned = _apply_qr_burn_layer_bgr(thumb_frame, layer0)
+                        cv2.imwrite(str(thumb_path), thumb_burned, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+                except Exception:
+                    logger.exception('QR live : échec incrustation sur la miniature vidéo.')
 
     capture_id, media_uid = record_capture('video', final_filename, thumb_name)
     logger.info('Vidéo capturée %s', final_filename)
@@ -1209,13 +1233,161 @@ def _render_qr_burn_layer(image_bgr, detections: list):
 def _apply_qr_burn_layer_bgr(image_bgr, layer):
     """Compose `layer` (RGBA, voir _render_qr_burn_layer) sur une image BGR
     (numpy, OpenCV) et renvoie le résultat au même format — utilisé pour la
-    photo et le photo strip (la vidéo passe par un fichier PNG + ffmpeg, voir
-    capture_video)."""
+    photo, le photo strip et chaque frame de la vidéo (voir
+    _qr_video_burn_track ci-dessous pour la vidéo)."""
     if layer is None:
         return image_bgr
     base = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)).convert('RGBA')
     composited = Image.alpha_composite(base, layer)
     return cv2.cvtColor(np.array(composited.convert('RGB')), cv2.COLOR_RGB2BGR)
+
+
+# ── Incrustation QR-code sur la vidéo : suivi du mouvement ────────────────────
+# La vidéo est le seul média où le QR-code peut bouger PENDANT la capture
+# (contrairement à la photo/au photo strip, figés à l'instant du
+# déclenchement) — sans suivi, la forme+texte resterait à la position de la
+# toute première frame, décalée dès que le visiteur bouge le QR-code
+# présenté. Compromis retenu (choisi avec l'utilisateur, voir /admin/tags) :
+# détection ÉCHANTILLONNÉE (1 frame sur _QR_VIDEO_TRACK_SAMPLE_INTERVAL, pas
+# sur CHAQUE frame — bien plus coûteux pour un gain de fluidité imperceptible
+# une fois interpolé) + interpolation linéaire de la position entre deux
+# détections proches, pour un mouvement toujours fluide à l'écran malgré
+# l'échantillonnage.
+#
+# Traitement en 2 passes après l'enregistrement (donc SANS impact sur la
+# fluidité/cadence de la capture elle-même, qui reste un simple
+# read_frame()/writer.write() en boucle comme avant) :
+#   passe 1 (_qr_video_detect_keyframes) : relit la vidéo déjà transcodée
+#     (+ cadre décoratif éventuel), détection échantillonnée -> liste de
+#     points-clés (frame, position, texte) ;
+#   construction (_qr_video_build_track) : à partir de ces points-clés,
+#     calcule la position à afficher pour CHAQUE frame (interpolation ou
+#     maintien courte durée) ;
+#   passe 2 (_qr_video_burn_track) : nouvelle lecture, incrustation frame
+#     par frame (réutilise _render_qr_burn_layer/_apply_qr_burn_layer_bgr,
+#     déjà utilisées pour la photo/le photo strip) dans un nouveau fichier,
+#     transcodé en MP4 par l'appelant (capture_video).
+_QR_VIDEO_TRACK_SAMPLE_INTERVAL = 3
+_QR_VIDEO_TRACK_HOLD_FRAMES = _QR_VIDEO_TRACK_SAMPLE_INTERVAL * 2
+_QR_VIDEO_TRACK_MAX_INTERP_GAP = _QR_VIDEO_TRACK_SAMPLE_INTERVAL * 4
+
+
+def _qr_video_detect_keyframes(video_path: Path, sample_interval: int) -> tuple:
+    """Passe 1 : parcourt `video_path` frame par frame, lance la détection
+    QR-code (_qr_detect_boxes_robust) une frame sur `sample_interval`
+    seulement. Ne garde qu'un point-clé par frame échantillonnée (le
+    premier QR-code décodé, s'il y en a plusieurs — un seul suivi à la
+    fois). Retourne (liste de (frame_idx, box, text), nombre total de
+    frames lues)."""
+    keyframes = []
+    frame_idx = 0
+    cap = cv2.VideoCapture(str(video_path))
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_idx % sample_interval == 0:
+                try:
+                    detections = _qr_detect_boxes_robust(frame)
+                except Exception:
+                    logger.exception('QR live : détection échouée (frame vidéo %d).', frame_idx)
+                    detections = []
+                for d in detections:
+                    if d.get('text'):
+                        xs = [p[0] for p in d['points']]
+                        ys = [p[1] for p in d['points']]
+                        keyframes.append((frame_idx, (min(xs), min(ys), max(xs), max(ys)), d['text']))
+                        break
+            frame_idx += 1
+    finally:
+        cap.release()
+    return keyframes, frame_idx
+
+
+def _qr_video_build_track(frame_count: int, keyframes: list, sample_interval: int) -> list:
+    """À partir des points-clés (frame_idx, box, text) où un QR-code a été
+    décodé, construit la position à afficher pour CHAQUE frame de la vidéo :
+    interpolation linéaire entre deux points-clés suffisamment proches
+    (écart <= _QR_VIDEO_TRACK_MAX_INTERP_GAP frames), maintien courte durée
+    (_QR_VIDEO_TRACK_HOLD_FRAMES) de part et d'autre d'un point-clé isolé —
+    le QR-code a momentanément disparu du champ —, rien au-delà : il est
+    alors considéré hors champ plutôt que de laisser l'étiquette « flotter »
+    sur toute la vidéo. Retourne une liste de (box, text) | None, un
+    élément par frame (0..frame_count-1)."""
+    track = [None] * frame_count
+    if not keyframes:
+        return track
+    hold = _QR_VIDEO_TRACK_HOLD_FRAMES
+    max_gap = _QR_VIDEO_TRACK_MAX_INTERP_GAP
+    for i, (idx, box, text) in enumerate(keyframes):
+        if 0 <= idx < frame_count:
+            track[idx] = (box, text)
+        if i + 1 >= len(keyframes):
+            continue
+        idx2, box2, text2 = keyframes[i + 1]
+        gap = idx2 - idx
+        if gap <= 1:
+            continue
+        if gap <= max_gap:
+            for f in range(idx + 1, idx2):
+                t = (f - idx) / gap
+                box_i = tuple(box[k] + (box2[k] - box[k]) * t for k in range(4))
+                if 0 <= f < frame_count:
+                    track[f] = (box_i, text)
+        else:
+            for f in range(idx + 1, min(idx + 1 + hold, idx2, frame_count)):
+                track[f] = (box, text)
+            for f in range(max(idx2 - hold, idx + 1), idx2):
+                if track[f] is None:
+                    track[f] = (box2, text2)
+    last_idx, last_box, last_text = keyframes[-1]
+    for f in range(last_idx + 1, min(last_idx + 1 + hold, frame_count)):
+        if track[f] is None:
+            track[f] = (last_box, last_text)
+    return track
+
+
+def _qr_video_burn_track(video_path: Path, track: list, w: int, h: int, fps: float,
+                          output_avi_path: Path) -> bool:
+    """Passe 2 : relit `video_path` frame par frame et grave, pour chaque
+    frame ayant une position suivie (voir _qr_video_build_track), la
+    forme+texte à cette position exacte — réutilise le même rendu que la
+    photo/le photo strip (_render_qr_burn_layer / _apply_qr_burn_layer_bgr),
+    avec 4 coins synthétiques reconstruits depuis la boîte suivie/interpolée
+    (ces fonctions n'ont besoin que d'un rectangle englobant, pas des coins
+    réels du QR-code). Écrit le résultat dans un .avi MJPG (même format que
+    l'enregistrement brut), à transcoder en MP4 par l'appelant. Retourne
+    False si le fichier de sortie n'a pas pu être ouvert en écriture."""
+    cap = cv2.VideoCapture(str(video_path))
+    writer = cv2.VideoWriter(str(output_avi_path), cv2.VideoWriter_fourcc(*'MJPG'), fps, (w, h))
+    if not writer.isOpened():
+        cap.release()
+        logger.error('QR live : VideoWriter impossible à ouvrir pour %s (incrustation suivie).', output_avi_path)
+        return False
+    frame_idx = 0
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            entry = track[frame_idx] if frame_idx < len(track) else None
+            if entry is not None:
+                box, text = entry
+                synth_pts = [(box[0], box[1]), (box[2], box[1]), (box[2], box[3]), (box[0], box[3])]
+                try:
+                    layer = _render_qr_burn_layer(frame, [{'text': text, 'points': synth_pts}])
+                except Exception:
+                    logger.exception('QR live : échec incrustation suivie (frame vidéo %d).', frame_idx)
+                    layer = None
+                if layer is not None:
+                    frame = _apply_qr_burn_layer_bgr(frame, layer)
+            writer.write(frame)
+            frame_idx += 1
+    finally:
+        cap.release()
+        writer.release()
+    return True
 
 
 # ── Message d'erreur QR-code (détecté mais illisible) ─────────────────────────
