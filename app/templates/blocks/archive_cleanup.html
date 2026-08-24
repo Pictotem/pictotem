@@ -1,0 +1,53 @@
+<p class="text-section-desc">
+  Supprime définitivement les captures officielles (fichiers média, miniatures, tags et
+  votes associés) dont la date de capture est dans l'intervalle choisi. Irréversible —
+  pensez à archiver l'intervalle ci-dessus avant de nettoyer si vous souhaitez conserver
+  une copie.
+</p>
+<form method="post" action="{{ url_for('admin_archive_cleanup') }}" id="cleanupForm">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <label class="all-row">
+    <input type="checkbox" name="range_all" value="1" id="cleanupRangeAll">
+    <span>Tout (ignore l'intervalle, supprime toutes les captures)</span>
+  </label>
+  <div class="text-fields" id="cleanup_range_fields">
+    <div class="text-field">
+      <label class="field-label" for="cleanup_range_start">Début</label>
+      <input type="datetime-local" id="cleanup_range_start" name="range_start">
+    </div>
+    <div class="text-field">
+      <label class="field-label" for="cleanup_range_end">Fin</label>
+      <input type="datetime-local" id="cleanup_range_end" name="range_end">
+    </div>
+  </div>
+  <label class="all-row">
+    <input type="checkbox" name="include_guests" value="1" checked id="cleanupIncludeGuests">
+    <span>Contient les médias invités (uploads via le lien de partage)</span>
+  </label>
+  <label class="confirm-row">
+    <input type="checkbox" name="confirm" value="1" required>
+    <span>Je confirme vouloir supprimer définitivement ces médias, leurs tags et leurs votes.</span>
+  </label>
+  <button type="submit" class="action-btn" style="border-color:rgba(200,50,50,.5);color:#f97b7b">
+    Supprimer les médias
+  </button>
+</form>
+
+<script>
+  (function () {
+    const toggle = document.getElementById('cleanupRangeAll');
+    const fields = document.getElementById('cleanup_range_fields');
+    const sync = () => fields?.classList.toggle('range-disabled', toggle?.checked);
+    toggle?.addEventListener('change', sync);
+    sync();
+
+    document.getElementById('cleanupForm')?.addEventListener('submit', (e) => {
+      const all = toggle?.checked;
+      const guests = document.getElementById('cleanupIncludeGuests')?.checked;
+      const scope = all ? 'TOUTES les captures, sans exception' : 'les captures de cet intervalle';
+      const withGuests = guests ? ' ainsi que les médias invités correspondants' : ' (médias invités exclus)';
+      const msg = `Supprimer définitivement ${scope}${withGuests}, avec tags et votes ? Cette action est irréversible.`;
+      if (!confirm(msg)) e.preventDefault();
+    });
+  })();
+</script>

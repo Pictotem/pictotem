@@ -1,0 +1,44 @@
+<div class="text-fields">
+  <div class="text-field" style="grid-column:1/-1">
+    <p class="field-default" style="margin:0 0 12px">
+      Change immédiatement le fond d'écran du Bureau Windows de la borne (même effet qu'un
+      changement fait depuis les Paramètres Windows — persiste après redémarrage). Utile par
+      exemple hors des heures d'utilisation, pour un Bureau visible entre deux événements.
+      Ajoutez une ou plusieurs images ci-dessous, puis choisissez celle à appliquer.
+    </p>
+
+    <form method="post" enctype="multipart/form-data" action="{{ url_for('admin_wallpaper_upload') }}"
+          style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:{% if wallpaper_images %}18px{% else %}0{% endif %}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="file" name="wallpaper_images" accept=".png,.jpg,.jpeg,.bmp" multiple>
+      <button type="submit" class="action-btn">Ajouter</button>
+    </form>
+
+    {% if wallpaper_images %}
+    <div class="frame-gallery">
+      {% for img in wallpaper_images %}
+      <div class="frame-card{% if img.is_current %} active{% endif %}">
+        <div class="frame-thumb"><img src="{{ img.url }}" alt=""></div>
+        <div class="frame-label">{% if img.is_current %}Fond d'écran actuel{% else %}&nbsp;{% endif %}</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <form method="post" action="{{ url_for('admin_wallpaper_apply') }}" style="flex:1">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="image_id" value="{{ img.id }}">
+            <button type="submit" class="action-btn{% if not img.is_current %} primary{% endif %}"
+                    style="width:100%" {% if img.is_current %}disabled{% endif %}>
+              {% if img.is_current %}Actif{% else %}Appliquer{% endif %}
+            </button>
+          </form>
+          <form method="post" action="{{ url_for('admin_wallpaper_delete') }}"
+                onsubmit="return confirm('Supprimer cette image de la liste ?')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="image_id" value="{{ img.id }}">
+            <button type="submit" class="action-btn ter" aria-label="Supprimer">✕</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>

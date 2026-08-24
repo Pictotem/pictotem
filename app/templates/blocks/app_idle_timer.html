@@ -1,0 +1,55 @@
+<form method="post" action="{{ url_for('admin_set_idle_timer') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="text-fields">
+    <div class="text-field" style="grid-column:1/-1">
+      <label class="field-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+        <input type="checkbox" name="idle_timer_enabled" value="1"
+               {% if idle_timer_enabled %}checked{% endif %}
+               style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">
+        Activer le timer de retour à l'accueil
+      </label>
+      <p class="field-default" style="margin-top:8px">
+        Affiche une barre de progression et un décompte sur les écrans intermédiaires
+        (choix du cadre, replay). Toute interaction remet le timer à zéro.
+      </p>
+    </div>
+    <div class="text-field">
+      <label class="field-label" for="idle_timer_seconds">Durée d'inactivité (secondes)</label>
+      <input type="number" id="idle_timer_seconds" name="idle_timer_seconds"
+             value="{{ idle_timer_seconds }}" min="5" max="300" style="width:110px">
+      <p class="field-default">Défaut : 30 s — minimum : 5 s</p>
+    </div>
+    <div class="text-field" style="grid-column:1/-1">
+      <label class="field-label" for="idle_timer_badge_text">Texte du badge</label>
+      <input type="text" id="idle_timer_badge_text" name="idle_timer_badge_text"
+             value="{{ idle_timer_badge_text }}" placeholder="Retour dans {n}s"
+             style="width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;box-sizing:border-box">
+      <p class="field-default">Utilisez <code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px">{n}</code> comme emplacement pour le nombre de secondes restantes.</p>
+    </div>
+    <div class="text-field">
+      <label class="field-label" for="idle_timer_font_size">Taille de police (px)</label>
+      <input type="number" id="idle_timer_font_size" name="idle_timer_font_size"
+             value="{{ idle_timer_font_size }}" min="8" max="48" style="width:110px">
+      <p class="field-default">Défaut : 13 px</p>
+    </div>
+    <div class="text-field">
+      <label class="field-label">Taille du badge — espacement interne (px)</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div>
+          <label class="field-label" for="idle_timer_padding_y" style="font-size:11px">Vertical</label>
+          <input type="number" id="idle_timer_padding_y" name="idle_timer_padding_y"
+                 value="{{ idle_timer_padding_y }}" min="0" max="40" style="width:80px">
+        </div>
+        <div>
+          <label class="field-label" for="idle_timer_padding_x" style="font-size:11px">Horizontal</label>
+          <input type="number" id="idle_timer_padding_x" name="idle_timer_padding_x"
+                 value="{{ idle_timer_padding_x }}" min="0" max="80" style="width:80px">
+        </div>
+      </div>
+      <p class="field-default">Défaut : 5 px / 13 px</p>
+    </div>
+    <div class="text-field" style="grid-column:1/-1">
+      <button type="submit" class="action-btn primary">Enregistrer</button>
+    </div>
+  </div>
+</form>

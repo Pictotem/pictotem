@@ -1,0 +1,40 @@
+<p class="text-section-desc">
+  Génère une archive ZIP téléchargeable contenant les photos/vidéos officielles capturées
+  dans l'intervalle choisi, ainsi qu'un manifeste (<code>manifest.csv</code> et
+  <code>manifest.json</code>) listant pour chaque média : identifiant, source (officiel ou
+  invité), statut, ID unique, type, nom de fichier, date et heure, score de votes et tags
+  appliqués (invités uniquement pour la source et le statut ; les tags ne concernent que les
+  captures officielles). N'affecte pas les médias eux-mêmes (lecture seule).
+</p>
+<form method="post" action="{{ url_for('admin_archive_export') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <label class="all-row">
+    <input type="checkbox" name="range_all" value="1" id="exportRangeAll">
+    <span>Tout (ignore l'intervalle, archive toutes les captures)</span>
+  </label>
+  <div class="text-fields" id="export_range_fields">
+    <div class="text-field">
+      <label class="field-label" for="export_range_start">Début</label>
+      <input type="datetime-local" id="export_range_start" name="range_start">
+    </div>
+    <div class="text-field">
+      <label class="field-label" for="export_range_end">Fin</label>
+      <input type="datetime-local" id="export_range_end" name="range_end">
+    </div>
+  </div>
+  <label class="all-row">
+    <input type="checkbox" name="include_guests" value="1" checked>
+    <span>Contient les médias invités (uploads via le lien de partage)</span>
+  </label>
+  <button type="submit" class="action-btn primary">Générer et télécharger l'archive</button>
+</form>
+
+<script>
+  (function () {
+    const toggle = document.getElementById('exportRangeAll');
+    const fields = document.getElementById('export_range_fields');
+    const sync = () => fields?.classList.toggle('range-disabled', toggle?.checked);
+    toggle?.addEventListener('change', sync);
+    sync();
+  })();
+</script>

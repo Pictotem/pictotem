@@ -1,0 +1,19 @@
+<div class="text-fields">
+  <div class="text-field" style="grid-column:1/-1">
+    <p class="field-default" style="margin:0 0 12px">
+      Comme ci-dessus, mais récupère d'abord la dernière version depuis le dépôt Git
+      (branche <code>main</code>) avant de relancer — équivalent à double-cliquer sur
+      <code>update.bat</code>. Vos réglages locaux (<code>config.toml</code>) sont
+      toujours préservés, même si le dépôt en a une version plus récente. Une fenêtre de
+      commande s'ouvre sur la borne le temps de la mise à jour (quelques dizaines de
+      secondes selon la connexion) — laissez-la se fermer d'elle-même ; en cas d'échec
+      (pas de connexion internet, etc.) elle reste ouverte avec le détail de l'erreur.
+      Détail complet dans <code>logs\update.log</code>.
+    </p>
+    <form method="post" action="{{ url_for('admin_restart_update_app') }}"
+          onsubmit="return confirm('Mettre à jour depuis le dépôt Git puis redémarrer l\'application maintenant ? La borne sera indisponible le temps de la mise à jour.')">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="action-btn">Mettre à jour et redémarrer maintenant</button>
+    </form>
+  </div>
+</div>

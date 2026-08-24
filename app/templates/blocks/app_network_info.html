@@ -1,0 +1,18 @@
+<div class="text-fields">
+  <div class="text-field" style="grid-column:1/-1">
+    <p class="field-default" style="margin:0 0 12px">
+      Sur l'interface principale (kiosque), plusieurs appuis rapides dans le coin bas-gauche
+      de l'écran affichent l'adresse IP et le port en écoute de l'application — utile pour un
+      dépannage réseau sur place, sans avoir à ouvrir le back office. Aucun mot de passe n'est
+      demandé : purement informatif, aucune action n'est accessible depuis cette fenêtre.
+    </p>
+    <form method="post" action="{{ url_for('admin_set_network_info_taps') }}"
+          style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <label style="font-size:13px;color:var(--muted)">Nombre d'appuis</label>
+      <input type="number" name="network_info_taps" min="2" max="15" value="{{ network_info_taps }}"
+             style="width:70px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;font-size:14px">
+      <button type="submit" class="action-btn">Enregistrer</button>
+    </form>
+  </div>
+</div>

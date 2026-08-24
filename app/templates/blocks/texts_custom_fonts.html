@@ -1,0 +1,30 @@
+<p class="field-default" style="margin-bottom:10px">
+  Une police ajoutée ici apparaît ensuite dans tous les sélecteurs de police de l'app
+  (Boutons, Tags &amp; ID média, Codes invités — QR-codes live et export, chiffre d'étape
+  photo strip, Slideshow Best Of). Formats acceptés : TTF ou OTF.
+</p>
+<form method="post" enctype="multipart/form-data" action="{{ url_for('admin_font_upload') }}"
+      style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:{% if custom_fonts %}18px{% else %}0{% endif %}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <input type="text" name="font_label" placeholder="Nom (facultatif)" style="width:200px">
+  <input type="file" name="font_file" accept=".ttf,.otf">
+  <button type="submit" class="action-btn">Ajouter</button>
+</form>
+{% if custom_fonts %}
+<div class="text-fields">
+  {% for f in custom_fonts %}
+  <div class="text-field font-card">
+    <div style="overflow:hidden">
+      <div class="font-preview" style="font-family:'{{ f.family }}', sans-serif">Abcdefgh 12345</div>
+      <div class="font-name">{{ f.label }}</div>
+    </div>
+    <form method="post" action="{{ url_for('admin_font_delete') }}"
+          onsubmit="return confirm('Supprimer la police « {{ f.label }} » ?')">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="font_id" value="{{ f.id }}">
+      <button type="submit" class="action-btn ter" aria-label="Supprimer">✕</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

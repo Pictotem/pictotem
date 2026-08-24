@@ -2413,10 +2413,13 @@ def _build_archive_zip(start_iso: str, end_iso: str, include_guests: bool = True
 @app.route('/admin/archive')
 @require_admin_auth
 def admin_archive():
+    blocks, block_context = _admin_render_blocks('archive')
     return render_template(
         'admin_archive.html', config=CONFIG,
+        blocks=blocks, current_page='archive', admin_pages=_ADMIN_PAGES,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
 
 
@@ -2585,6 +2588,7 @@ def admin_texts():
         set_setting('photostrip_step.position', ps_position)
 
         return redirect(url_for('admin_texts', ok='Paramètres mis à jour.'))
+    blocks, block_context = _admin_render_blocks('texts')
     return render_template('admin_texts.html', config=CONFIG,
                            texts=get_ui_texts(),
                            defaults=TEXT_DEFAULTS,
@@ -2595,9 +2599,10 @@ def admin_texts():
                            photostrip_step=_photostrip_step_settings(),
                            photostrip_step_fonts=_all_fonts(),
                            photostrip_step_positions=_PHOTOSTRIP_STEP_POSITION_LABELS,
-                           custom_fonts=list_custom_fonts(),
+                           blocks=blocks, current_page='texts', admin_pages=_ADMIN_PAGES,
                            alert_success=request.args.get('ok'),
-                           alert_error=request.args.get('err'))
+                           alert_error=request.args.get('err'),
+                           **block_context)
 
 
 @app.route('/admin/texts/fonts/upload', methods=['POST'])
@@ -2747,6 +2752,188 @@ def admin_system():
     )
 
 
+# ── Blocs admin repliables / réorganisables / déplaçables entre tuiles ───────
+# Chaque bloc-fonction (une section .admin-block, ex. « Fond d'écran
+# Windows ») peut être réduit à son titre, réordonné dans sa page, ou
+# déplacé vers une autre tuile — voir /admin/ui/... ci-dessous et
+# static/admin-blocks.js. Portée volontairement limitée pour l'instant aux
+# blocs qui ont DÉJÀ leur propre <form> et leur propre route dédiée
+# (condition nécessaire pour qu'un bloc déplacé continue de fonctionner :
+# son formulaire poste toujours vers la même route, peu importe la page qui
+# l'affiche) — les tuiles dont plusieurs sections partagent un unique
+# <form>/une unique route (Caméra & écran, une partie de Textes...)
+# rejoindront ce système au fur et à mesure qu'elles seront scindées en
+# routes indépendantes, par petites livraisons successives.
+#
+# Un bloc est identifié par un id stable (clé de _ADMIN_BLOCKS), rendu
+# depuis un fragment de template dédié (templates/blocks/<id>.html) inclus
+# par la page qui le possède actuellement — voir _admin_render_blocks.
+# Contrairement à _PROMO_FONTS, _ADMIN_BLOCKS n'a pas besoin d'être défini
+# avant les fonctions ci-dessous : il n'est lu qu'au moment des requêtes.
+_ADMIN_BLOCKS = {
+    'app_fullscreen':      {'title': "Plein écran — bascule immédiate",         'default_page': 'application', 'template': 'blocks/app_fullscreen.html',      'context_fn': None},
+    'app_restart':         {'title': "Redémarrage de l'application",           'default_page': 'application', 'template': 'blocks/app_restart.html',         'context_fn': None},
+    'app_restart_update':  {'title': "Redémarrage avec mise à jour (Git)",      'default_page': 'application', 'template': 'blocks/app_restart_update.html',  'context_fn': None},
+    'app_autostart':       {'title': "Démarrage automatique Windows",           'default_page': 'application', 'template': 'blocks/app_autostart.html',       'context_fn': '_block_ctx_app_autostart'},
+    'app_wallpaper':       {'title': "Fond d'écran Windows",                    'default_page': 'application', 'template': 'blocks/app_wallpaper.html',       'context_fn': '_block_ctx_app_wallpaper'},
+    'app_idle_timer':      {'title': "Mise en veille automatique",              'default_page': 'application', 'template': 'blocks/app_idle_timer.html',      'context_fn': '_block_ctx_app_idle_timer'},
+    'app_network_info':    {'title': "Informations réseau (interface principale)", 'default_page': 'application', 'template': 'blocks/app_network_info.html', 'context_fn': '_block_ctx_app_network_info'},
+    'access_password':     {'title': "Mot de passe du back office",             'default_page': 'access',      'template': 'blocks/access_password.html',     'context_fn': '_block_ctx_access_password'},
+    'access_clear_password': {'title': "Supprimer la protection",               'default_page': 'access',      'template': 'blocks/access_clear_password.html', 'context_fn': '_block_ctx_access_password'},
+    'archive_export':      {'title': "Archiver un intervalle",                  'default_page': 'archive',     'template': 'blocks/archive_export.html',      'context_fn': None},
+    'archive_cleanup':     {'title': "Nettoyer un intervalle",                  'default_page': 'archive',     'template': 'blocks/archive_cleanup.html',     'context_fn': None, 'variant': 'danger'},
+    'texts_custom_fonts':  {'title': "Polices personnalisées",                  'default_page': 'texts',       'template': 'blocks/texts_custom_fonts.html',  'context_fn': '_block_ctx_texts_custom_fonts'},
+}
+# (slug, libellé affiché dans le menu « Déplacer vers », endpoint Flask) —
+# seulement les tuiles qui exécutent déjà la boucle de rendu de blocs
+# (_admin_render_blocks) ci-dessous peuvent être une destination : un bloc
+# déplacé vers une tuile qui ne connaît pas ce système resterait invisible.
+_ADMIN_PAGES = [
+    ('application', 'Application',          'admin_application'),
+    ('access',      'Admin',                'admin_access'),
+    ('archive',     'Archive & nettoyage',  'admin_archive'),
+    ('texts',       'Textes',               'admin_texts'),
+]
+_ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
+
+
+def _admin_block_page(block_id: str) -> str:
+    return get_setting(f'ui.block_page.{block_id}', _ADMIN_BLOCKS[block_id]['default_page'])
+
+
+def _admin_block_collapsed(block_id: str) -> bool:
+    return get_setting(f'ui.block_collapsed.{block_id}', '0') == '1'
+
+
+def _admin_page_order(page: str, candidate_ids: list) -> list:
+    """Ordre d'affichage des blocs `candidate_ids` sur `page` : l'ordre
+    enregistré (voir /admin/ui/block_order), filtré aux ids toujours
+    candidats sur cette page, puis les candidats absents de cet ordre
+    enregistré (bloc tout juste déplacé ici, ou jamais réordonné) ajoutés à
+    la suite dans leur ordre naturel."""
+    raw = get_setting(f'ui.page_order.{page}', '')
+    try:
+        stored = json.loads(raw) if raw else []
+    except (ValueError, TypeError):
+        stored = []
+    ordered = [b for b in stored if b in candidate_ids]
+    ordered += [b for b in candidate_ids if b not in ordered]
+    return ordered
+
+
+def _admin_block_context(block_id: str) -> dict:
+    fn_name = _ADMIN_BLOCKS[block_id]['context_fn']
+    return globals()[fn_name]() if fn_name else {}
+
+
+def _admin_render_blocks(page: str, locally_visible: list = None) -> tuple:
+    """Calcule, pour `page`, la liste ordonnée des blocs à afficher (chacun
+    avec son id/titre/template/état replié) ainsi que le contexte Jinja
+    fusionné dont leurs fragments ont besoin. `locally_visible`, si fourni,
+    restreint aux ids de cette liste — utilisé par une route dont un bloc
+    n'est affiché que sous condition (ex. access_clear_password seulement
+    si un mot de passe est actuellement défini) : la route calcule
+    elle-même cette condition et exclut le bloc en amont plutôt que
+    d'afficher un bloc vide."""
+    candidates = [b for b in _ADMIN_BLOCKS if _admin_block_page(b) == page]
+    if locally_visible is not None:
+        candidates = [b for b in candidates if b in locally_visible]
+    ids = _admin_page_order(page, candidates)
+    context = {}
+    for bid in ids:
+        context.update(_admin_block_context(bid))
+    blocks = [{'id': bid, 'title': _ADMIN_BLOCKS[bid]['title'], 'template': _ADMIN_BLOCKS[bid]['template'],
+               'variant': _ADMIN_BLOCKS[bid].get('variant'),
+               'collapsed': _admin_block_collapsed(bid)} for bid in ids]
+    return blocks, context
+
+
+def _block_ctx_app_autostart() -> dict:
+    return {'autostart_enabled': is_autostart_enabled()}
+
+
+def _block_ctx_app_wallpaper() -> dict:
+    return {'wallpaper_images': _wallpaper_images_view()}
+
+
+def _block_ctx_app_idle_timer() -> dict:
+    return {
+        'idle_timer_enabled': get_setting('idle_timer_enabled', '0') == '1',
+        'idle_timer_seconds': int(get_setting('idle_timer_seconds', '30')),
+        'idle_timer_badge_text': get_setting('idle_timer_badge_text', 'Retour dans {n}s'),
+        'idle_timer_font_size': int(get_setting('idle_timer_font_size', '13')),
+        'idle_timer_padding_y': int(get_setting('idle_timer_padding_y', '5')),
+        'idle_timer_padding_x': int(get_setting('idle_timer_padding_x', '13')),
+    }
+
+
+def _block_ctx_app_network_info() -> dict:
+    return {'network_info_taps': _kiosk_network_info_settings()['taps']}
+
+
+def _block_ctx_access_password() -> dict:
+    return {'password_status': admin_password_status()}
+
+
+def _block_ctx_texts_custom_fonts() -> dict:
+    return {'custom_fonts': list_custom_fonts()}
+
+
+@app.route('/admin/ui/block_collapse', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_ui_block_collapse():
+    """Persiste l'état replié/déplié d'un bloc — appelé en AJAX par
+    static/admin-blocks.js à chaque clic sur le chevron d'un bloc."""
+    block_id = request.form.get('block_id', '')
+    if block_id not in _ADMIN_BLOCKS:
+        return jsonify(ok=False, error='bloc inconnu'), 404
+    set_setting(f'ui.block_collapsed.{block_id}', '1' if request.form.get('collapsed') == '1' else '0')
+    return jsonify(ok=True)
+
+
+@app.route('/admin/ui/block_order', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_ui_block_order():
+    """Persiste l'ordre d'affichage des blocs d'une page — appelé en AJAX
+    par static/admin-blocks.js après un glisser-déposer. `order` : ids
+    séparés par des virgules, dans le nouvel ordre voulu."""
+    page = request.form.get('page', '')
+    if page not in _ADMIN_PAGE_SLUGS:
+        return jsonify(ok=False, error='page inconnue'), 404
+    order = [b for b in (request.form.get('order', '')).split(',') if b in _ADMIN_BLOCKS]
+    set_setting(f'ui.page_order.{page}', json.dumps(order))
+    return jsonify(ok=True)
+
+
+@app.route('/admin/ui/move_block', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_move_block():
+    """Déplace un bloc vers une autre tuile — action explicite (menu
+    déroulant + bouton), sans glisser-déposer en direct entre pages : un
+    bloc n'a jamais été conçu pour être injecté dynamiquement dans le DOM
+    d'une autre page (scripts/identifiants qui lui sont propres), donc le
+    déplacement se fait ici côté serveur (le bloc est ensuite rendu
+    normalement, comme tous les autres, par la route de sa page cible) suivi
+    d'un rechargement classique de page — beaucoup plus sûr qu'une
+    manipulation du DOM en JavaScript entre deux pages."""
+    block_id = request.form.get('block_id', '')
+    target_page = request.form.get('target_page', '')
+    if block_id not in _ADMIN_BLOCKS:
+        return redirect(url_for('admin_home', err='Bloc inconnu.'))
+    if target_page not in _ADMIN_PAGE_SLUGS:
+        return redirect(url_for('admin_home', err='Page de destination inconnue.'))
+    current_page = _admin_block_page(block_id)
+    set_setting(f'ui.block_page.{block_id}', target_page)
+    target_endpoint = dict((slug, endpoint) for slug, _label, endpoint in _ADMIN_PAGES)[target_page]
+    if target_page == current_page:
+        return redirect(url_for(target_endpoint))
+    target_label = dict((slug, label) for slug, label, _endpoint in _ADMIN_PAGES)[target_page]
+    return redirect(url_for(target_endpoint, ok=f"Bloc « {_ADMIN_BLOCKS[block_id]['title']} » déplacé vers « {target_label} »."))
+
+
 # ── Fond d'écran Windows (réglable depuis la tuile « Application ») ───────────
 WALLPAPER_DIR = BASE_DIR / 'app' / 'static' / 'wallpapers'
 _WALLPAPER_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.bmp'}
@@ -2773,19 +2960,13 @@ def admin_application():
     Windows, fond d'écran Windows, informations réseau sur le kiosque),
     séparées des réglages caméra/écran de /admin/system. Pas de POST ici :
     chaque action poste vers sa propre route dédiée ci-dessous."""
+    blocks, block_context = _admin_render_blocks('application')
     return render_template(
         'admin_application.html', config=CONFIG,
-        autostart_enabled=is_autostart_enabled(),
-        wallpaper_images=_wallpaper_images_view(),
-        network_info_taps=_kiosk_network_info_settings()['taps'],
-        idle_timer_enabled=get_setting('idle_timer_enabled', '0') == '1',
-        idle_timer_seconds=int(get_setting('idle_timer_seconds', '30')),
-        idle_timer_badge_text=get_setting('idle_timer_badge_text', 'Retour dans {n}s'),
-        idle_timer_font_size=int(get_setting('idle_timer_font_size', '13')),
-        idle_timer_padding_y=int(get_setting('idle_timer_padding_y', '5')),
-        idle_timer_padding_x=int(get_setting('idle_timer_padding_x', '13')),
+        blocks=blocks, current_page='application', admin_pages=_ADMIN_PAGES,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
 
 
@@ -2817,11 +2998,17 @@ def admin_access():
     mot de passe dans config.toml (section [admin], conservée en lecture
     seule pour compatibilité ascendante tant qu'aucun mot de passe n'a été
     défini depuis cette page — voir commentaire dans auth._get_admin_password)."""
+    password_status = admin_password_status()
+    visible = ['access_password']
+    if password_status['set'] and password_status['source'] != 'env':
+        visible.append('access_clear_password')
+    blocks, block_context = _admin_render_blocks('access', locally_visible=visible)
     return render_template(
         'admin_access.html', config=CONFIG,
-        password_status=admin_password_status(),
+        blocks=blocks, current_page='access', admin_pages=_ADMIN_PAGES,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
 
 

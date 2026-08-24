@@ -4,7 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Archive &amp; nettoyage — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
+  <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
   <style>
     .admin-wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 60px; }
     .admin-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 36px; flex-wrap: wrap; }
@@ -41,7 +44,7 @@
     .text-fields.range-disabled { opacity: .35; pointer-events: none; }
   </style>
 </head>
-<body class="gallery-body">
+<body class="gallery-body" data-admin-page="archive">
 <div class="admin-wrap">
 
   <div class="admin-header">
@@ -58,99 +61,29 @@
   {% if alert_success %}<ul class="flash-list"><li class="success">{{ alert_success }}</li></ul>{% endif %}
   {% if alert_error   %}<ul class="flash-list"><li class="error">{{ alert_error }}</li></ul>{% endif %}
 
-  <div class="text-section">
-    <h2>Archiver un intervalle</h2>
-    <p class="text-section-desc">
-      Génère une archive ZIP téléchargeable contenant les photos/vidéos officielles capturées
-      dans l'intervalle choisi, ainsi qu'un manifeste (<code>manifest.csv</code> et
-      <code>manifest.json</code>) listant pour chaque média : identifiant, source (officiel ou
-      invité), statut, ID unique, type, nom de fichier, date et heure, score de votes et tags
-      appliqués (invités uniquement pour la source et le statut ; les tags ne concernent que les
-      captures officielles). N'affecte pas les médias eux-mêmes (lecture seule).
-    </p>
-    <form method="post" action="{{ url_for('admin_archive_export') }}">
+  {% for block in blocks %}
+  <div class="text-section{% if block.variant %} {{ block.variant }}{% endif %}{% if block.collapsed %} block-collapsed{% endif %}" data-block-id="{{ block.id }}">
+    <div class="block-header-row">
+      <span class="block-drag-handle" title="Glisser pour réordonner">⠿</span>
+      <h2>{{ block.title }}</h2>
+      <button type="button" class="block-collapse-toggle" aria-label="Replier / déplier">▾</button>
+    </div>
+    <div class="admin-block-body">
+      {% include block.template %}
+    </div>
+    <form method="post" action="{{ url_for('admin_move_block') }}" class="block-move-form">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <label class="all-row">
-        <input type="checkbox" name="range_all" value="1" class="archive-all-toggle" data-target="export">
-        <span>Tout (ignore l'intervalle, archive toutes les captures)</span>
-      </label>
-      <div class="text-fields" id="export_range_fields">
-        <div class="text-field">
-          <label class="field-label" for="export_range_start">Début</label>
-          <input type="datetime-local" id="export_range_start" name="range_start">
-        </div>
-        <div class="text-field">
-          <label class="field-label" for="export_range_end">Fin</label>
-          <input type="datetime-local" id="export_range_end" name="range_end">
-        </div>
-      </div>
-      <label class="all-row">
-        <input type="checkbox" name="include_guests" value="1" checked>
-        <span>Contient les médias invités (uploads via le lien de partage)</span>
-      </label>
-      <button type="submit" class="action-btn primary">Générer et télécharger l'archive</button>
+      <input type="hidden" name="block_id" value="{{ block.id }}">
+      <label>Déplacer vers</label>
+      <select name="target_page">
+        {% for slug, label, _ep in admin_pages %}
+        <option value="{{ slug }}" {% if slug == current_page %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Déplacer</button>
     </form>
   </div>
-
-  <div class="text-section danger">
-    <h2>Nettoyer un intervalle</h2>
-    <p class="text-section-desc">
-      Supprime définitivement les captures officielles (fichiers média, miniatures, tags et
-      votes associés) dont la date de capture est dans l'intervalle choisi. Irréversible —
-      pensez à archiver l'intervalle ci-dessus avant de nettoyer si vous souhaitez conserver
-      une copie.
-    </p>
-    <form method="post" action="{{ url_for('admin_archive_cleanup') }}" id="cleanupForm">
-      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <label class="all-row">
-        <input type="checkbox" name="range_all" value="1" class="archive-all-toggle" data-target="cleanup" id="cleanupRangeAll">
-        <span>Tout (ignore l'intervalle, supprime toutes les captures)</span>
-      </label>
-      <div class="text-fields" id="cleanup_range_fields">
-        <div class="text-field">
-          <label class="field-label" for="cleanup_range_start">Début</label>
-          <input type="datetime-local" id="cleanup_range_start" name="range_start">
-        </div>
-        <div class="text-field">
-          <label class="field-label" for="cleanup_range_end">Fin</label>
-          <input type="datetime-local" id="cleanup_range_end" name="range_end">
-        </div>
-      </div>
-      <label class="all-row">
-        <input type="checkbox" name="include_guests" value="1" checked id="cleanupIncludeGuests">
-        <span>Contient les médias invités (uploads via le lien de partage)</span>
-      </label>
-      <label class="confirm-row">
-        <input type="checkbox" name="confirm" value="1" required>
-        <span>Je confirme vouloir supprimer définitivement ces médias, leurs tags et leurs votes.</span>
-      </label>
-      <button type="submit" class="action-btn" style="border-color:rgba(200,50,50,.5);color:#f97b7b">
-        Supprimer les médias
-      </button>
-    </form>
-  </div>
-
-  <script>
-    // Case "Tout" (les deux formulaires) : grise/désactive visuellement les
-    // champs de dates (ignorés côté serveur dans ce cas, voir
-    // _resolve_archive_range() dans app.py) sans bloquer la soumission.
-    document.querySelectorAll('.archive-all-toggle').forEach((toggle) => {
-      const fields = document.getElementById(toggle.dataset.target + '_range_fields');
-      const sync = () => fields?.classList.toggle('range-disabled', toggle.checked);
-      toggle.addEventListener('change', sync);
-      sync();
-    });
-
-    // Message de confirmation adapté selon les cases "Tout" et "médias invités".
-    document.getElementById('cleanupForm')?.addEventListener('submit', (e) => {
-      const all = document.getElementById('cleanupRangeAll')?.checked;
-      const guests = document.getElementById('cleanupIncludeGuests')?.checked;
-      const scope = all ? 'TOUTES les captures, sans exception' : 'les captures de cet intervalle';
-      const withGuests = guests ? ' ainsi que les médias invités correspondants' : ' (médias invités exclus)';
-      const msg = `Supprimer définitivement ${scope}${withGuests}, avec tags et votes ? Cette action est irréversible.`;
-      if (!confirm(msg)) e.preventDefault();
-    });
-  </script>
+  {% endfor %}
 
 </div>
 </body>

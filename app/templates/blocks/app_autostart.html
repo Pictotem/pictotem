@@ -1,0 +1,19 @@
+<div class="text-fields">
+  <div class="text-field" style="grid-column:1/-1">
+    <p class="field-default" style="margin:0 0 12px">
+      {% if autostart_enabled %}
+      Actuellement <strong style="color:var(--accent)">activé</strong> : l'application se lance
+      automatiquement à l'ouverture de session Windows (raccourci vers <code>run.bat</code> dans le
+      dossier Démarrage de l'utilisateur courant).
+      {% else %}
+      Actuellement désactivé : lancement uniquement manuel via <code>run.bat</code>.
+      {% endif %}
+    </p>
+    <form method="post" action="{{ url_for('admin_toggle_autostart') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="action-btn{% if not autostart_enabled %} primary{% endif %}">
+        {% if autostart_enabled %}Désactiver le démarrage automatique{% else %}Activer le démarrage automatique{% endif %}
+      </button>
+    </form>
+  </div>
+</div>

@@ -4,7 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Application — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
+  <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
   <style>
     .admin-wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 60px; }
     .admin-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 36px; flex-wrap: wrap; }
@@ -24,7 +27,7 @@
     .field-default { font-size: 11px; color: rgba(255,255,255,.35); margin-top: 5px; }
   </style>
 </head>
-<body class="gallery-body">
+<body class="gallery-body" data-admin-page="application">
 <div class="admin-wrap">
 
   <div class="admin-header">
@@ -41,220 +44,29 @@
   {% if alert_success %}<ul class="flash-list"><li class="success">{{ alert_success }}</li></ul>{% endif %}
   {% if alert_error   %}<ul class="flash-list"><li class="error">{{ alert_error }}</li></ul>{% endif %}
 
-  <div class="text-section">
-    <h2>Plein écran — bascule immédiate</h2>
-    <div class="text-fields">
-      <div class="text-field" style="grid-column:1/-1">
-        <p class="field-default" style="margin:0 0 12px">
-          Bascule tout de suite le plein écran de la fenêtre actuellement affichée sur la borne,
-          sans redémarrer l'application — indépendant du réglage « au démarrage » (voir
-          <a href="{{ url_for('admin_system') }}" style="color:var(--accent)">Caméra &amp; écran</a>).
-          Équivalent au déverrouillage par code PIN depuis l'interface principale (appuis
-          dans le coin haut-gauche ou Ctrl+Maj+K), mais ne demande pas de code ici car
-          l'accès à cette page est déjà protégé.
-        </p>
-        <form method="post" action="{{ url_for('admin_toggle_fullscreen') }}">
-          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="action-btn">Basculer le plein écran maintenant</button>
-        </form>
-      </div>
+  {% for block in blocks %}
+  <div class="text-section{% if block.variant %} {{ block.variant }}{% endif %}{% if block.collapsed %} block-collapsed{% endif %}" data-block-id="{{ block.id }}">
+    <div class="block-header-row">
+      <span class="block-drag-handle" title="Glisser pour réordonner">⠿</span>
+      <h2>{{ block.title }}</h2>
+      <button type="button" class="block-collapse-toggle" aria-label="Replier / déplier">▾</button>
     </div>
-  </div>
-
-  <div class="text-section">
-    <h2>Redémarrage de l'application</h2>
-    <div class="text-fields">
-      <div class="text-field" style="grid-column:1/-1">
-        <p class="field-default" style="margin:0 0 12px">
-          Relance immédiatement l'application (même processus, sans repasser par
-          <code>run.bat</code>) : nécessaire pour appliquer certains changements qui ne sont
-          pris en compte qu'au démarrage — modification du code, des gabarits d'écran ou du
-          fichier <code>config.toml</code> fait en dehors de ce back office. L'écran de la borne
-          se ferme puis se rouvre automatiquement, quelques secondes.
-        </p>
-        <form method="post" action="{{ url_for('admin_restart_app') }}"
-              onsubmit="return confirm('Redémarrer l\'application maintenant ? La borne sera brièvement indisponible.')">
-          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="action-btn">Redémarrer l'application maintenant</button>
-        </form>
-      </div>
+    <div class="admin-block-body">
+      {% include block.template %}
     </div>
-  </div>
-
-  <div class="text-section">
-    <h2>Redémarrage avec mise à jour (Git)</h2>
-    <div class="text-fields">
-      <div class="text-field" style="grid-column:1/-1">
-        <p class="field-default" style="margin:0 0 12px">
-          Comme ci-dessus, mais récupère d'abord la dernière version depuis le dépôt Git
-          (branche <code>main</code>) avant de relancer — équivalent à double-cliquer sur
-          <code>update.bat</code>. Vos réglages locaux (<code>config.toml</code>) sont
-          toujours préservés, même si le dépôt en a une version plus récente. Une fenêtre de
-          commande s'ouvre sur la borne le temps de la mise à jour (quelques dizaines de
-          secondes selon la connexion) — laissez-la se fermer d'elle-même ; en cas d'échec
-          (pas de connexion internet, etc.) elle reste ouverte avec le détail de l'erreur.
-          Détail complet dans <code>logs\update.log</code>.
-        </p>
-        <form method="post" action="{{ url_for('admin_restart_update_app') }}"
-              onsubmit="return confirm('Mettre à jour depuis le dépôt Git puis redémarrer l\'application maintenant ? La borne sera indisponible le temps de la mise à jour.')">
-          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="action-btn">Mettre à jour et redémarrer maintenant</button>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <div class="text-section">
-    <h2>Démarrage automatique Windows</h2>
-    <div class="text-fields">
-      <div class="text-field" style="grid-column:1/-1">
-        <p class="field-default" style="margin:0 0 12px">
-          {% if autostart_enabled %}
-          Actuellement <strong style="color:var(--accent)">activé</strong> : l'application se lance
-          automatiquement à l'ouverture de session Windows (raccourci vers <code>run.bat</code> dans le
-          dossier Démarrage de l'utilisateur courant).
-          {% else %}
-          Actuellement désactivé : lancement uniquement manuel via <code>run.bat</code>.
-          {% endif %}
-        </p>
-        <form method="post" action="{{ url_for('admin_toggle_autostart') }}">
-          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="action-btn{% if not autostart_enabled %} primary{% endif %}">
-            {% if autostart_enabled %}Désactiver le démarrage automatique{% else %}Activer le démarrage automatique{% endif %}
-          </button>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <div class="text-section">
-    <h2>Fond d'écran Windows</h2>
-    <div class="text-fields">
-      <div class="text-field" style="grid-column:1/-1">
-        <p class="field-default" style="margin:0 0 12px">
-          Change immédiatement le fond d'écran du Bureau Windows de la borne (même effet qu'un
-          changement fait depuis les Paramètres Windows — persiste après redémarrage). Utile par
-          exemple hors des heures d'utilisation, pour un Bureau visible entre deux événements.
-          Ajoutez une ou plusieurs images ci-dessous, puis choisissez celle à appliquer.
-        </p>
-
-        <form method="post" enctype="multipart/form-data" action="{{ url_for('admin_wallpaper_upload') }}"
-              style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:{% if wallpaper_images %}18px{% else %}0{% endif %}">
-          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-          <input type="file" name="wallpaper_images" accept=".png,.jpg,.jpeg,.bmp" multiple>
-          <button type="submit" class="action-btn">Ajouter</button>
-        </form>
-
-        {% if wallpaper_images %}
-        <div class="frame-gallery">
-          {% for img in wallpaper_images %}
-          <div class="frame-card{% if img.is_current %} active{% endif %}">
-            <div class="frame-thumb"><img src="{{ img.url }}" alt=""></div>
-            <div class="frame-label">{% if img.is_current %}Fond d'écran actuel{% else %}&nbsp;{% endif %}</div>
-            <div style="display:flex;gap:6px;margin-top:8px">
-              <form method="post" action="{{ url_for('admin_wallpaper_apply') }}" style="flex:1">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="image_id" value="{{ img.id }}">
-                <button type="submit" class="action-btn{% if not img.is_current %} primary{% endif %}"
-                        style="width:100%" {% if img.is_current %}disabled{% endif %}>
-                  {% if img.is_current %}Actif{% else %}Appliquer{% endif %}
-                </button>
-              </form>
-              <form method="post" action="{{ url_for('admin_wallpaper_delete') }}"
-                    onsubmit="return confirm('Supprimer cette image de la liste ?')">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="image_id" value="{{ img.id }}">
-                <button type="submit" class="action-btn ter" aria-label="Supprimer">✕</button>
-              </form>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="text-section">
-    <h2>Mise en veille automatique</h2>
-    <form method="post" action="{{ url_for('admin_set_idle_timer') }}">
+    <form method="post" action="{{ url_for('admin_move_block') }}" class="block-move-form">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <div class="text-fields">
-        <div class="text-field" style="grid-column:1/-1">
-          <label class="field-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
-            <input type="checkbox" name="idle_timer_enabled" value="1"
-                   {% if idle_timer_enabled %}checked{% endif %}
-                   style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">
-            Activer le timer de retour à l'accueil
-          </label>
-          <p class="field-default" style="margin-top:8px">
-            Affiche une barre de progression et un décompte sur les écrans intermédiaires
-            (choix du cadre, replay). Toute interaction remet le timer à zéro.
-          </p>
-        </div>
-        <div class="text-field">
-          <label class="field-label" for="idle_timer_seconds">Durée d'inactivité (secondes)</label>
-          <input type="number" id="idle_timer_seconds" name="idle_timer_seconds"
-                 value="{{ idle_timer_seconds }}" min="5" max="300" style="width:110px">
-          <p class="field-default">Défaut : 30 s — minimum : 5 s</p>
-        </div>
-        <div class="text-field" style="grid-column:1/-1">
-          <label class="field-label" for="idle_timer_badge_text">Texte du badge</label>
-          <input type="text" id="idle_timer_badge_text" name="idle_timer_badge_text"
-                 value="{{ idle_timer_badge_text }}" placeholder="Retour dans {n}s"
-                 style="width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;box-sizing:border-box">
-          <p class="field-default">Utilisez <code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px">{n}</code> comme emplacement pour le nombre de secondes restantes.</p>
-        </div>
-        <div class="text-field">
-          <label class="field-label" for="idle_timer_font_size">Taille de police (px)</label>
-          <input type="number" id="idle_timer_font_size" name="idle_timer_font_size"
-                 value="{{ idle_timer_font_size }}" min="8" max="48" style="width:110px">
-          <p class="field-default">Défaut : 13 px</p>
-        </div>
-        <div class="text-field">
-          <label class="field-label">Taille du badge — espacement interne (px)</label>
-          <div style="display:flex;gap:8px;align-items:center">
-            <div>
-              <label class="field-label" for="idle_timer_padding_y" style="font-size:11px">Vertical</label>
-              <input type="number" id="idle_timer_padding_y" name="idle_timer_padding_y"
-                     value="{{ idle_timer_padding_y }}" min="0" max="40" style="width:80px">
-            </div>
-            <div>
-              <label class="field-label" for="idle_timer_padding_x" style="font-size:11px">Horizontal</label>
-              <input type="number" id="idle_timer_padding_x" name="idle_timer_padding_x"
-                     value="{{ idle_timer_padding_x }}" min="0" max="80" style="width:80px">
-            </div>
-          </div>
-          <p class="field-default">Défaut : 5 px / 13 px</p>
-        </div>
-        <div class="text-field" style="grid-column:1/-1">
-          <button type="submit" class="action-btn primary">Enregistrer</button>
-        </div>
-      </div>
+      <input type="hidden" name="block_id" value="{{ block.id }}">
+      <label>Déplacer vers</label>
+      <select name="target_page">
+        {% for slug, label, _ep in admin_pages %}
+        <option value="{{ slug }}" {% if slug == current_page %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Déplacer</button>
     </form>
   </div>
-
-  <div class="text-section" style="margin-bottom:0">
-    <h2>Informations réseau (interface principale)</h2>
-    <div class="text-fields">
-      <div class="text-field" style="grid-column:1/-1">
-        <p class="field-default" style="margin:0 0 12px">
-          Sur l'interface principale (kiosque), plusieurs appuis rapides dans le coin bas-gauche
-          de l'écran affichent l'adresse IP et le port en écoute de l'application — utile pour un
-          dépannage réseau sur place, sans avoir à ouvrir le back office. Aucun mot de passe n'est
-          demandé : purement informatif, aucune action n'est accessible depuis cette fenêtre.
-        </p>
-        <form method="post" action="{{ url_for('admin_set_network_info_taps') }}"
-              style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-          <label style="font-size:13px;color:var(--muted)">Nombre d'appuis</label>
-          <input type="number" name="network_info_taps" min="2" max="15" value="{{ network_info_taps }}"
-                 style="width:70px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;font-size:14px">
-          <button type="submit" class="action-btn">Enregistrer</button>
-        </form>
-      </div>
-    </div>
-  </div>
+  {% endfor %}
 
 </div>
 </body>

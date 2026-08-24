@@ -1,0 +1,16 @@
+<div class="text-fields">
+  <div class="text-field" style="grid-column:1/-1">
+    <p class="field-default" style="margin:0 0 12px">
+      Bascule tout de suite le plein écran de la fenêtre actuellement affichée sur la borne,
+      sans redémarrer l'application — indépendant du réglage « au démarrage » (voir
+      <a href="{{ url_for('admin_system') }}" style="color:var(--accent)">Caméra &amp; écran</a>).
+      Équivalent au déverrouillage par code PIN depuis l'interface principale (appuis
+      dans le coin haut-gauche ou Ctrl+Maj+K), mais ne demande pas de code ici car
+      l'accès à cette page est déjà protégé.
+    </p>
+    <form method="post" action="{{ url_for('admin_toggle_fullscreen') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="action-btn">Basculer le plein écran maintenant</button>
+    </form>
+  </div>
+</div>
