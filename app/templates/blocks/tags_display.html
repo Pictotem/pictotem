@@ -1,0 +1,87 @@
+<form method="post" action="{{ url_for('admin_tags_set_display') }}" id="displayForm">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <p class="section-hint" style="margin:0 0 18px">Les tags associés à chaque média sont affichés en overlay sur le diaporama public.</p>
+  <div class="field">
+    <div class="check-row">
+      <input type="checkbox" id="show_on_bestof_tags" name="show_on_bestof"
+             {% if tags_settings.show_on_bestof %}checked{% endif %}>
+      <span>Afficher les tags sur le diaporama /bestof</span>
+    </div>
+  </div>
+
+  <div class="field-row" style="margin-top:14px">
+    <div class="field">
+      <label>Police</label>
+      <select name="style_font" id="style_font">
+        {% for value, label in tags_fonts %}
+        <option value="{{ value }}" {% if tags_settings.style_font == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>Taille du texte (px)</label>
+      <input type="number" name="style_font_size" id="style_font_size" min="8" max="72" value="{{ tags_settings.style_font_size }}">
+    </div>
+    <div class="field">
+      <label>Couleur du fond</label>
+      <div class="color-row">
+        <input type="color" id="cp_bg" value="{{ tags_settings.style_bg_color }}"
+               oninput="document.getElementById('style_bg_color').value=this.value; tagsUpdatePreview()">
+        <input type="text" id="style_bg_color" name="style_bg_color" class="color-hex"
+               value="{{ tags_settings.style_bg_color }}" maxlength="7"
+               oninput="document.getElementById('cp_bg').value=this.value; tagsUpdatePreview()">
+      </div>
+    </div>
+    <div class="field">
+      <label>Couleur du texte</label>
+      <div class="color-row">
+        <input type="color" id="cp_text" value="{{ tags_settings.style_text_color }}"
+               oninput="document.getElementById('style_text_color').value=this.value; tagsUpdatePreview()">
+        <input type="text" id="style_text_color" name="style_text_color" class="color-hex"
+               value="{{ tags_settings.style_text_color }}" maxlength="7"
+               oninput="document.getElementById('cp_text').value=this.value; tagsUpdatePreview()">
+      </div>
+    </div>
+  </div>
+
+  <div class="tags-preview-wrap">
+    <p class="tags-preview-label">Aperçu</p>
+    <div class="tags-preview-box">
+      <span class="tag-preview-chip" id="tagPreviewChip1">Anniversaire</span>
+      <span class="tag-preview-chip" id="tagPreviewChip2">Trop bien !</span>
+    </div>
+  </div>
+
+  <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
+</form>
+
+<script>
+  // Section auto-suffisante (pas de couplage avec un autre bloc) : IIFE +
+  // exposition sur window par cohérence avec les autres blocs à aperçu en
+  // direct (votes_thresholds_colors, buttons_style), et par sécurité en cas
+  // de ré-inclusion multiple sur une même page.
+  (function () {
+    function tagsUpdatePreviewImpl() {
+      const fontEl = document.getElementById('style_font');
+      if (!fontEl) return;
+      const font = fontEl.value;
+      const size = document.getElementById('style_font_size').value || 14;
+      const bg   = document.getElementById('style_bg_color').value || '#0d8b8f';
+      const text = document.getElementById('style_text_color').value || '#ffffff';
+      ['tagPreviewChip1', 'tagPreviewChip2'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.fontFamily = font;
+        el.style.fontSize = size + 'px';
+        el.style.background = bg;
+        el.style.color = text;
+      });
+    }
+    window.tagsUpdatePreview = tagsUpdatePreviewImpl;
+
+    document.getElementById('style_font')?.addEventListener('change', tagsUpdatePreviewImpl);
+    document.getElementById('style_font_size')?.addEventListener('input', tagsUpdatePreviewImpl);
+    tagsUpdatePreviewImpl();
+  })();
+</script>

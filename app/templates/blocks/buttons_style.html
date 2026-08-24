@@ -7,30 +7,30 @@
     <div class="field">
       <label>Forme</label>
       <select name="shape" id="shape">
-        <option value="pill"    {% if settings.shape == 'pill'    %}selected{% endif %}>Pilule (arrondi complet)</option>
-        <option value="rounded" {% if settings.shape == 'rounded' %}selected{% endif %}>Arrondi</option>
-        <option value="square"  {% if settings.shape == 'square'  %}selected{% endif %}>Carré</option>
+        <option value="pill"    {% if buttons_settings.shape == 'pill'    %}selected{% endif %}>Pilule (arrondi complet)</option>
+        <option value="rounded" {% if buttons_settings.shape == 'rounded' %}selected{% endif %}>Arrondi</option>
+        <option value="square"  {% if buttons_settings.shape == 'square'  %}selected{% endif %}>Carré</option>
       </select>
     </div>
     <div class="field">
       <label>Police</label>
       <select name="font" id="font">
-        {% for value, label in fonts %}
-        <option value="{{ value }}" {% if settings.font == value %}selected{% endif %}>{{ label }}</option>
+        {% for value, label in buttons_fonts %}
+        <option value="{{ value }}" {% if buttons_settings.font == value %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
     </div>
     <div class="field">
       <label>Taille du texte (px)</label>
-      <input type="number" name="font_size" id="font_size" min="10" max="72" value="{{ settings.font_size }}">
+      <input type="number" name="font_size" id="font_size" min="10" max="72" value="{{ buttons_settings.font_size }}">
     </div>
     <div class="field">
       <label>Espacement vertical (px)</label>
-      <input type="number" name="padding_y" id="padding_y" min="0" max="60" value="{{ settings.padding_y }}">
+      <input type="number" name="padding_y" id="padding_y" min="0" max="60" value="{{ buttons_settings.padding_y }}">
     </div>
     <div class="field">
       <label>Espacement horizontal (px)</label>
-      <input type="number" name="padding_x" id="padding_x" min="0" max="80" value="{{ settings.padding_x }}">
+      <input type="number" name="padding_x" id="padding_x" min="0" max="80" value="{{ buttons_settings.padding_x }}">
     </div>
   </div>
 
@@ -46,7 +46,7 @@
       </tr>
     </thead>
     <tbody>
-      {% for key, role in settings.roles.items() %}
+      {% for key, role in buttons_settings.roles.items() %}
       <tr>
         <td class="role-label">{{ role.label }}</td>
         <td>
@@ -73,7 +73,7 @@
   <div class="btn-preview-wrap">
     <p class="btn-preview-label">Aperçu</p>
     <div class="btn-preview-box" id="btnPreviewBox">
-      {% for key, role in settings.roles.items() %}
+      {% for key, role in buttons_settings.roles.items() %}
       <button type="button" class="btn-preview-chip" id="preview_{{ key }}">{{ role.label.split('(')[0].strip() }}</button>
       {% endfor %}
     </div>
@@ -88,7 +88,7 @@
   // direct les champs des deux sections, qui doivent donc toujours
   // cohabiter sur la même page.
   (function () {
-    const ROLE_KEYS = [{% for key, role in settings.roles.items() %}'{{ key }}'{{ ',' if not loop.last }}{% endfor %}];
+    const ROLE_KEYS = [{% for key, role in buttons_settings.roles.items() %}'{{ key }}'{{ ',' if not loop.last }}{% endfor %}];
 
     function luminanceTextColor(hex) {
       const h = (hex || '').replace('#', '');

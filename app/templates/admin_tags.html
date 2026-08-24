@@ -4,8 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tags & ID média — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('custom_fonts_css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
+  <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
   <style>
     .admin-wrap  { max-width: 820px; margin: 0 auto; padding: 40px 20px 60px; }
     .back-link   { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
@@ -18,6 +21,9 @@
     .alert-err { background: rgba(200,50,50,.15);  border:1px solid rgba(200,50,50,.3);  color:#e57373; }
     .form-card  { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
                   padding: 24px; margin-bottom: 24px; }
+    .text-section { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+                    padding: 24px; margin-bottom: 24px; }
+    .text-section h2 { font-size: 17px; font-weight: 700; margin: 0; }
     .section-title { font-size: 17px; font-weight: 700; margin: 0 0 4px; }
     .section-hint   { font-size: 13px; color: var(--muted); margin: 0 0 18px; }
     .field { margin-bottom: 18px; }
@@ -113,7 +119,7 @@
     .applied-table .col-act { width: 110px; text-align: right; }
   </style>
 </head>
-<body class="gallery-body">
+<body class="gallery-body" data-admin-page="tags">
 <div class="admin-wrap">
 
   <a class="back-link" href="{{ url_for('admin_home') }}">← Administration</a>
@@ -123,144 +129,32 @@
   {% if alert_success %}<div class="alert alert-ok">{{ alert_success }}</div>{% endif %}
   {% if alert_error   %}<div class="alert alert-err">{{ alert_error }}</div>{% endif %}
 
-  <!-- Activation & règles du tag libre -->
-  <form method="post">
-    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="action" value="settings">
-
-    <div class="form-card">
-      <p class="section-title">Activation</p>
-      <p class="section-hint">Ajoute un bouton « Tags » sur l'écran de relecture du kiosque, après chaque capture.</p>
-      <div class="field">
-        <div class="check-row">
-          <input type="checkbox" id="enabled" name="enabled" {% if settings.enabled %}checked{% endif %}>
-          <span>Activer les tags sur les captures</span>
-        </div>
-      </div>
-      <div class="field" style="margin-top:6px">
-        <div class="check-row">
-          <input type="checkbox" id="free_enabled" name="free_enabled" {% if settings.free_enabled %}checked{% endif %}>
-          <span>Autoriser le tag « libre » (saisie au clavier virtuel tactile)</span>
-        </div>
-      </div>
+  {% for block in blocks %}
+  <div class="text-section{% if block.variant %} {{ block.variant }}{% endif %}{% if block.collapsed %} block-collapsed{% endif %}" data-block-id="{{ block.id }}">
+    <div class="block-header-row">
+      <span class="block-drag-handle" title="Glisser pour réordonner">⠿</span>
+      <h2>{{ block.title }}</h2>
+      <button type="button" class="block-collapse-toggle" aria-label="Replier / déplier">▾</button>
     </div>
-
-    <div class="form-card">
-      <p class="section-title">Règles du tag libre</p>
-      <div class="field-row">
-        <div class="field">
-          <label>Longueur minimale</label>
-          <input type="number" name="free_min_length" min="1" max="100" value="{{ settings.free_min_length }}">
-        </div>
-        <div class="field">
-          <label>Longueur maximale</label>
-          <input type="number" name="free_max_length" min="1" max="200" value="{{ settings.free_max_length }}">
-        </div>
-        <div class="field">
-          <label>Nombre max. de tags par média</label>
-          <input type="number" name="max_per_capture" min="1" max="50" value="{{ settings.max_per_capture }}">
-        </div>
-      </div>
+    <div class="admin-block-body">
+      {% include block.template %}
     </div>
-
-    <button class="btn-primary" type="submit">Enregistrer</button>
-  </form>
-
-  <!-- ID unique média -->
-  <form method="post" style="margin-top:24px">
-    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="action" value="media_id_settings">
-
-    <div class="form-card">
-      <p class="section-title">ID unique par média</p>
-      <p class="section-hint">
-        Chaque capture (et upload invité) reçoit un identifiant numérique unique,
-        recherchable depuis la galerie et affichable sur le diaporama /bestof.
-      </p>
-      <div class="field-row">
-        <div class="field">
-          <label>Nombre de chiffres</label>
-          <input type="number" name="media_id_length" min="3" max="12" value="{{ media_id.length }}">
-          <p class="field-hint">Entre 3 et 12 — s'applique aux prochaines captures uniquement.</p>
-        </div>
-      </div>
-      <div class="field">
-        <div class="check-row">
-          <input type="checkbox" id="show_on_bestof" name="show_on_bestof"
-                 {% if media_id.show_on_bestof %}checked{% endif %}>
-          <span>Afficher l'ID média sur le diaporama /bestof</span>
-        </div>
-      </div>
-    </div>
-
-    <button class="btn-primary" type="submit">Enregistrer</button>
-  </form>
-
-  <!-- Affichage des tags sur le diaporama /bestof -->
-  <form method="post" id="displayForm" style="margin-top:24px">
-    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="action" value="display_settings">
-
-    <div class="form-card">
-      <p class="section-title">Affichage sur /bestof</p>
-      <p class="section-hint">Les tags associés à chaque média sont affichés en overlay sur le diaporama public.</p>
-      <div class="field">
-        <div class="check-row">
-          <input type="checkbox" id="show_on_bestof_tags" name="show_on_bestof"
-                 {% if settings.show_on_bestof %}checked{% endif %}>
-          <span>Afficher les tags sur le diaporama /bestof</span>
-        </div>
-      </div>
-
-      <div class="field-row" style="margin-top:14px">
-        <div class="field">
-          <label>Police</label>
-          <select name="style_font" id="style_font">
-            {% for value, label in tags_fonts %}
-            <option value="{{ value }}" {% if settings.style_font == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="field">
-          <label>Taille du texte (px)</label>
-          <input type="number" name="style_font_size" id="style_font_size" min="8" max="72" value="{{ settings.style_font_size }}">
-        </div>
-        <div class="field">
-          <label>Couleur du fond</label>
-          <div class="color-row">
-            <input type="color" id="cp_bg" value="{{ settings.style_bg_color }}"
-                   oninput="document.getElementById('style_bg_color').value=this.value; updateTagsPreview()">
-            <input type="text" id="style_bg_color" name="style_bg_color" class="color-hex"
-                   value="{{ settings.style_bg_color }}" maxlength="7"
-                   oninput="document.getElementById('cp_bg').value=this.value; updateTagsPreview()">
-          </div>
-        </div>
-        <div class="field">
-          <label>Couleur du texte</label>
-          <div class="color-row">
-            <input type="color" id="cp_text" value="{{ settings.style_text_color }}"
-                   oninput="document.getElementById('style_text_color').value=this.value; updateTagsPreview()">
-            <input type="text" id="style_text_color" name="style_text_color" class="color-hex"
-                   value="{{ settings.style_text_color }}" maxlength="7"
-                   oninput="document.getElementById('cp_text').value=this.value; updateTagsPreview()">
-          </div>
-        </div>
-      </div>
-
-      <div class="tags-preview-wrap">
-        <p class="tags-preview-label">Aperçu</p>
-        <div class="tags-preview-box">
-          <span class="tag-preview-chip" id="tagPreviewChip1">Anniversaire</span>
-          <span class="tag-preview-chip" id="tagPreviewChip2">Trop bien !</span>
-        </div>
-      </div>
-    </div>
-
-    <button class="btn-primary" type="submit">Enregistrer</button>
-  </form>
+    <form method="post" action="{{ url_for('admin_move_block') }}" class="block-move-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="block_id" value="{{ block.id }}">
+      <label>Déplacer vers</label>
+      <select name="target_page">
+        {% for slug, label, _ep in admin_pages %}
+        <option value="{{ slug }}" {% if slug == current_page %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Déplacer</button>
+    </form>
+  </div>
+  {% endfor %}
 
   <!-- Tags prédéfinis (CRUD) -->
-  <div class="form-card" style="margin-top:24px">
+  <div class="form-card">
     <p class="section-title">Tags prédéfinis</p>
     <p class="section-hint">Proposés en priorité dans le modal « Tags » du kiosque, avant la saisie libre.</p>
 
@@ -360,26 +254,5 @@
   </div>
 
 </div>
-
-<script>
-  function updateTagsPreview() {
-    const font = document.getElementById('style_font').value;
-    const size = document.getElementById('style_font_size').value || 14;
-    const bg   = document.getElementById('style_bg_color').value || '#0d8b8f';
-    const text = document.getElementById('style_text_color').value || '#ffffff';
-    ['tagPreviewChip1', 'tagPreviewChip2'].forEach((id) => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.style.fontFamily = font;
-      el.style.fontSize = size + 'px';
-      el.style.background = bg;
-      el.style.color = text;
-    });
-  }
-  document.getElementById('style_font')?.addEventListener('change', updateTagsPreview);
-  document.getElementById('style_font_size')?.addEventListener('input', updateTagsPreview);
-  updateTagsPreview();
-
-</script>
 </body>
 </html>

@@ -2830,6 +2830,9 @@ _ADMIN_BLOCKS = {
     'votes_activation':    {'title': "Activation",                              'default_page': 'votes',       'template': 'blocks/votes_activation.html',    'context_fn': '_block_ctx_votes_activation'},
     'votes_thresholds_colors': {'title': "Seuils & couleurs",                   'default_page': 'votes',       'template': 'blocks/votes_thresholds_colors.html', 'context_fn': '_block_ctx_votes_thresholds_colors'},
     'buttons_style':       {'title': "Style des boutons",                       'default_page': 'buttons',     'template': 'blocks/buttons_style.html',       'context_fn': '_block_ctx_buttons_style'},
+    'tags_settings':       {'title': "Activation & règles du tag libre",        'default_page': 'tags',        'template': 'blocks/tags_settings.html',       'context_fn': '_block_ctx_tags_settings'},
+    'tags_media_id':       {'title': "ID unique par média",                     'default_page': 'tags',        'template': 'blocks/tags_media_id.html',       'context_fn': '_block_ctx_tags_media_id'},
+    'tags_display':        {'title': "Affichage sur /bestof",                   'default_page': 'tags',        'template': 'blocks/tags_display.html',        'context_fn': '_block_ctx_tags_display'},
 }
 # (slug, libellé affiché dans le menu « Déplacer vers », endpoint Flask) —
 # seulement les tuiles qui exécutent déjà la boucle de rendu de blocs
@@ -2845,6 +2848,7 @@ _ADMIN_PAGES = [
     ('frames',      'Cadres',               'admin_frames'),
     ('votes',       'Votes',                'admin_votes'),
     ('buttons',     'Boutons',              'admin_buttons'),
+    ('tags',        'Tags & ID média',      'admin_tags'),
 ]
 _ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
 
@@ -2977,7 +2981,28 @@ def _block_ctx_votes_thresholds_colors() -> dict:
 
 
 def _block_ctx_buttons_style() -> dict:
-    return {'settings': _buttons_settings(), 'fonts': _all_fonts()}
+    # Clés préfixées 'buttons_' (plutôt que les génériques 'settings'/'fonts')
+    # pour ne jamais entrer en collision avec le contexte d'un autre bloc
+    # fusionné sur la même page par _admin_render_blocks (context.update),
+    # si ce bloc est un jour déplacé à côté d'un autre bloc à réglages —
+    # voir la même précaution sur les blocs tags_* ci-dessous.
+    return {'buttons_settings': _buttons_settings(), 'buttons_fonts': _all_fonts()}
+
+
+def _block_ctx_tags_settings() -> dict:
+    return {'tags_settings': _tags_settings()}
+
+
+def _block_ctx_tags_media_id() -> dict:
+    return {'media_id': _media_id_settings()}
+
+
+def _block_ctx_tags_display() -> dict:
+    # Même source de données que _block_ctx_tags_settings (clé 'tags_settings'
+    # partagée à l'identique, sans risque si les deux blocs cohabitent sur
+    # une même page) ; 'tags_fonts' plutôt que 'fonts' pour ne pas entrer en
+    # collision avec la clé 'buttons_fonts' d'un bloc buttons_style déplacé ici.
+    return {'tags_settings': _tags_settings(), 'tags_fonts': _all_fonts()}
 
 
 @app.route('/admin/ui/block_collapse', methods=['POST'])
@@ -3605,45 +3630,14 @@ def admin_votes_set_thresholds_colors():
 @require_admin_auth
 @csrf_protect
 def admin_tags():
+    """Tuile « Tags & ID média ». « Activation & règles du tag libre »,
+    « ID unique par média » et « Affichage sur /bestof » ont chacune leur
+    propre route dédiée ci-dessous et rejoignent le système de blocs.
+    « Tags prédéfinis » (CRUD) et « Tags appliqués » (journal) restent
+    ici, hors du système de blocs : ce n'est pas un réglage mais la
+    gestion du contenu lui-même (comme admin_captures/admin_emails)."""
     if request.method == 'POST':
-        action = request.form.get('action', 'settings')
-
-        if action == 'settings':
-            set_setting('tags.enabled',      '1' if request.form.get('enabled') else '0')
-            set_setting('tags.free_enabled', '1' if request.form.get('free_enabled') else '0')
-            raw_min = (request.form.get('free_min_length') or '').strip()
-            raw_max = (request.form.get('free_max_length') or '').strip()
-            if raw_min.isdigit() and int(raw_min) >= 1:
-                set_setting('tags.free_min_length', raw_min)
-            if raw_max.isdigit() and int(raw_max) >= 1:
-                set_setting('tags.free_max_length', raw_max)
-            raw_max_tags = (request.form.get('max_per_capture') or '').strip()
-            if raw_max_tags.isdigit() and int(raw_max_tags) >= 1:
-                set_setting('tags.max_per_capture', raw_max_tags)
-            return redirect(url_for('admin_tags', ok='Paramètres mis à jour.'))
-
-        if action == 'media_id_settings':
-            raw_len = (request.form.get('media_id_length') or '').strip()
-            if raw_len.isdigit() and 3 <= int(raw_len) <= 12:
-                set_setting('media_id.length', raw_len)
-            set_setting('media_id.show_on_bestof', '1' if request.form.get('show_on_bestof') else '0')
-            return redirect(url_for('admin_tags', ok='Réglages ID média mis à jour.'))
-
-        if action == 'display_settings':
-            set_setting('tags.show_on_bestof', '1' if request.form.get('show_on_bestof') else '0')
-            font_value = request.form.get('style_font', '')
-            if font_value in dict(_all_fonts()):
-                set_setting('tags.style_font', font_value)
-            bg_value = request.form.get('style_bg_color', '').strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_value):
-                set_setting('tags.style_bg_color', bg_value)
-            text_value = request.form.get('style_text_color', '').strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', text_value):
-                set_setting('tags.style_text_color', text_value)
-            raw_fs = (request.form.get('style_font_size') or '').strip()
-            if raw_fs.isdigit() and int(raw_fs) >= 8:
-                set_setting('tags.style_font_size', raw_fs)
-            return redirect(url_for('admin_tags', ok="Réglages d'affichage mis à jour."))
+        action = request.form.get('action', '')
 
         if action == 'tag_new':
             label = (request.form.get('label') or '').strip()
@@ -3678,13 +3672,66 @@ def admin_tags():
                 return redirect(url_for('admin_tags', ok=f"Tag « {row['label']} » retiré du média."))
             return redirect(url_for('admin_tags', err='Assignation introuvable.'))
 
+        abort(404)
+
+    blocks, block_context = _admin_render_blocks('tags')
     return render_template(
         'admin_tags.html', config=CONFIG,
-        settings=_tags_settings(), media_id=_media_id_settings(), tags=list_tags(),
-        assignments=list_capture_tags_with_media(), tags_fonts=_all_fonts(),
+        blocks=blocks, current_page='tags', admin_pages=_ADMIN_PAGES,
+        tags=list_tags(), assignments=list_capture_tags_with_media(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
+
+
+@app.route('/admin/tags/settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tags_set_settings():
+    set_setting('tags.enabled',      '1' if request.form.get('enabled') else '0')
+    set_setting('tags.free_enabled', '1' if request.form.get('free_enabled') else '0')
+    raw_min = (request.form.get('free_min_length') or '').strip()
+    raw_max = (request.form.get('free_max_length') or '').strip()
+    if raw_min.isdigit() and int(raw_min) >= 1:
+        set_setting('tags.free_min_length', raw_min)
+    if raw_max.isdigit() and int(raw_max) >= 1:
+        set_setting('tags.free_max_length', raw_max)
+    raw_max_tags = (request.form.get('max_per_capture') or '').strip()
+    if raw_max_tags.isdigit() and int(raw_max_tags) >= 1:
+        set_setting('tags.max_per_capture', raw_max_tags)
+    return _admin_block_redirect('tags_settings', ok='Paramètres mis à jour.')
+
+
+@app.route('/admin/tags/media_id', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tags_set_media_id():
+    raw_len = (request.form.get('media_id_length') or '').strip()
+    if raw_len.isdigit() and 3 <= int(raw_len) <= 12:
+        set_setting('media_id.length', raw_len)
+    set_setting('media_id.show_on_bestof', '1' if request.form.get('show_on_bestof') else '0')
+    return _admin_block_redirect('tags_media_id', ok='Réglages ID média mis à jour.')
+
+
+@app.route('/admin/tags/display', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tags_set_display():
+    set_setting('tags.show_on_bestof', '1' if request.form.get('show_on_bestof') else '0')
+    font_value = request.form.get('style_font', '')
+    if font_value in dict(_all_fonts()):
+        set_setting('tags.style_font', font_value)
+    bg_value = request.form.get('style_bg_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_value):
+        set_setting('tags.style_bg_color', bg_value)
+    text_value = request.form.get('style_text_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', text_value):
+        set_setting('tags.style_text_color', text_value)
+    raw_fs = (request.form.get('style_font_size') or '').strip()
+    if raw_fs.isdigit() and int(raw_fs) >= 8:
+        set_setting('tags.style_font_size', raw_fs)
+    return _admin_block_redirect('tags_display', ok="Réglages d'affichage mis à jour.")
 
 
 # ── Admin — codes invités ──────────────────────────────────────────────────────

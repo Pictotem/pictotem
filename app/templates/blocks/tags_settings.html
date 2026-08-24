@@ -1,0 +1,40 @@
+<form method="post" action="{{ url_for('admin_tags_set_settings') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-card" style="margin-bottom:18px">
+    <p class="section-title">Activation</p>
+    <p class="section-hint">Ajoute un bouton « Tags » sur l'écran de relecture du kiosque, après chaque capture.</p>
+    <div class="field">
+      <div class="check-row">
+        <input type="checkbox" id="enabled" name="enabled" {% if tags_settings.enabled %}checked{% endif %}>
+        <span>Activer les tags sur les captures</span>
+      </div>
+    </div>
+    <div class="field" style="margin-top:6px">
+      <div class="check-row">
+        <input type="checkbox" id="free_enabled" name="free_enabled" {% if tags_settings.free_enabled %}checked{% endif %}>
+        <span>Autoriser le tag « libre » (saisie au clavier virtuel tactile)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-card">
+    <p class="section-title">Règles du tag libre</p>
+    <div class="field-row">
+      <div class="field">
+        <label>Longueur minimale</label>
+        <input type="number" name="free_min_length" min="1" max="100" value="{{ tags_settings.free_min_length }}">
+      </div>
+      <div class="field">
+        <label>Longueur maximale</label>
+        <input type="number" name="free_max_length" min="1" max="200" value="{{ tags_settings.free_max_length }}">
+      </div>
+      <div class="field">
+        <label>Nombre max. de tags par média</label>
+        <input type="number" name="max_per_capture" min="1" max="50" value="{{ tags_settings.max_per_capture }}">
+      </div>
+    </div>
+  </div>
+
+  <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
+</form>

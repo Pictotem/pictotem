@@ -1,0 +1,24 @@
+<form method="post" action="{{ url_for('admin_tags_set_media_id') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <p class="section-hint" style="margin:0 0 18px">
+    Chaque capture (et upload invité) reçoit un identifiant numérique unique,
+    recherchable depuis la galerie et affichable sur le diaporama /bestof.
+  </p>
+  <div class="field-row">
+    <div class="field">
+      <label>Nombre de chiffres</label>
+      <input type="number" name="media_id_length" min="3" max="12" value="{{ media_id.length }}">
+      <p class="field-hint">Entre 3 et 12 — s'applique aux prochaines captures uniquement.</p>
+    </div>
+  </div>
+  <div class="field">
+    <div class="check-row">
+      <input type="checkbox" id="show_on_bestof" name="show_on_bestof"
+             {% if media_id.show_on_bestof %}checked{% endif %}>
+      <span>Afficher l'ID média sur le diaporama /bestof</span>
+    </div>
+  </div>
+
+  <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
+</form>
