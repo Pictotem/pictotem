@@ -3641,6 +3641,47 @@ def _port_is_free(host: str, port: int) -> bool:
             return False
 
 
+# Délai maximum toléré, au démarrage, avant de conclure que le port configuré
+# est réellement pris par une AUTRE application (voir _wait_port_free
+# ci-dessous — corrige un bug de redémarrage depuis le B-O découvert en
+# pratique : sans cette tolérance, la nouvelle instance perdait l'accès au
+# port habituel).
+_PORT_WAIT_TIMEOUT_S = 5.0
+_PORT_WAIT_INTERVAL_S = 0.25
+
+
+def _wait_port_free(host: str, port: int, timeout: float = _PORT_WAIT_TIMEOUT_S) -> bool:
+    """Comme _port_is_free ci-dessus, mais réessaie pendant `timeout`
+    secondes avant de conclure à l'indisponibilité, au lieu d'un test
+    unique et immédiat.
+
+    Nécessaire pour le redémarrage de l'application depuis le B-O (tuile
+    Application, voir _do_restart_app) : celui-ci lance la nouvelle
+    instance AVANT que l'ancienne ne se termine (os._exit), pour ne jamais
+    laisser l'application complètement arrêtée en cas d'échec du lancement.
+    Un très bref recouvrement entre les deux processus est donc normal et
+    attendu — l'ancienne instance peut mettre quelques centaines de
+    millisecondes (voire plus sur une machine chargée) à réellement libérer
+    le port après le lancement de la nouvelle. Avec un test unique et
+    immédiat (comportement d'origine), la nouvelle instance concluait à
+    tort que le port était pris par une AUTRE application et basculait
+    silencieusement sur le port 8080 (voir plus bas) : l'interface kiosque
+    continuait de fonctionner normalement (elle se connecte au port
+    réellement choisi, quel qu'il soit), mais le back office devenait
+    injoignable à l'adresse habituelle — symptôme observé en pratique
+    (« je perds l'accès au B-O » après un redémarrage depuis celui-ci).
+    Sans effet sur le cas normal (port réellement occupé par une autre
+    application dès le premier lancement) au-delà d'ajouter jusqu'à
+    `timeout` secondes avant la bascule sur 8080, déjà loggée."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if _port_is_free(host, port):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_PORT_WAIT_INTERVAL_S)
+
+
 class _KioskAPI:
     """Exposée en JS via window.pywebview.api (voir static/app.js). Permet à
     l'interface principale de sortir/rentrer du plein écran, protégé par un
@@ -3723,6 +3764,18 @@ def _do_restart_app():
             cwd=str(BASE_DIR),
             creationflags=creationflags,
             close_fds=True,
+            # DETACHED_PROCESS = aucune console pour la nouvelle instance
+            # (contrairement au tout premier lancement, fait depuis la
+            # console de run.ps1) : sans cette redirection explicite,
+            # stdin/stdout/stderr y seraient rattachés à des handles de
+            # console invalides — inoffensif pour logger (protégé en
+            # interne contre ce cas), mais pas garanti pour d'éventuels
+            # écrits directs d'une bibliothèque tierce (ex. cv2). DEVNULL
+            # lève toute ambiguïté ; les logs restent disponibles dans
+            # logs\app.log (FileHandler, inchangé) quel que soit ce réglage.
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
     except Exception:
         logger.exception("Échec du lancement de la nouvelle instance — redémarrage annulé, l'application actuelle continue de tourner.")
@@ -3797,13 +3850,17 @@ if __name__ == '__main__':
     _host = CONFIG['server']['host']
     _port = int(CONFIG['server']['port'])
 
-    if not _port_is_free(_host, _port):
+    if not _wait_port_free(_host, _port):
         # Port 80 souvent indisponible sous Windows (IIS, Skype, etc.) —
         # on bascule avant même de tenter le bind plutôt que de planter.
+        # _wait_port_free (et non _port_is_free directement) tolère un bref
+        # recouvrement avec une ancienne instance en cours d'arrêt (voir
+        # redémarrage depuis le B-O, _do_restart_app) avant de conclure que
+        # le port est pris par une autre application.
         logger.warning(
-            'Port %s indisponible sur %s, bascule sur le port 8080 '
+            'Port %s indisponible sur %s après %.0fs d\'attente, bascule sur le port 8080 '
             '— modifiez server.port dans config.toml pour changer ce comportement.',
-            _port, _host,
+            _port, _host, _PORT_WAIT_TIMEOUT_S,
         )
         _port = 8080
 
