@@ -222,6 +222,22 @@ def init_db():
         )
         """)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_capture_tags_capture_id ON capture_tags(capture_id)')
+
+        # Codes invités (voir /admin/guest_codes) : un code numérique aléatoire
+        # (longueur paramétrable, settings guest_codes.code_length) associé à
+        # un texte libre (250 caractères max). Un QR-code dont le contenu brut
+        # correspond exactement à un `code` existant affiche le `texte` associé
+        # à la place du contenu brut — voir get_guest_code_text() plus bas et
+        # _qr_detect_boxes_robust (app.py).
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS guest_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL UNIQUE,
+            texte TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_guest_codes_code ON guest_codes(code)')
         conn.commit()
 
 
@@ -818,6 +834,102 @@ def get_media_by_uid(media_uid):
             d['source'] = 'guest'
             return d
     return None
+
+
+# ── Codes invités ─────────────────────────────────────────────────────────────
+# Voir /admin/guest_codes : table de correspondance code numérique <-> texte
+# libre. Un badge QR-code peut encoder directement ce code numérique plutôt
+# que le texte final — la résolution code -> texte se fait à la détection
+# (voir _qr_detect_boxes_robust, app.py), donc s'applique uniformément à
+# l'aperçu en direct, à l'incrustation sur le média et au tag automatique.
+
+def list_guest_codes():
+    with closing(db_conn()) as conn:
+        rows = conn.execute('SELECT * FROM guest_codes ORDER BY created_at DESC').fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_guest_code_by_id(guest_code_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM guest_codes WHERE id = ?', (guest_code_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_guest_code_text(code):
+    """Retourne le `texte` associé à `code` s'il correspond à un code invité
+    existant, sinon None (le QR-code doit alors être traité comme du texte
+    brut). Appelée à chaque détection QR-code (voir _qr_detect_boxes_robust,
+    app.py) : requête indexée (UNIQUE sur `code`), coût négligeable."""
+    code = (code or '').strip()
+    if not code:
+        return None
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT texte FROM guest_codes WHERE code = ?', (code,)).fetchone()
+    return row['texte'] if row else None
+
+
+def generate_guest_code(length):
+    """Génère un code numérique aléatoire unique (non déjà présent dans
+    guest_codes) de `length` chiffres — même principe que
+    generate_media_uid() ci-dessus."""
+    try:
+        length = max(2, min(int(length), 10))
+    except (TypeError, ValueError):
+        length = 4
+    with closing(db_conn()) as conn:
+        for _ in range(30):
+            candidate = ''.join(random.choices('0123456789', k=length))
+            exists = conn.execute('SELECT 1 FROM guest_codes WHERE code = ?', (candidate,)).fetchone()
+            if not exists:
+                return candidate
+    # Filet de sécurité (ne devrait jamais être atteint) : garantit quand
+    # même une terminaison plutôt qu'une boucle infinie.
+    return str(int(datetime.now().timestamp() * 1000))[-length:]
+
+
+def create_guest_code(texte, length):
+    """Crée un nouveau code invité : `texte` fourni par l'admin, `code`
+    généré aléatoirement (voir generate_guest_code). Retourne le dict créé."""
+    code = generate_guest_code(length)
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            'INSERT INTO guest_codes(code, texte, created_at) VALUES(?,?,?)',
+            (code, texte, created_at)
+        )
+        conn.commit()
+        return {'id': cur.lastrowid, 'code': code, 'texte': texte, 'created_at': created_at}
+
+
+def update_guest_code_texte(guest_code_id, texte):
+    with closing(db_conn()) as conn:
+        conn.execute('UPDATE guest_codes SET texte=? WHERE id=?', (texte, guest_code_id))
+        conn.commit()
+
+
+def regenerate_guest_code(guest_code_id, length):
+    """Remplace le code (numéro) d'un code invité existant par un nouveau
+    code aléatoire unique, sans toucher au texte associé. Retourne le
+    nouveau code, ou None si `guest_code_id` est introuvable."""
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT id FROM guest_codes WHERE id = ?', (guest_code_id,)).fetchone()
+        if not row:
+            return None
+    new_code = generate_guest_code(length)
+    with closing(db_conn()) as conn:
+        conn.execute('UPDATE guest_codes SET code=? WHERE id=?', (new_code, guest_code_id))
+        conn.commit()
+    return new_code
+
+
+def delete_guest_code_db(guest_code_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM guest_codes WHERE id = ?', (guest_code_id,)).fetchone()
+        if not row:
+            return None
+        conn.execute('DELETE FROM guest_codes WHERE id = ?', (guest_code_id,))
+        conn.commit()
+    return dict(row)
 
 
 # ── Tags ──────────────────────────────────────────────────────────────────────

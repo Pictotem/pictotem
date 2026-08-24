@@ -64,7 +64,10 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_capture_tags, count_capture_tags, add_capture_tag, delete_capture_tag,
                 get_media_by_uid, get_tags_for_captures, list_distinct_tag_labels,
                 list_capture_tags_with_media,
-                list_wallpaper_images, add_wallpaper_image, delete_wallpaper_image_db)
+                list_wallpaper_images, add_wallpaper_image, delete_wallpaper_image_db,
+                list_guest_codes, get_guest_code_by_id, get_guest_code_text,
+                create_guest_code, update_guest_code_texte, regenerate_guest_code,
+                delete_guest_code_db)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, get_network_info,
                    is_autostart_enabled, make_thumb, message_text, print_photo,
@@ -733,7 +736,7 @@ def _media_id_settings():
 
 
 # ── Add-on : détection de QR-codes → tags automatiques ────────────────────────
-# Activable depuis /admin/tags (section dédiée). À chaque photo (capture
+# Activable depuis /admin/guest_codes (section dédiée). À chaque photo (capture
 # simple ou photo strip), si activé, on scanne l'image finale (avec cadre
 # déjà appliqué) à la recherche de QR-codes. Chaque QR-code décodé devient
 # un tag libre sur la capture, avec les mêmes bornes que les tags libres
@@ -778,17 +781,18 @@ def _qrcode_settings() -> dict:
 def _qr_burn_settings() -> dict:
     """Incrustation (dure, dans le fichier final) de la forme + du texte
     QR-code live sur les médias capturés — option indépendante par type de
-    média (photo/vidéo/photo strip), réglable depuis /admin/tags. Nécessite
-    « Activer la détection automatique de QR-codes » (qrcode.enabled)
-    ci-dessus, comme le tag automatique. Ne concerne jamais le message
-    d'erreur (qrcode.live_error_style.*) : voir _render_qr_burn_layer."""
+    média (photo/vidéo/photo strip), réglable depuis /admin/guest_codes.
+    Nécessite « Activer la détection automatique de QR-codes »
+    (qrcode.enabled) ci-dessus, comme le tag automatique. Ne concerne jamais
+    le message d'erreur (qrcode.live_error_style.*) : voir
+    _render_qr_burn_layer."""
     photo = get_setting('qrcode.burn_into_media.photo', '0') == '1'
     video = get_setting('qrcode.burn_into_media.video', '0') == '1'
     strip = get_setting('qrcode.burn_into_media.strip', '0') == '1'
     return {'photo': photo, 'video': video, 'strip': strip, 'any': photo or video or strip}
 
 
-# ── Apparence du texte QR-code affiché en direct (réglable depuis /admin/tags) ─
+# ── Apparence du texte QR-code affiché en direct (réglable depuis /admin/guest_codes) ─
 QR_LIVE_DIR = BASE_DIR / 'app' / 'static' / 'qr_live'
 _QR_LIVE_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp'}
 _QR_LIVE_SHAPES = [
@@ -960,7 +964,7 @@ def _qr_live_style_settings() -> dict:
 
 # ── Incrustation de la forme/texte QR-code live sur les médias capturés ───────
 # Option indépendante par type de média (voir _qr_burn_settings et
-# /admin/tags) : quand activée, la même forme + le même texte que l'aperçu
+# /admin/guest_codes) : quand activée, la même forme + le même texte que l'aperçu
 # en direct sont gravés dans la photo/vidéo/photo strip finale, à
 # l'emplacement du QR-code réellement détecté sur CE média (nouvelle
 # détection, indépendante du polling /api/qr/live) — jamais le message
@@ -1264,7 +1268,7 @@ def _apply_qr_burn_layer_bgr(image_bgr, layer):
 # (contrairement à la photo/au photo strip, figés à l'instant du
 # déclenchement) — sans suivi, la forme+texte resterait à la position de la
 # toute première frame, décalée dès que le visiteur bouge le QR-code
-# présenté. Compromis retenu (choisi avec l'utilisateur, voir /admin/tags) :
+# présenté. Compromis retenu (choisi avec l'utilisateur, voir /admin/guest_codes) :
 # détection ÉCHANTILLONNÉE (1 frame sur _QR_VIDEO_TRACK_SAMPLE_INTERVAL, pas
 # sur CHAQUE frame — bien plus coûteux pour un gain de fluidité imperceptible
 # une fois interpolé) + interpolation linéaire de la position entre deux
@@ -1421,7 +1425,7 @@ def _qr_live_error_style_settings() -> dict:
         # Jamais réglé sous cette clé (mise à jour depuis une version
         # antérieure) : reprend l'ancien réglage qrcode.too_small_message_enabled
         # (activé par défaut) le temps d'un premier enregistrement depuis
-        # /admin/tags — voir le même principe pour le mot de passe admin.
+        # /admin/guest_codes — voir le même principe pour le mot de passe admin.
         enabled = get_setting('qrcode.too_small_message_enabled', '1') == '1'
     else:
         enabled = raw_enabled == '1'
@@ -1554,7 +1558,12 @@ def _qr_detect_boxes_robust(image) -> list:
     (_qr_retry_decode_upscaled). Retourne une liste de dicts
     {'text': str|None, 'points': [...]} — 'text' vaut None quand le code
     est repéré (marqueurs trouvés) mais reste illisible malgré ces
-    tentatives."""
+    tentatives. Si le texte brut décodé correspond exactement à un code
+    invité existant (/admin/guest_codes, table guest_codes), il est
+    remplacé ici par le texte associé (voir _guest_code_resolve, fin de
+    cette fonction) — résolution centralisée à ce point unique de
+    détection pour s'appliquer uniformément à l'aperçu en direct, à
+    l'incrustation sur le média et au tag automatique."""
     try:
         found, decoded_texts, points, _straight = _qr_detector_aruco.detectAndDecodeMulti(image)
     except Exception:
@@ -1591,7 +1600,16 @@ def _qr_detect_boxes_robust(image) -> list:
                 # tentative sur un recadrage agrandi avant de conclure que
                 # le code est réellement trop petit à lire.
                 text = _qr_retry_decode_upscaled(image, pts)
-            results.append({'text': text or None, 'points': pts})
+            text = text or None
+            if text:
+                # Le contenu brut du QR-code peut être soit un texte direct,
+                # soit un code invité (voir /admin/guest_codes) : dans ce
+                # second cas, c'est le texte associé qui doit être affiché/
+                # incrusté/tagué, jamais le code numérique lui-même.
+                mapped = get_guest_code_text(text)
+                if mapped is not None:
+                    text = mapped
+            results.append({'text': text, 'points': pts})
     return results
 
 
@@ -1630,7 +1648,7 @@ def api_qr_live():
         elif too_small_enabled:
             # Marqueurs du QR-code repérés, mais code trop petit dans
             # l'image pour être décodé même après agrandissement —
-            # signalé au visiteur (désactivable depuis /admin/tags),
+            # signalé au visiteur (désactivable depuis /admin/guest_codes),
             # plutôt que silencieusement ignoré.
             box = {'x0': min(xs), 'y0': min(ys), 'x1': max(xs), 'y1': max(ys)}
             box['text'] = None
@@ -3208,13 +3226,80 @@ def admin_tags():
                 return redirect(url_for('admin_tags', ok=f"Tag « {row['label']} » retiré du média."))
             return redirect(url_for('admin_tags', err='Assignation introuvable.'))
 
+    return render_template(
+        'admin_tags.html', config=CONFIG,
+        settings=_tags_settings(), media_id=_media_id_settings(), tags=list_tags(),
+        assignments=list_capture_tags_with_media(), tags_fonts=_PROMO_FONTS,
+        alert_success=request.args.get('ok'),
+        alert_error=request.args.get('err'),
+    )
+
+
+# ── Admin — codes invités ──────────────────────────────────────────────────────
+# Correspondance code numérique <-> texte libre (voir get_guest_code_text,
+# db.py) + réglages QR-code déplacés depuis /admin/tags : détection
+# automatique, apparence du texte affiché en direct, message d'erreur.
+
+def _guest_codes_settings() -> dict:
+    raw_len = get_setting('guest_codes.code_length', '4')
+    try:
+        length = max(2, min(int(raw_len), 10))
+    except (TypeError, ValueError):
+        length = 4
+    return {'code_length': length}
+
+
+@app.route('/admin/guest_codes', methods=['GET', 'POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes():
+    if request.method == 'POST':
+        action = request.form.get('action', 'code_settings')
+
+        if action == 'code_settings':
+            raw_len = (request.form.get('code_length') or '').strip()
+            if raw_len.isdigit() and 2 <= int(raw_len) <= 10:
+                set_setting('guest_codes.code_length', raw_len)
+            return redirect(url_for('admin_guest_codes', ok='Réglages mis à jour.'))
+
+        if action == 'guest_code_new':
+            texte = (request.form.get('texte') or '').strip()[:250]
+            if not texte:
+                return redirect(url_for('admin_guest_codes', err='Le texte est obligatoire.'))
+            row = create_guest_code(texte, _guest_codes_settings()['code_length'])
+            return redirect(url_for('admin_guest_codes', ok=f"Code « {row['code']} » créé."))
+
+        if action == 'guest_code_edit':
+            guest_code_id = int(request.form.get('guest_code_id', 0))
+            if not get_guest_code_by_id(guest_code_id):
+                abort(404)
+            texte = (request.form.get('texte') or '').strip()[:250]
+            if not texte:
+                return redirect(url_for('admin_guest_codes', err='Le texte est obligatoire.'))
+            update_guest_code_texte(guest_code_id, texte)
+            return redirect(url_for('admin_guest_codes', ok='Code invité mis à jour.'))
+
+        if action == 'guest_code_regenerate':
+            guest_code_id = int(request.form.get('guest_code_id', 0))
+            new_code = regenerate_guest_code(guest_code_id, _guest_codes_settings()['code_length'])
+            if new_code is None:
+                return redirect(url_for('admin_guest_codes', err='Code introuvable.'))
+            return redirect(url_for('admin_guest_codes', ok=f'Nouveau code généré : {new_code}.'))
+
+        if action == 'guest_code_delete':
+            guest_code_id = int(request.form.get('guest_code_id', 0))
+            row = delete_guest_code_db(guest_code_id)
+            if row:
+                return redirect(url_for('admin_guest_codes', ok=f"Code « {row['code']} » supprimé."))
+            return redirect(url_for('admin_guest_codes', err='Code introuvable.'))
+
         if action == 'qrcode_settings':
             set_setting('qrcode.enabled', '1' if request.form.get('enabled') else '0')
             set_setting('qrcode.live_overlay', '1' if request.form.get('live_overlay') else '0')
             set_setting('qrcode.burn_into_media.photo', '1' if request.form.get('burn_photo') else '0')
             set_setting('qrcode.burn_into_media.video', '1' if request.form.get('burn_video') else '0')
             set_setting('qrcode.burn_into_media.strip', '1' if request.form.get('burn_strip') else '0')
-            return redirect(url_for('admin_tags', ok='Réglages QR-code mis à jour.'))
+            return redirect(url_for('admin_guest_codes', ok='Réglages QR-code mis à jour.'))
 
         if action == 'qrcode_live_style':
             bg_mode = request.form.get('bg_mode', 'shape')
@@ -3260,7 +3345,7 @@ def admin_tags():
             if file and file.filename:
                 ext = Path(file.filename).suffix.lower()
                 if ext not in _QR_LIVE_ALLOWED_EXT:
-                    return redirect(url_for('admin_tags', err="Format non supporté pour l'image de fond (PNG, JPG, WEBP)."))
+                    return redirect(url_for('admin_guest_codes', err="Format non supporté pour l'image de fond (PNG, JPG, WEBP)."))
                 QR_LIVE_DIR.mkdir(parents=True, exist_ok=True)
                 old = get_setting('qrcode.live_style.bg_image_filename', '')
                 if old:
@@ -3274,7 +3359,7 @@ def admin_tags():
                     (QR_LIVE_DIR / old).unlink(missing_ok=True)
                     set_setting('qrcode.live_style.bg_image_filename', '')
 
-            return redirect(url_for('admin_tags', ok='Apparence du texte QR-code mise à jour.'))
+            return redirect(url_for('admin_guest_codes', ok='Apparence du texte QR-code mise à jour.'))
 
         if action == 'qrcode_live_error_style':
             set_setting('qrcode.live_error_style.enabled',
@@ -3300,7 +3385,7 @@ def admin_tags():
             if error_file and error_file.filename:
                 ext = Path(error_file.filename).suffix.lower()
                 if ext not in _QR_LIVE_ALLOWED_EXT:
-                    return redirect(url_for('admin_tags', err="Format non supporté pour l'image du message d'erreur (PNG, JPG, WEBP)."))
+                    return redirect(url_for('admin_guest_codes', err="Format non supporté pour l'image du message d'erreur (PNG, JPG, WEBP)."))
                 QR_LIVE_DIR.mkdir(parents=True, exist_ok=True)
                 old = get_setting('qrcode.live_error_style.image_filename', '')
                 if old:
@@ -3314,12 +3399,13 @@ def admin_tags():
                     (QR_LIVE_DIR / old).unlink(missing_ok=True)
                     set_setting('qrcode.live_error_style.image_filename', '')
 
-            return redirect(url_for('admin_tags', ok="Message d'erreur QR-code mis à jour."))
+            return redirect(url_for('admin_guest_codes', ok="Message d'erreur QR-code mis à jour."))
 
     return render_template(
-        'admin_tags.html', config=CONFIG,
-        settings=_tags_settings(), media_id=_media_id_settings(), tags=list_tags(),
-        assignments=list_capture_tags_with_media(), tags_fonts=_PROMO_FONTS,
+        'admin_guest_codes.html', config=CONFIG,
+        guest_codes_settings=_guest_codes_settings(),
+        guest_codes=list_guest_codes(),
+        tags_fonts=_PROMO_FONTS,
         qrcode_settings=_qrcode_settings(),
         qrcode_burn_settings=_qr_burn_settings(),
         qrcode_live_style=_qr_live_style_settings(),
