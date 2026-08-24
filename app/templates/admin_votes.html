@@ -6,6 +6,7 @@
   <title>Votes — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('custom_fonts_css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
   <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
   <style>

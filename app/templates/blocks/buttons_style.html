@@ -1,0 +1,136 @@
+<form method="post" action="{{ url_for('admin_buttons_set_style') }}" id="buttonsStyleForm">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <p class="section-title" style="margin:0 0 4px">Réglages communs</p>
+  <p class="section-hint">S'appliquent à tous les boutons du kiosque, quel que soit leur rôle.</p>
+  <div class="field-row">
+    <div class="field">
+      <label>Forme</label>
+      <select name="shape" id="shape">
+        <option value="pill"    {% if settings.shape == 'pill'    %}selected{% endif %}>Pilule (arrondi complet)</option>
+        <option value="rounded" {% if settings.shape == 'rounded' %}selected{% endif %}>Arrondi</option>
+        <option value="square"  {% if settings.shape == 'square'  %}selected{% endif %}>Carré</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Police</label>
+      <select name="font" id="font">
+        {% for value, label in fonts %}
+        <option value="{{ value }}" {% if settings.font == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>Taille du texte (px)</label>
+      <input type="number" name="font_size" id="font_size" min="10" max="72" value="{{ settings.font_size }}">
+    </div>
+    <div class="field">
+      <label>Espacement vertical (px)</label>
+      <input type="number" name="padding_y" id="padding_y" min="0" max="60" value="{{ settings.padding_y }}">
+    </div>
+    <div class="field">
+      <label>Espacement horizontal (px)</label>
+      <input type="number" name="padding_x" id="padding_x" min="0" max="80" value="{{ settings.padding_x }}">
+    </div>
+  </div>
+
+  <p class="section-title" style="margin:24px 0 4px">Réglages par bouton</p>
+  <p class="section-hint">Couleur de fond et graisse du texte, propres à chaque bouton (la couleur du texte s'ajuste automatiquement pour rester lisible).</p>
+
+  <table class="role-table">
+    <thead>
+      <tr>
+        <th>Bouton</th>
+        <th>Couleur de fond</th>
+        <th>Texte gras</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for key, role in settings.roles.items() %}
+      <tr>
+        <td class="role-label">{{ role.label }}</td>
+        <td>
+          <div class="color-row">
+            <input type="color" id="cp_{{ key }}" value="{{ role.bg }}"
+                   oninput="document.getElementById('hex_{{ key }}').value=this.value; buttonsUpdatePreview()">
+            <input type="text" id="hex_{{ key }}" name="{{ key }}_bg" class="color-hex"
+                   value="{{ role.bg }}" maxlength="7"
+                   oninput="document.getElementById('cp_{{ key }}').value=this.value; buttonsUpdatePreview()">
+          </div>
+        </td>
+        <td>
+          <div class="check-row">
+            <input type="checkbox" id="bold_{{ key }}" name="{{ key }}_bold"
+                   {% if role.bold %}checked{% endif %} onchange="buttonsUpdatePreview()">
+            <span>Gras</span>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="btn-preview-wrap">
+    <p class="btn-preview-label">Aperçu</p>
+    <div class="btn-preview-box" id="btnPreviewBox">
+      {% for key, role in settings.roles.items() %}
+      <button type="button" class="btn-preview-chip" id="preview_{{ key }}">{{ role.label.split('(')[0].strip() }}</button>
+      {% endfor %}
+    </div>
+  </div>
+
+  <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
+</form>
+
+<script>
+  // « Réglages communs » et « Réglages par bouton » restent volontairement
+  // UN SEUL bloc (voir admin_buttons() dans app.py) : cet aperçu lit en
+  // direct les champs des deux sections, qui doivent donc toujours
+  // cohabiter sur la même page.
+  (function () {
+    const ROLE_KEYS = [{% for key, role in settings.roles.items() %}'{{ key }}'{{ ',' if not loop.last }}{% endfor %}];
+
+    function luminanceTextColor(hex) {
+      const h = (hex || '').replace('#', '');
+      if (h.length !== 6) return '#ffffff';
+      const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      return luminance > 0.55 ? '#111111' : '#ffffff';
+    }
+
+    function shapeRadius(shape) {
+      return { pill: '999px', rounded: '16px', square: '6px' }[shape] || '999px';
+    }
+
+    function buttonsUpdatePreviewImpl() {
+      const shapeEl = document.getElementById('shape');
+      if (!shapeEl) return;
+      const shape = shapeEl.value;
+      const font = document.getElementById('font').value;
+      const fontSize = document.getElementById('font_size').value || 38;
+      const padY = document.getElementById('padding_y').value || 14;
+      const padX = document.getElementById('padding_x').value || 20;
+
+      ROLE_KEYS.forEach((key) => {
+        const el = document.getElementById('preview_' + key);
+        if (!el) return;
+        const bg = document.getElementById('hex_' + key).value || '#888888';
+        const bold = document.getElementById('bold_' + key).checked;
+        el.style.fontFamily = font;
+        el.style.fontSize = fontSize + 'px';
+        el.style.padding = padY + 'px ' + padX + 'px';
+        el.style.borderRadius = shapeRadius(shape);
+        el.style.background = bg;
+        el.style.color = luminanceTextColor(bg);
+        el.style.fontWeight = bold ? '800' : '400';
+      });
+    }
+    window.buttonsUpdatePreview = buttonsUpdatePreviewImpl;
+
+    ['shape', 'font', 'font_size', 'padding_y', 'padding_x'].forEach((id) => {
+      document.getElementById(id)?.addEventListener('input', buttonsUpdatePreviewImpl);
+      document.getElementById(id)?.addEventListener('change', buttonsUpdatePreviewImpl);
+    });
+    buttonsUpdatePreviewImpl();
+  })();
+</script>

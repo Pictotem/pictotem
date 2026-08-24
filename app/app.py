@@ -2829,6 +2829,7 @@ _ADMIN_BLOCKS = {
     'frames_new':          {'title': "Ajouter un cadre",                        'default_page': 'frames',      'template': 'blocks/frames_new.html',          'context_fn': None},
     'votes_activation':    {'title': "Activation",                              'default_page': 'votes',       'template': 'blocks/votes_activation.html',    'context_fn': '_block_ctx_votes_activation'},
     'votes_thresholds_colors': {'title': "Seuils & couleurs",                   'default_page': 'votes',       'template': 'blocks/votes_thresholds_colors.html', 'context_fn': '_block_ctx_votes_thresholds_colors'},
+    'buttons_style':       {'title': "Style des boutons",                       'default_page': 'buttons',     'template': 'blocks/buttons_style.html',       'context_fn': '_block_ctx_buttons_style'},
 }
 # (slug, libellé affiché dans le menu « Déplacer vers », endpoint Flask) —
 # seulement les tuiles qui exécutent déjà la boucle de rendu de blocs
@@ -2843,6 +2844,7 @@ _ADMIN_PAGES = [
     ('gallery',     'Galerie',              'admin_gallery'),
     ('frames',      'Cadres',               'admin_frames'),
     ('votes',       'Votes',                'admin_votes'),
+    ('buttons',     'Boutons',              'admin_buttons'),
 ]
 _ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
 
@@ -2972,6 +2974,10 @@ def _block_ctx_votes_activation() -> dict:
 
 def _block_ctx_votes_thresholds_colors() -> dict:
     return {'cfg': _vote_cfg()}
+
+
+def _block_ctx_buttons_style() -> dict:
+    return {'settings': _buttons_settings(), 'fonts': _all_fonts()}
 
 
 @app.route('/admin/ui/block_collapse', methods=['POST'])
@@ -4432,39 +4438,50 @@ def admin_guest_codes_export_csv():
 
 # ── Admin — boutons d'action (kiosque) ────────────────────────────────────────
 
-@app.route('/admin/buttons', methods=['GET', 'POST'])
+@app.route('/admin/buttons')
 @require_admin_auth
-@csrf_protect
 def admin_buttons():
-    if request.method == 'POST':
-        shape = request.form.get('shape', 'pill')
-        if shape in _BUTTON_SHAPES:
-            set_setting('buttons.shape', shape)
-        font_value = request.form.get('font', '')
-        if font_value in dict(_all_fonts()):
-            set_setting('buttons.font', font_value)
-        raw_fs = (request.form.get('font_size') or '').strip()
-        if raw_fs.isdigit() and int(raw_fs) >= 10:
-            set_setting('buttons.font_size', raw_fs)
-        raw_py = (request.form.get('padding_y') or '').strip()
-        if raw_py.isdigit():
-            set_setting('buttons.padding_y', raw_py)
-        raw_px = (request.form.get('padding_x') or '').strip()
-        if raw_px.isdigit():
-            set_setting('buttons.padding_x', raw_px)
-        for key, _label, _default_bg in _BUTTON_ROLES:
-            bg_value = request.form.get(f'{key}_bg', '').strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_value):
-                set_setting(f'buttons.{key}_bg', bg_value)
-            set_setting(f'buttons.{key}_bold', '1' if request.form.get(f'{key}_bold') else '0')
-        return redirect(url_for('admin_buttons', ok='Paramètres mis à jour.'))
-
+    """Tuile « Boutons ». Pas de POST ici : l'unique bloc de cette page
+    poste vers sa propre route dédiée ci-dessous. « Réglages communs » et
+    « Réglages par bouton » restent un SEUL bloc (et non 2) car l'aperçu
+    en direct (voir templates/blocks/buttons_style.html) lit les deux
+    ensembles de champs à la fois — les séparer sur des tuiles
+    différentes casserait cet aperçu."""
+    blocks, block_context = _admin_render_blocks('buttons')
     return render_template(
         'admin_buttons.html', config=CONFIG,
-        settings=_buttons_settings(), fonts=_all_fonts(),
+        blocks=blocks, current_page='buttons', admin_pages=_ADMIN_PAGES,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
+
+
+@app.route('/admin/buttons/style', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_buttons_set_style():
+    shape = request.form.get('shape', 'pill')
+    if shape in _BUTTON_SHAPES:
+        set_setting('buttons.shape', shape)
+    font_value = request.form.get('font', '')
+    if font_value in dict(_all_fonts()):
+        set_setting('buttons.font', font_value)
+    raw_fs = (request.form.get('font_size') or '').strip()
+    if raw_fs.isdigit() and int(raw_fs) >= 10:
+        set_setting('buttons.font_size', raw_fs)
+    raw_py = (request.form.get('padding_y') or '').strip()
+    if raw_py.isdigit():
+        set_setting('buttons.padding_y', raw_py)
+    raw_px = (request.form.get('padding_x') or '').strip()
+    if raw_px.isdigit():
+        set_setting('buttons.padding_x', raw_px)
+    for key, _label, _default_bg in _BUTTON_ROLES:
+        bg_value = request.form.get(f'{key}_bg', '').strip()
+        if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_value):
+            set_setting(f'buttons.{key}_bg', bg_value)
+        set_setting(f'buttons.{key}_bold', '1' if request.form.get(f'{key}_bold') else '0')
+    return _admin_block_redirect('buttons_style', ok='Paramètres mis à jour.')
 
 
 # ── Slideshow /bestof ─────────────────────────────────────────────────────────
