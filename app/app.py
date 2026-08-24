@@ -3266,6 +3266,12 @@ _GUEST_CODES_SORTS = [
     ('length_desc',  'Longueur du texte (long → court)'),
 ]
 
+# Garde-fou sur l'ajout en masse (action guest_codes_bulk_add) : une ligne
+# du textarea = une génération de code (jusqu'à 30 tentatives aléatoires
+# chacune, voir generate_guest_code, db.py) + une écriture en base — borne
+# le coût d'un collage accidentel massif plutôt que de le refuser en bloc.
+_GUEST_CODES_BULK_MAX = 500
+
 
 def _admin_guest_codes_redirect(success=None, error=None, sort='created_desc', q=''):
     """Redirection standard des actions CRUD/import/purge de cette page —
@@ -3303,6 +3309,30 @@ def admin_guest_codes():
                 return _admin_guest_codes_redirect(error='Le texte est obligatoire.', sort=sort, q=q)
             row = create_guest_code(texte, _guest_codes_settings()['code_length'])
             return _admin_guest_codes_redirect(success=f"Code « {row['code']} » créé.", sort=sort, q=q)
+
+        if action == 'guest_codes_bulk_add':
+            # Une ligne = un texte -> exactement le même chemin que
+            # guest_code_new ci-dessus (create_guest_code génère le code
+            # aléatoire à la longueur réglée et horodate created_at à
+            # l'instant présent), simplement répété par ligne non vide.
+            raw_lines = (request.form.get('bulk_texts') or '').splitlines()
+            length = _guest_codes_settings()['code_length']
+            created, truncated = 0, False
+            for line in raw_lines:
+                texte = line.strip()[:250]
+                if not texte:
+                    continue
+                if created >= _GUEST_CODES_BULK_MAX:
+                    truncated = True
+                    break
+                create_guest_code(texte, length)
+                created += 1
+            if created == 0:
+                return _admin_guest_codes_redirect(error='Aucun texte valide dans la liste.', sort=sort, q=q)
+            msg = f'{created} code(s) créé(s) à partir de la liste.'
+            if truncated:
+                msg += f' Limité aux {_GUEST_CODES_BULK_MAX} premières lignes non vides.'
+            return _admin_guest_codes_redirect(success=msg, sort=sort, q=q)
 
         if action == 'guest_code_edit':
             guest_code_id = int(request.form.get('guest_code_id', 0))
@@ -3507,6 +3537,7 @@ def admin_guest_codes():
         guest_codes_settings=_guest_codes_settings(),
         guest_codes=list_guest_codes(sort=list_sort, q=list_q),
         guest_codes_sorts=_GUEST_CODES_SORTS,
+        guest_codes_bulk_max=_GUEST_CODES_BULK_MAX,
         guest_codes_sort=list_sort,
         guest_codes_q=list_q,
         tags_fonts=_PROMO_FONTS,
