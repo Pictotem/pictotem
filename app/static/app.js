@@ -121,8 +121,10 @@ function showReplayBadge(show){ setVisible(replayBadge, show); }
 // Badge de confirmation "QR-code détecté" sur l'écran de relecture — visible
 // uniquement quand l'add-on de détection QR (voir /admin/tags) a effectivement
 // trouvé et tagué un ou plusieurs QR-codes sur la capture affichée (qr_tags
-// non vide dans la réponse de /api/capture/photo|photostrip, voir
-// applyReplayUi()). Jamais affiché pour les vidéos (pas de détection QR).
+// non vide dans la réponse de /api/capture/photo|photostrip|video, voir
+// applyReplayUi()). Pour la vidéo, ne peut être non-vide que si « Incruster
+// la forme + le texte sur la vidéo capturée » est aussi coché (c'est cette
+// option qui déclenche l'analyse de la vidéo, voir /admin/tags).
 function showQrDetectedBadge(show, count = 0) {
   if (!qrDetectedBadge) return;
   if (show && count > 0) {

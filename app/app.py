@@ -623,6 +623,12 @@ def capture_video():
     # impact sur la fluidité/cadence de la capture elle-même. No-op (fichier
     # simplement renommé) si aucun QR-code n'a jamais été décodé dans la
     # vidéo — cas le plus fréquent quand l'option est activée « au cas où ».
+    # `keyframes` sert aussi de base au tag automatique ci-dessous (aucune
+    # détection supplémentaire nécessaire, uniquement quand l'incrustation
+    # vidéo est active — sinon aucune frame de la vidéo n'est jamais
+    # analysée, contrairement à la photo/au photo strip qui scannent
+    # systématiquement dès que l'add-on est activé).
+    keyframes = []
     if qr_burn_enabled:
         keyframes, frame_count = _qr_video_detect_keyframes(path_for_qr, _QR_VIDEO_TRACK_SAMPLE_INTERVAL)
         if not keyframes:
@@ -657,8 +663,19 @@ def capture_video():
 
     capture_id, media_uid = record_capture('video', final_filename, thumb_name)
     logger.info('Vidéo capturée %s', final_filename)
+    # Tag automatique (comme la photo/le photo strip, voir _qr_tag_detections)
+    # à partir des textes décodés pendant le suivi ci-dessus — dédoublonnés
+    # (un même QR-code tenu tout du long donne un point-clé identique toutes
+    # les _QR_VIDEO_TRACK_SAMPLE_INTERVAL frames, un seul tag par texte).
+    qr_tags = []
+    if keyframes:
+        seen_texts = []
+        for _idx, _box, text in keyframes:
+            if text not in seen_texts:
+                seen_texts.append(text)
+        qr_tags = _qr_tag_detections(capture_id, [{'text': t} for t in seen_texts])
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'video',
-                    'filename': final_filename,
+                    'filename': final_filename, 'qr_tags': qr_tags,
                     'url': f'/media/video/{final_filename}', 'message': message_text()})
 
 
