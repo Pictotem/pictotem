@@ -2429,12 +2429,12 @@ def admin_archive():
 def admin_archive_export():
     start_iso, end_iso, err = _resolve_archive_range(request.form)
     if err:
-        return redirect(url_for('admin_archive', err=err))
+        return _admin_block_redirect('archive_export', err=err)
     include_guests = bool(request.form.get('include_guests'))
     zip_path, count = _build_archive_zip(start_iso, end_iso, include_guests)
     if count == 0:
         zip_path.unlink(missing_ok=True)
-        return redirect(url_for('admin_archive', err='Aucun média dans cet intervalle.'))
+        return _admin_block_redirect('archive_export', err='Aucun média dans cet intervalle.')
     logger.info('Archive admin : %d média(s) exporté(s) (%s -> %s, invités %s).',
                 count, start_iso, end_iso, 'inclus' if include_guests else 'exclus')
     return send_file(zip_path, mimetype='application/zip', as_attachment=True, download_name=zip_path.name)
@@ -2446,9 +2446,9 @@ def admin_archive_export():
 def admin_archive_cleanup():
     start_iso, end_iso, err = _resolve_archive_range(request.form)
     if err:
-        return redirect(url_for('admin_archive', err=err))
+        return _admin_block_redirect('archive_cleanup', err=err)
     if not request.form.get('confirm'):
-        return redirect(url_for('admin_archive', err='Cochez la case de confirmation pour supprimer.'))
+        return _admin_block_redirect('archive_cleanup', err='Cochez la case de confirmation pour supprimer.')
 
     include_guests = bool(request.form.get('include_guests'))
 
@@ -2487,7 +2487,7 @@ def admin_archive_cleanup():
     if include_guests:
         msg += f' + {guest_count} média(s) invité(s) supprimé(s)'
     msg += ' (tags et votes inclus).'
-    return redirect(url_for('admin_archive', ok=msg))
+    return _admin_block_redirect('archive_cleanup', ok=msg)
 
 
 # ── Admin — cadres ────────────────────────────────────────────────────────────
@@ -2613,10 +2613,10 @@ def admin_font_upload():
     dans tous les sélecteurs de police de l'app — voir _all_fonts()."""
     file = request.files.get('font_file')
     if not file or not file.filename:
-        return redirect(url_for('admin_texts', err='Aucun fichier sélectionné.'))
+        return _admin_block_redirect('texts_custom_fonts', err='Aucun fichier sélectionné.')
     ext = Path(file.filename).suffix.lower()
     if ext not in _CUSTOM_FONT_ALLOWED_EXT:
-        return redirect(url_for('admin_texts', err='Format non supporté (TTF ou OTF uniquement).'))
+        return _admin_block_redirect('texts_custom_fonts', err='Format non supporté (TTF ou OTF uniquement).')
     label = (request.form.get('font_label') or '').strip() or Path(file.filename).stem
     label = label[:80]
     CUSTOM_FONTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -2627,9 +2627,9 @@ def admin_font_upload():
         ImageFont.truetype(str(CUSTOM_FONTS_DIR / safe_filename), 24)
     except Exception:
         (CUSTOM_FONTS_DIR / safe_filename).unlink(missing_ok=True)
-        return redirect(url_for('admin_texts', err='Fichier de police invalide ou illisible.'))
+        return _admin_block_redirect('texts_custom_fonts', err='Fichier de police invalide ou illisible.')
     create_custom_font(label, base_family, safe_filename)
-    return redirect(url_for('admin_texts', ok=f'Police « {label} » ajoutée.'))
+    return _admin_block_redirect('texts_custom_fonts', ok=f'Police « {label} » ajoutée.')
 
 
 @app.route('/admin/texts/fonts/delete', methods=['POST'])
@@ -2644,13 +2644,13 @@ def admin_font_delete():
     try:
         font_id = int(request.form.get('font_id', ''))
     except ValueError:
-        return redirect(url_for('admin_texts', err='Police invalide.'))
+        return _admin_block_redirect('texts_custom_fonts', err='Police invalide.')
     font = delete_custom_font_db(font_id)
     if not font:
-        return redirect(url_for('admin_texts', err='Police introuvable.'))
+        return _admin_block_redirect('texts_custom_fonts', err='Police introuvable.')
     (CUSTOM_FONTS_DIR / font['filename']).unlink(missing_ok=True)
     _qr_live_burn_font_cache.clear()
-    return redirect(url_for('admin_texts', ok=f"Police « {font['label']} » supprimée."))
+    return _admin_block_redirect('texts_custom_fonts', ok=f"Police « {font['label']} » supprimée.")
 
 
 @app.route('/fonts.css')
@@ -2799,6 +2799,22 @@ _ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
 
 def _admin_block_page(block_id: str) -> str:
     return get_setting(f'ui.block_page.{block_id}', _ADMIN_BLOCKS[block_id]['default_page'])
+
+
+_ADMIN_PAGE_ENDPOINTS = {slug: endpoint for slug, _label, endpoint in _ADMIN_PAGES}
+
+
+def _admin_block_redirect(block_id: str, **kwargs):
+    """Redirige vers la page qui affiche ACTUELLEMENT `block_id`, et non
+    vers sa page d'origine (`default_page`) — à utiliser par la route
+    propre à un bloc déplaçable après traitement de son formulaire. Un
+    bloc déplacé (voir admin_move_block) continue de poster vers la même
+    route quelle que soit la page qui l'affiche ; c'est cette fonction qui
+    garantit que l'utilisateur revient bien sur cette page-là plutôt que
+    sur la tuile d'origine du bloc."""
+    page = _admin_block_page(block_id)
+    endpoint = _ADMIN_PAGE_ENDPOINTS.get(page, _ADMIN_PAGE_ENDPOINTS[_ADMIN_BLOCKS[block_id]['default_page']])
+    return redirect(url_for(endpoint, **kwargs))
 
 
 def _admin_block_collapsed(block_id: str) -> bool:
@@ -2986,7 +3002,7 @@ def admin_set_idle_timer():
     for key, default in [('idle_timer_font_size', '13'), ('idle_timer_padding_y', '5'), ('idle_timer_padding_x', '13')]:
         raw = (request.form.get(key) or default).strip()
         set_setting(key, str(max(1, int(raw))) if raw.isdigit() else default)
-    return redirect(url_for('admin_application', ok='Mise en veille automatique mise à jour.'))
+    return _admin_block_redirect('app_idle_timer', ok='Mise en veille automatique mise à jour.')
 
 
 @app.route('/admin/access')
@@ -3022,15 +3038,15 @@ def admin_set_password():
     new_password = (request.form.get('new_password') or '').strip()
     confirm_password = (request.form.get('confirm_password') or '').strip()
     if not new_password:
-        return redirect(url_for(
-            'admin_access',
+        return _admin_block_redirect(
+            'access_password',
             err="Le mot de passe ne peut pas être vide (utilisez « Supprimer la protection » ci-dessous pour désactiver le mot de passe).",
-        ))
+        )
     if new_password != confirm_password:
-        return redirect(url_for('admin_access', err='Les deux mots de passe saisis ne correspondent pas.'))
+        return _admin_block_redirect('access_password', err='Les deux mots de passe saisis ne correspondent pas.')
     set_admin_password(new_password)
     logger.info("Mot de passe admin modifié depuis /admin/access (back office).")
-    return redirect(url_for('admin_access', ok='Mot de passe mis à jour.'))
+    return _admin_block_redirect('access_password', ok='Mot de passe mis à jour.')
 
 
 @app.route('/admin/access/password/clear', methods=['POST'])
@@ -3042,10 +3058,10 @@ def admin_clear_password():
     redéfini depuis cette même page)."""
     set_admin_password('')
     logger.warning("Protection par mot de passe du back office désactivée depuis /admin/access.")
-    return redirect(url_for(
-        'admin_access',
+    return _admin_block_redirect(
+        'access_clear_password',
         ok='Protection par mot de passe désactivée — le back office est désormais accessible sans mot de passe.',
-    ))
+    )
 
 
 @app.route('/admin/system/autostart', methods=['POST'])
@@ -3060,8 +3076,8 @@ def admin_toggle_autostart():
     else:
         ok, msg = enable_autostart(BASE_DIR / 'run.bat')
     if ok:
-        return redirect(url_for('admin_application', ok=msg))
-    return redirect(url_for('admin_application', err=msg))
+        return _admin_block_redirect('app_autostart', ok=msg)
+    return _admin_block_redirect('app_autostart', err=msg)
 
 
 @app.route('/admin/system/fullscreen', methods=['POST'])
@@ -3075,8 +3091,8 @@ def admin_toggle_fullscreen():
     l'appel JS équivalent déclenché depuis l'interface principale)."""
     result = _kiosk_api._do_toggle('back office')
     if result.get('ok'):
-        return redirect(url_for('admin_application', ok='Plein écran basculé.'))
-    return redirect(url_for('admin_application', err=result.get('error', 'Bascule impossible.')))
+        return _admin_block_redirect('app_fullscreen', ok='Plein écran basculé.')
+    return _admin_block_redirect('app_fullscreen', err=result.get('error', 'Bascule impossible.'))
 
 
 @app.route('/admin/system/restart', methods=['POST'])
@@ -3093,10 +3109,10 @@ def admin_restart_app():
     navigateur avant que le processus ne se remplace lui-même."""
     logger.info('Redémarrage programmé depuis /admin/application (back office).')
     threading.Timer(0.8, _do_restart_app).start()
-    return redirect(url_for(
-        'admin_application',
+    return _admin_block_redirect(
+        'app_restart',
         ok="Redémarrage en cours... la borne va être indisponible quelques secondes.",
-    ))
+    )
 
 
 @app.route('/admin/system/restart_update', methods=['POST'])
@@ -3122,13 +3138,13 @@ def admin_restart_update_app():
     alors qu'une fenêtre visible sur la borne permet de constater l'échec
     et de la fermer."""
     if not (BASE_DIR / '.git').is_dir():
-        return redirect(url_for(
-            'admin_application',
+        return _admin_block_redirect(
+            'app_restart_update',
             err="Ce dossier n'est pas un dépôt Git (pas de sous-dossier .git) — mise à jour impossible.",
-        ))
+        )
     update_bat = BASE_DIR / 'update.bat'
     if not update_bat.exists():
-        return redirect(url_for('admin_application', err='update.bat introuvable.'))
+        return _admin_block_redirect('app_restart_update', err='update.bat introuvable.')
     logger.info('Mise à jour Git + redémarrage programmés depuis /admin/application (back office).')
     try:
         subprocess.Popen(
@@ -3139,14 +3155,14 @@ def admin_restart_update_app():
         )
     except Exception:
         logger.exception("Échec du lancement de update.bat depuis le back office.")
-        return redirect(url_for(
-            'admin_application',
+        return _admin_block_redirect(
+            'app_restart_update',
             err="Échec du lancement de la mise à jour (voir logs\\app.log).",
-        ))
-    return redirect(url_for(
-        'admin_application',
+        )
+    return _admin_block_redirect(
+        'app_restart_update',
         ok="Mise à jour en cours (fenêtre ouverte sur la borne)... l'application redémarrera automatiquement.",
-    ))
+    )
 
 
 @app.route('/admin/application/wallpaper/upload', methods=['POST'])
@@ -3159,7 +3175,7 @@ def admin_wallpaper_upload():
     sur une image déjà présente dans cette liste."""
     files = [f for f in request.files.getlist('wallpaper_images') if f and f.filename]
     if not files:
-        return redirect(url_for('admin_application', err='Aucun fichier sélectionné.'))
+        return _admin_block_redirect('app_wallpaper', err='Aucun fichier sélectionné.')
     WALLPAPER_DIR.mkdir(parents=True, exist_ok=True)
     added = 0
     for i, file in enumerate(files):
@@ -3171,12 +3187,12 @@ def admin_wallpaper_upload():
         add_wallpaper_image(safe)
         added += 1
     if not added:
-        return redirect(url_for('admin_application', err='Format non supporté (PNG, JPG, BMP).'))
+        return _admin_block_redirect('app_wallpaper', err='Format non supporté (PNG, JPG, BMP).')
     skipped = len(files) - added
     msg = f"{added} image(s) ajoutée(s)."
     if skipped:
         msg += f' {skipped} ignorée(s) (format non supporté).'
-    return redirect(url_for('admin_application', ok=msg))
+    return _admin_block_redirect('app_wallpaper', ok=msg)
 
 
 @app.route('/admin/application/wallpaper/apply', methods=['POST'])
@@ -3189,17 +3205,17 @@ def admin_wallpaper_apply():
     try:
         image_id = int(request.form.get('image_id', ''))
     except ValueError:
-        return redirect(url_for('admin_application', err='Image invalide.'))
+        return _admin_block_redirect('app_wallpaper', err='Image invalide.')
     images = {img['id']: img for img in list_wallpaper_images()}
     img = images.get(image_id)
     if not img:
-        return redirect(url_for('admin_application', err='Image introuvable.'))
+        return _admin_block_redirect('app_wallpaper', err='Image introuvable.')
     ok, msg = set_windows_wallpaper(WALLPAPER_DIR / img['filename'])
     if not ok:
-        return redirect(url_for('admin_application', err=msg))
+        return _admin_block_redirect('app_wallpaper', err=msg)
     set_setting('application.wallpaper_current_filename', img['filename'])
     logger.info('Fond d\'écran Windows changé depuis /admin/application : %s', img['filename'])
-    return redirect(url_for('admin_application', ok=msg))
+    return _admin_block_redirect('app_wallpaper', ok=msg)
 
 
 @app.route('/admin/application/wallpaper/delete', methods=['POST'])
@@ -3214,14 +3230,14 @@ def admin_wallpaper_delete():
     try:
         image_id = int(request.form.get('image_id', ''))
     except ValueError:
-        return redirect(url_for('admin_application', err='Image invalide.'))
+        return _admin_block_redirect('app_wallpaper', err='Image invalide.')
     img = delete_wallpaper_image_db(image_id)
     if not img:
-        return redirect(url_for('admin_application', err='Image introuvable.'))
+        return _admin_block_redirect('app_wallpaper', err='Image introuvable.')
     (WALLPAPER_DIR / img['filename']).unlink(missing_ok=True)
     if get_setting('application.wallpaper_current_filename', '') == img['filename']:
         set_setting('application.wallpaper_current_filename', '')
-    return redirect(url_for('admin_application', ok='Image supprimée.'))
+    return _admin_block_redirect('app_wallpaper', ok='Image supprimée.')
 
 
 @app.route('/admin/application/network_info_taps', methods=['POST'])
@@ -3235,7 +3251,7 @@ def admin_set_network_info_taps():
     raw_taps = (request.form.get('network_info_taps') or '').strip()
     set_setting('kiosk.network_info_taps',
                 raw_taps if raw_taps.isdigit() and 2 <= int(raw_taps) <= 15 else '')
-    return redirect(url_for('admin_application', ok='Réglage mis à jour.'))
+    return _admin_block_redirect('app_network_info', ok='Réglage mis à jour.')
 
 
 @app.route('/admin/frames')
