@@ -741,6 +741,25 @@ def _scale_padding_css(padding_css: str, scale: float) -> str:
     return ' '.join(parts) if parts else padding_css
 
 
+def _add_padding_margin_css(padding_css: str, extra_px: int) -> str:
+    """Ajoute `extra_px` (marge supplémentaire réglable, voir text_margin_px
+    dans _qr_live_style_settings) à chaque valeur numérique d'un padding CSS
+    déjà mis à l'échelle par _scale_padding_css ci-dessus — via calc(), qui
+    accepte nativement l'addition d'unités différentes (px + em), donc sans
+    avoir à convertir les valeurs de base (certaines formes utilisent em)."""
+    if not extra_px:
+        return padding_css
+    parts = []
+    for token in padding_css.split():
+        m = re.match(r'^([\d.]+)(px|em)$', token)
+        if not m:
+            parts.append(token)
+            continue
+        value, unit = m.group(1), m.group(2)
+        parts.append(f'calc({value}{unit} + {extra_px}px)')
+    return ' '.join(parts) if parts else padding_css
+
+
 def _qr_live_bg_dim_px(raw: str) -> int:
     """Parse une dimension (largeur/hauteur) de la forme d'arrière-plan en
     px. Chaîne vide/invalide → 0, ce qui signifie « auto » (comportement
@@ -790,6 +809,17 @@ def _qr_live_style_settings() -> dict:
     if position not in dict(_QR_LIVE_POSITIONS):
         position = 'above'
     bg_image_filename = get_setting('qrcode.live_style.bg_image_filename', '')
+    # Marge additionnelle (px) entre le texte et le bord de la forme, réglable
+    # indépendamment de « Taille de la forme (%) » ci-dessus — s'ajoute au
+    # padding de base de la forme (voir _add_padding_margin_css), sans effet
+    # en mode proportionnel (padding forcé à 0, voir renderQrLiveBoxes dans
+    # app.js — la forme colle alors exactement au QR-code détecté).
+    raw_text_margin = get_setting('qrcode.live_style.text_margin_px', '') or '0'
+    try:
+        text_margin_px = max(0, min(60, int(raw_text_margin)))
+    except ValueError:
+        text_margin_px = 0
+    scaled_padding = _scale_padding_css(shape_css['padding'], bg_size_pct / 100)
     return {
         'bg_mode': bg_mode,
         'bg_shape': bg_shape,
@@ -798,11 +828,21 @@ def _qr_live_style_settings() -> dict:
         'bg_height_px': bg_height_px,
         'bg_width_css': f'{bg_width_px}px' if bg_width_px else 'auto',
         'bg_height_css': f'{bg_height_px}px' if bg_height_px else 'auto',
+        # Forcé à 1/1 uniquement pour la forme « Cercle » : sans ça, une boîte
+        # en taille auto (padding + texte) n'est carrée que par coïncidence —
+        # border-radius:50% sur une boîte plus large que haute (texte
+        # horizontal) donne un OVALE, pas un disque. 'auto' pour les autres
+        # formes (aucun effet, y compris quand largeur/hauteur sont fixées
+        # explicitement ci-dessus : aspect-ratio ne s'applique jamais quand
+        # les deux dimensions sont déjà définies, cf. spec CSS — le choix
+        # manuel de l'admin est donc toujours respecté).
+        'bg_aspect_ratio_css': '1 / 1' if bg_shape == 'circle' else 'auto',
         'bg_proportional': bg_proportional,
         'bg_proportional_adjust_pct': bg_proportional_adjust_pct,
         'bg_radius_css': shape_css['radius'],
         'bg_clip_css': shape_css['clip'],
-        'bg_padding_css': _scale_padding_css(shape_css['padding'], bg_size_pct / 100),
+        'bg_padding_css': _add_padding_margin_css(scaled_padding, text_margin_px),
+        'text_margin_px': text_margin_px,
         'bg_color': get_setting('qrcode.live_style.bg_color', '') or '#0d8b8f',
         'bg_image_filename': bg_image_filename,
         'bg_image_url': f'/static/qr_live/{bg_image_filename}' if bg_image_filename else '',
@@ -2618,6 +2658,9 @@ def admin_tags():
             raw_bg_height = (request.form.get('bg_height_px') or '').strip()
             set_setting('qrcode.live_style.bg_height_px',
                         str(max(20, min(800, int(raw_bg_height)))) if raw_bg_height.isdigit() else '')
+            raw_text_margin = (request.form.get('text_margin_px') or '0').strip()
+            set_setting('qrcode.live_style.text_margin_px',
+                        str(max(0, min(60, int(raw_text_margin)))) if raw_text_margin.isdigit() else '0')
             set_setting('qrcode.live_style.bg_proportional',
                         '1' if request.form.get('bg_proportional') else '0')
             raw_prop_adjust = (request.form.get('bg_proportional_adjust_pct') or '0').strip()

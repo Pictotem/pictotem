@@ -765,6 +765,15 @@ button, input, a { font: inherit; }
      renderQrLiveBoxes() (app.js) à chaque frame. */
   width: var(--qr-live-width, auto);
   height: var(--qr-live-height, auto);
+  /* Forme « Cercle » uniquement (voir bg_aspect_ratio_css dans
+     _qr_live_style_settings, app.py) : force un vrai disque (1/1) quand
+     largeur/hauteur sont en auto — sans quoi border-radius:50% sur une
+     boîte qui s'ajuste au texte (donc plus large que haute) donne un
+     ovale. Sans effet dès que les deux dimensions sont explicitement
+     fixées ci-dessus (spec CSS : aspect-ratio est ignoré si width ET
+     height sont déjà définis), donc un choix manuel reste toujours
+     respecté. 'auto' (pas d'effet) pour toutes les autres formes. */
+  aspect-ratio: var(--qr-live-aspect-ratio, auto);
   padding: var(--qr-live-padding, 7px 14px);
   border-radius: var(--qr-live-radius, 999px);
   clip-path: var(--qr-live-clip-path, none);

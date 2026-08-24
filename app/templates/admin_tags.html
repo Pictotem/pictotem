@@ -302,6 +302,15 @@
                      oninput="document.getElementById('cp_qr_bg').value=this.value; updateQrLivePreview()">
             </div>
           </div>
+          <div class="field">
+            <label>Marge autour du texte (px)</label>
+            <input type="number" name="text_margin_px" id="qr_live_text_margin_px" min="0" max="60" step="2"
+                   value="{{ qrcode_live_style.text_margin_px }}" oninput="updateQrLivePreview()">
+            <p class="field-hint">
+              Défaut : 0 px. Espace ajouté entre le texte et le bord de la forme, en plus de
+              « Taille de la forme » ci-dessus. Sans effet en mode « Proportionnel » ci-dessous.
+            </p>
+          </div>
         </div>
 
         <div class="check-row" style="margin-top:-6px;margin-bottom:10px">
@@ -330,7 +339,9 @@
         <p class="field-hint" style="margin-top:-6px;margin-bottom:14px">
           La forme s'applique aussi en mode « Image de fond » ci-dessous (découpe l'image
           selon le contour choisi). Cercle, ovale et étoile conviennent mieux à un texte
-          court : les contenus longs peuvent être rognés par les bords ou les pointes.
+          court : les contenus longs peuvent être rognés par les bords ou les pointes. La
+          forme « Cercle » est toujours un vrai disque (hauteur forcée à égalité avec la
+          largeur en taille automatique) — plus le texte est long, plus le disque est grand.
         </p>
 
         <div id="qr_bg_image_fields" class="field">
@@ -719,6 +730,17 @@
     }).join(' ');
   }
 
+  // Mirroir de _add_padding_margin_css (app.py) : ajoute une marge (px) fixe
+  // à chaque valeur numérique d'un padding CSS déjà mis à l'échelle.
+  function addQrLivePaddingMargin(paddingCss, extraPx) {
+    if (!extraPx) return paddingCss;
+    return paddingCss.split(' ').map((token) => {
+      const m = token.match(/^([\d.]+)(px|em)$/);
+      if (!m) return token;
+      return `calc(${m[1]}${m[2]} + ${extraPx}px)`;
+    }).join(' ');
+  }
+
   function updateQrLivePreview() {
     const chip = document.getElementById('qrLivePreviewChip');
     if (!chip) return;
@@ -733,6 +755,7 @@
     const sizePct = Number(document.getElementById('qr_live_bg_size_pct')?.value || 100) || 100;
     const widthPx = Number(document.getElementById('qr_live_bg_width_px')?.value || 0) || 0;
     const heightPx = Number(document.getElementById('qr_live_bg_height_px')?.value || 0) || 0;
+    const marginPx = Math.max(0, Math.min(60, Number(document.getElementById('qr_live_text_margin_px')?.value || 0) || 0));
     const shapeCss = QR_LIVE_SHAPE_CSS[shape] || QR_LIVE_SHAPE_CSS.pill;
     chip.style.display = 'inline-flex';
     chip.style.alignItems = 'center';
@@ -743,17 +766,22 @@
     chip.style.color = textColor;
     chip.style.borderRadius = shapeCss.radius;
     chip.style.clipPath = shapeCss.clip;
+    // Forme « Cercle » : vrai disque (voir bg_aspect_ratio_css, app.py) —
+    // sans effet dès que largeur ET hauteur sont fixées explicitement
+    // ci-dessous (même règle CSS que sur le kiosque réel).
+    chip.style.aspectRatio = (shape === 'circle') ? '1 / 1' : 'auto';
     if (proportional) {
       // Calculée en direct à partir du QR-code réellement détecté (voir
       // renderQrLiveBoxes dans app.js) — pas de taille fixe à prévisualiser
-      // ici, on retombe sur l'ajustement automatique au texte.
+      // ici, on retombe sur l'ajustement automatique au texte. Pas de marge
+      // additionnelle non plus : le padding réel est forcé à 0 dans ce mode.
       chip.style.width = 'auto';
       chip.style.height = 'auto';
       chip.style.padding = scaleQrLivePadding(shapeCss.padding, 1 + proportionalAdjustPct / 100);
     } else {
       chip.style.width = widthPx ? widthPx + 'px' : 'auto';
       chip.style.height = heightPx ? heightPx + 'px' : 'auto';
-      chip.style.padding = scaleQrLivePadding(shapeCss.padding, sizePct / 100);
+      chip.style.padding = addQrLivePaddingMargin(scaleQrLivePadding(shapeCss.padding, sizePct / 100), marginPx);
     }
     if (bgMode === 'image' && QR_LIVE_EXISTING_BG_IMAGE_URL) {
       chip.style.backgroundImage = `url('${QR_LIVE_EXISTING_BG_IMAGE_URL}')`;
@@ -776,15 +804,16 @@
   }
 
   // Mode « proportionnel au QR-code détecté » : les champs Taille (%),
-  // Largeur et Hauteur n'ont alors plus d'effet (recalculés en direct côté
-  // client, voir renderQrLiveBoxes dans app.js) — on les grise pour éviter
-  // de laisser croire qu'ils s'appliquent encore.
+  // Largeur, Hauteur et Marge n'ont alors plus d'effet (padding forcé à 0,
+  // largeur/hauteur recalculées en direct côté client, voir
+  // renderQrLiveBoxes dans app.js) — on les grise pour éviter de laisser
+  // croire qu'ils s'appliquent encore.
   function updateQrLiveProportionalUi() {
     const proportional = document.getElementById('qr_live_bg_proportional')?.checked || false;
     // On grise ces champs (readOnly, pas disabled) plutôt que de les
     // désactiver : leur valeur reste ainsi soumise et enregistrée comme
     // repli si l'option est décochée plus tard, au lieu d'être perdue.
-    ['qr_live_bg_size_pct', 'qr_live_bg_width_px', 'qr_live_bg_height_px'].forEach((id) => {
+    ['qr_live_bg_size_pct', 'qr_live_bg_width_px', 'qr_live_bg_height_px', 'qr_live_text_margin_px'].forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
       el.readOnly = proportional;
@@ -826,10 +855,14 @@
     const textColor = document.getElementById('qr_error_text_color')?.value || '#ffffff';
     const bgColor = document.getElementById('qr_error_bg_color')?.value || '#b26e0a';
     const text = document.getElementById('qr_error_text')?.value || 'QR-code détecté mais illisible';
-    // Reprend la forme (radius/clip/padding) du texte décodé avec succès,
-    // partagée entre les deux formulaires (voir formulaire "Apparence" ci-dessus).
+    // Reprend la forme (radius/clip/padding/aspect-ratio) du texte décodé
+    // avec succès, partagée entre les deux formulaires (voir formulaire
+    // "Apparence" ci-dessus — même héritage CSS que sur le kiosque réel,
+    // .qr-live-label.too-small ne surchargeant que couleurs/police/taille).
     const shape = document.getElementById('qr_live_bg_shape')?.value || 'pill';
     const shapeCss = QR_LIVE_SHAPE_CSS[shape] || QR_LIVE_SHAPE_CSS.pill;
+    const sizePct = Number(document.getElementById('qr_live_bg_size_pct')?.value || 100) || 100;
+    const marginPx = Math.max(0, Math.min(60, Number(document.getElementById('qr_live_text_margin_px')?.value || 0) || 0));
     chip.style.display = 'inline-flex';
     chip.style.alignItems = 'center';
     chip.style.justifyContent = 'center';
@@ -840,7 +873,8 @@
     chip.style.color = textColor;
     chip.style.borderRadius = shapeCss.radius;
     chip.style.clipPath = shapeCss.clip;
-    chip.style.padding = shapeCss.padding;
+    chip.style.aspectRatio = (shape === 'circle') ? '1 / 1' : 'auto';
+    chip.style.padding = addQrLivePaddingMargin(scaleQrLivePadding(shapeCss.padding, sizePct / 100), marginPx);
     chip.style.backgroundImage = 'none';
     chip.style.backgroundColor = bgColor;
   }
