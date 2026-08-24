@@ -6,6 +6,7 @@ from functools import wraps
 from flask import abort, redirect, request, session, url_for
 
 from config_loader import CONFIG
+from db import get_setting, set_setting
 
 logger = logging.getLogger('pictotem')
 
@@ -20,8 +21,53 @@ def _get_gallery_password() -> str:
     return os.environ.get('PICTOTEM_GALLERY_PASSWORD') or str(CONFIG.get('auth', {}).get('gallery_password', ''))
 
 
+# Mot de passe admin (back office) : géré depuis la Tuile "Admin" du back
+# office (voir app.py admin_access / admin_set_password), stocké en base via
+# settings (clé 'admin.master_password'), PLUS géré dans config.toml. Ordre
+# de priorité :
+#   1. Variable d'env PICTOTEM_ADMIN_PASSWORD (recovery/déploiement) ;
+#   2. Réglage en base 'admin.master_password', s'il a déjà été défini une
+#      fois depuis la Tuile "Admin" (même vide = protection désactivée
+#      volontairement — voir set_admin_password) ;
+#   3. À défaut (aucun réglage en base pour l'instant, mise à jour depuis une
+#      version antérieure), ancienne valeur config.toml [admin] password —
+#      purement une compatibilité ascendante pour éviter un verrouillage
+#      accidentel ; elle cesse d'être utilisée dès qu'un mot de passe est
+#      défini une première fois depuis la Tuile "Admin".
+_ADMIN_PASSWORD_SETTING_KEY = 'admin.master_password'
+_ADMIN_PASSWORD_UNSET = object()
+
+
 def _get_admin_password() -> str:
-    return os.environ.get('PICTOTEM_ADMIN_PASSWORD') or str(CONFIG.get('admin', {}).get('password', ''))
+    env_password = os.environ.get('PICTOTEM_ADMIN_PASSWORD')
+    if env_password:
+        return env_password
+    db_value = get_setting(_ADMIN_PASSWORD_SETTING_KEY, _ADMIN_PASSWORD_UNSET)
+    if db_value is not _ADMIN_PASSWORD_UNSET:
+        return db_value
+    return str(CONFIG.get('admin', {}).get('password', ''))
+
+
+def admin_password_status() -> dict:
+    """Renseigne l'origine du mot de passe admin actuellement actif, pour
+    affichage informatif sur la Tuile "Admin" (jamais le mot de passe en
+    clair). 'source' vaut 'env' | 'db' | 'config_legacy' | 'unset'."""
+    if os.environ.get('PICTOTEM_ADMIN_PASSWORD'):
+        return {'set': True, 'source': 'env'}
+    db_value = get_setting(_ADMIN_PASSWORD_SETTING_KEY, _ADMIN_PASSWORD_UNSET)
+    if db_value is not _ADMIN_PASSWORD_UNSET:
+        return {'set': bool(db_value), 'source': 'db'}
+    legacy = str(CONFIG.get('admin', {}).get('password', '')).strip()
+    return {'set': bool(legacy), 'source': 'config_legacy' if legacy else 'unset'}
+
+
+def set_admin_password(new_password: str) -> None:
+    """Définit (ou, avec une chaîne vide, supprime) le mot de passe admin en
+    base — devient dès cet appel l'unique source de vérité pour
+    _get_admin_password() ci-dessus, quel que soit le contenu de
+    config.toml. La session en cours (déjà authentifiée pour arriver sur
+    cette page) n'est pas invalidée par ce changement."""
+    set_setting(_ADMIN_PASSWORD_SETTING_KEY, (new_password or '').strip())
 
 
 # ── Point 2 : clé secrète robuste ────────────────────────────────────────────

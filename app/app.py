@@ -30,13 +30,14 @@ from flask import (Flask, Response, abort, jsonify, make_response, redirect,
                    session, url_for)
 from PIL import Image, ImageOps
 
-from auth import (auth_enabled, build_secret_key, check_admin_password,
-                  check_gallery_password, check_main_password, client_ip,
-                  csrf_protect, gallery_session_key, generate_csrf_token,
+from auth import (admin_password_status, auth_enabled, build_secret_key,
+                  check_admin_password, check_gallery_password,
+                  check_main_password, client_ip, csrf_protect,
+                  gallery_session_key, generate_csrf_token,
                   is_admin_authenticated, is_gallery_authenticated,
                   is_local_request, is_main_authenticated, main_session_key,
                   require_admin_auth, require_gallery_auth, require_main_auth,
-                  require_media_auth)
+                  require_media_auth, set_admin_password)
 from camera import (VIDEO_CAPTURE_ACTIVE, CAM_LOCK, clear_overlay_cache,
                     clear_recording_frame, composite_frame_overlay,
                     encode_jpeg, get_frame_overlay_path, get_latest_preview_frame,
@@ -1958,6 +1959,59 @@ def admin_application():
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )
+
+
+@app.route('/admin/access')
+@require_admin_auth
+def admin_access():
+    """Tuile « Admin » du back office — gestion du mot de passe unique qui
+    protège l'ensemble du back office (voir auth.py : _get_admin_password,
+    admin_password_status, set_admin_password). Remplace la gestion de ce
+    mot de passe dans config.toml (section [admin], conservée en lecture
+    seule pour compatibilité ascendante tant qu'aucun mot de passe n'a été
+    défini depuis cette page — voir commentaire dans auth._get_admin_password)."""
+    return render_template(
+        'admin_access.html', config=CONFIG,
+        password_status=admin_password_status(),
+        alert_success=request.args.get('ok'),
+        alert_error=request.args.get('err'),
+    )
+
+
+@app.route('/admin/access/password', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_set_password():
+    """Définit ou change le mot de passe admin unique. Un mot de passe vide
+    est refusé ici (utiliser admin_clear_password ci-dessous, action
+    distincte et explicite, pour désactiver volontairement la protection)."""
+    new_password = (request.form.get('new_password') or '').strip()
+    confirm_password = (request.form.get('confirm_password') or '').strip()
+    if not new_password:
+        return redirect(url_for(
+            'admin_access',
+            err="Le mot de passe ne peut pas être vide (utilisez « Supprimer la protection » ci-dessous pour désactiver le mot de passe).",
+        ))
+    if new_password != confirm_password:
+        return redirect(url_for('admin_access', err='Les deux mots de passe saisis ne correspondent pas.'))
+    set_admin_password(new_password)
+    logger.info("Mot de passe admin modifié depuis /admin/access (back office).")
+    return redirect(url_for('admin_access', ok='Mot de passe mis à jour.'))
+
+
+@app.route('/admin/access/password/clear', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_clear_password():
+    """Désactive volontairement la protection par mot de passe du back
+    office (accès libre à /admin ensuite, tant qu'aucun mot de passe n'est
+    redéfini depuis cette même page)."""
+    set_admin_password('')
+    logger.warning("Protection par mot de passe du back office désactivée depuis /admin/access.")
+    return redirect(url_for(
+        'admin_access',
+        ok='Protection par mot de passe désactivée — le back office est désormais accessible sans mot de passe.',
+    ))
 
 
 @app.route('/admin/system/autostart', methods=['POST'])
