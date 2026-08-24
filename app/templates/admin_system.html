@@ -4,7 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Caméra &amp; écran — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
+  <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
   <style>
     .admin-wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 60px; }
     .admin-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 36px; flex-wrap: wrap; }
@@ -31,7 +34,7 @@
     input[type=text]:focus, input[type=number]:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
   </style>
 </head>
-<body class="gallery-body">
+<body class="gallery-body" data-admin-page="system">
 <div class="admin-wrap">
 
   <div class="admin-header">
@@ -48,88 +51,29 @@
   {% if alert_success %}<ul class="flash-list"><li class="success">{{ alert_success }}</li></ul>{% endif %}
   {% if alert_error   %}<ul class="flash-list"><li class="error">{{ alert_error }}</li></ul>{% endif %}
 
-  <form method="post" action="{{ url_for('admin_system') }}">
-    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-
-    <div class="text-section">
-      <h2>Caméra</h2>
-      <div class="text-fields">
-        <div class="text-field">
-          <label class="field-label" for="camera_device">Caméra (index)</label>
-          <input type="number" id="camera_device" name="camera_device" value="{{ camera.device }}" min="0" max="10">
-          <p class="field-default">0 = première caméra détectée par Windows, 1 = deuxième, etc.</p>
-        </div>
-        <div class="text-field">
-          <label class="field-label" for="camera_rotation">Rotation</label>
-          <select id="camera_rotation" name="camera_rotation">
-            <option value="0"   {% if camera.rotation == 0   %}selected{% endif %}>0°</option>
-            <option value="90"  {% if camera.rotation == 90  %}selected{% endif %}>90°</option>
-            <option value="180" {% if camera.rotation == 180 %}selected{% endif %}>180°</option>
-            <option value="270" {% if camera.rotation == 270 %}selected{% endif %}>270°</option>
-          </select>
-        </div>
-        <div class="text-field">
-          <label class="field-label" for="camera_width">Largeur (px)</label>
-          <input type="number" id="camera_width" name="camera_width" value="{{ camera.width }}" min="1" step="1">
-        </div>
-        <div class="text-field">
-          <label class="field-label" for="camera_height">Hauteur (px)</label>
-          <input type="number" id="camera_height" name="camera_height" value="{{ camera.height }}" min="1" step="1">
-        </div>
-        <div class="text-field" style="grid-column:1/-1">
-          <label class="field-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
-            <input type="checkbox" name="camera_preview_mirror" value="1"
-                   {% if camera.preview_mirror %}checked{% endif %}
-                   style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">
-            Effet miroir sur l'aperçu
-          </label>
-        </div>
-      </div>
+  {% for block in blocks %}
+  <div class="text-section{% if block.variant %} {{ block.variant }}{% endif %}{% if block.collapsed %} block-collapsed{% endif %}" data-block-id="{{ block.id }}">
+    <div class="block-header-row">
+      <span class="block-drag-handle" title="Glisser pour réordonner">⠿</span>
+      <h2>{{ block.title }}</h2>
+      <button type="button" class="block-collapse-toggle" aria-label="Replier / déplier">▾</button>
     </div>
-
-    <div class="text-section">
-      <h2>Écran / mode kiosque</h2>
-      <div class="text-fields">
-        <div class="text-field" style="grid-column:1/-1">
-          <label class="field-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
-            <input type="checkbox" name="ui_kiosk_mode" value="1"
-                   {% if screen.kiosk_mode %}checked{% endif %}
-                   style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">
-            Lancer le navigateur en plein écran (mode kiosque) au démarrage
-          </label>
-          <p class="field-default" style="margin-top:8px">
-            Décoché : ouverture dans une fenêtre de navigateur normale (pratique en développement).
-          </p>
-        </div>
-        <div class="text-field">
-          <label class="field-label" for="ui_kiosk_screen">Écran (index)</label>
-          <input type="number" id="ui_kiosk_screen" name="ui_kiosk_screen" value="{{ screen.kiosk_screen }}" min="0" max="10">
-          <p class="field-default">0 = premier écran (le plus à gauche), 1 = deuxième, etc.</p>
-        </div>
-      </div>
+    <div class="admin-block-body">
+      {% include block.template %}
     </div>
-
-    <div class="text-section">
-      <h2>Déverrouillage plein écran (interface principale)</h2>
-      <div class="text-fields">
-        <div class="text-field">
-          <label class="field-label" for="kiosk_unlock_pin">Code PIN</label>
-          <input type="text" id="kiosk_unlock_pin" name="kiosk_unlock_pin"
-                 value="{{ kiosk_unlock.pin }}" inputmode="numeric" pattern="[0-9]*" maxlength="8">
-          <p class="field-default">Chiffres uniquement (2 à 8). Défaut : 1234. Saisi sur la borne via un clavier numérique tactile.</p>
-        </div>
-        <div class="text-field">
-          <label class="field-label" for="kiosk_unlock_taps">Appuis déclencheurs</label>
-          <input type="number" id="kiosk_unlock_taps" name="kiosk_unlock_taps"
-                 value="{{ kiosk_unlock.taps }}" min="2" max="15">
-          <p class="field-default">Nombre d'appuis rapides dans le coin haut-gauche pour ouvrir le clavier. Défaut : 5.</p>
-        </div>
-      </div>
-    </div>
-
-    <button type="submit" class="action-btn primary" style="margin-top:8px">Enregistrer</button>
-
-  </form>
+    <form method="post" action="{{ url_for('admin_move_block') }}" class="block-move-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="block_id" value="{{ block.id }}">
+      <label>Déplacer vers</label>
+      <select name="target_page">
+        {% for slug, label, _ep in admin_pages %}
+        <option value="{{ slug }}" {% if slug == current_page %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Déplacer</button>
+    </form>
+  </div>
+  {% endfor %}
 
 </div>
 </body>

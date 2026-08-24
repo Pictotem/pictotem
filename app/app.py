@@ -2685,71 +2685,100 @@ def admin_gallery():
                            alert_error=request.args.get('err'))
 
 
-@app.route('/admin/system', methods=['GET', 'POST'])
-@require_admin_auth
-@csrf_protect
-def admin_system():
-    if request.method == 'POST':
-        # Caméra — validation légère avant écriture, on ignore les champs
-        # vides ou invalides plutôt que d'écrire une valeur incohérente.
-        raw_device = (request.form.get('camera_device') or '').strip()
-        if raw_device.isdigit():
-            set_setting('camera.device', raw_device)
-
-        raw_width = (request.form.get('camera_width') or '').strip()
-        if raw_width.isdigit() and int(raw_width) > 0:
-            set_setting('camera.width', raw_width)
-
-        raw_height = (request.form.get('camera_height') or '').strip()
-        if raw_height.isdigit() and int(raw_height) > 0:
-            set_setting('camera.height', raw_height)
-
-        raw_rotation = (request.form.get('camera_rotation') or '0').strip()
-        if raw_rotation in ('0', '90', '180', '270'):
-            set_setting('camera.rotation', raw_rotation)
-
-        set_setting('camera.preview_mirror', '1' if request.form.get('camera_preview_mirror') else '0')
-
-        # Écran / kiosque — appliqué au prochain lancement de run.bat.
-        set_setting('ui.kiosk_mode', '1' if request.form.get('ui_kiosk_mode') else '0')
-        raw_screen = (request.form.get('ui_kiosk_screen') or '0').strip()
-        set_setting('ui.kiosk_screen', raw_screen if raw_screen.isdigit() else '0')
-
-        # Déverrouillage plein écran (interface principale) — champ vidé =
-        # retour à la valeur par défaut (voir _kiosk_unlock_settings()).
-        raw_pin = re.sub(r'\D', '', request.form.get('kiosk_unlock_pin') or '')[:8]
-        set_setting('kiosk.unlock_pin', raw_pin)
-        raw_taps = (request.form.get('kiosk_unlock_taps') or '').strip()
-        set_setting('kiosk.unlock_taps', raw_taps if raw_taps.isdigit() and 2 <= int(raw_taps) <= 15 else '')
-
-        reset_camera()
-        return redirect(url_for('admin_system', ok='Réglages enregistrés. Caméra relancée avec les nouvelles valeurs.'))
-
+def _admin_system_camera_values() -> dict:
     def _cfg_int(key, default):
         raw = get_setting(f'camera.{key}', '')
         return int(raw) if raw.isdigit() else int(CONFIG['camera'].get(key, default))
-
-    camera_values = {
+    return {
         'device':         _cfg_int('device', 0),
         'width':          _cfg_int('width', 1920),
         'height':         _cfg_int('height', 1080),
         'rotation':       _cfg_int('rotation', 0),
         'preview_mirror': (get_setting('camera.preview_mirror', '') or ('1' if CONFIG['camera'].get('preview_mirror', False) else '0')) == '1',
     }
+
+
+def _admin_system_screen_values() -> dict:
     ui_cfg = CONFIG.get('ui', {})
     _kiosk_mode_raw = get_setting('ui.kiosk_mode', '')
     _kiosk_screen_raw = get_setting('ui.kiosk_screen', '')
-    screen_values = {
+    return {
         'kiosk_mode':   (_kiosk_mode_raw == '1') if _kiosk_mode_raw in ('0', '1') else bool(ui_cfg.get('kiosk_mode', True)),
         'kiosk_screen': int(_kiosk_screen_raw) if _kiosk_screen_raw.isdigit() else int(ui_cfg.get('kiosk_screen', 0)),
     }
+
+
+@app.route('/admin/system')
+@require_admin_auth
+def admin_system():
+    """Tuile « Caméra & écran » du back office. Pas de POST ici : chaque
+    section (caméra, écran/kiosque, déverrouillage plein écran) poste vers
+    sa propre route dédiée ci-dessous — voir commentaire de admin_application
+    plus bas sur le système de blocs déplaçables."""
+    blocks, block_context = _admin_render_blocks('system')
     return render_template(
         'admin_system.html', config=CONFIG,
-        camera=camera_values, screen=screen_values,
-        kiosk_unlock=_kiosk_unlock_settings(),
+        blocks=blocks, current_page='system', admin_pages=_ADMIN_PAGES,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
+
+
+@app.route('/admin/system/camera', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_system_set_camera():
+    """Réglages caméra — validation légère avant écriture, on ignore les
+    champs vides ou invalides plutôt que d'écrire une valeur incohérente.
+    Appliqué à chaud (reset_camera()), contrairement à l'écran/kiosque
+    ci-dessous qui n'est pris en compte qu'au prochain lancement de
+    run.bat."""
+    raw_device = (request.form.get('camera_device') or '').strip()
+    if raw_device.isdigit():
+        set_setting('camera.device', raw_device)
+
+    raw_width = (request.form.get('camera_width') or '').strip()
+    if raw_width.isdigit() and int(raw_width) > 0:
+        set_setting('camera.width', raw_width)
+
+    raw_height = (request.form.get('camera_height') or '').strip()
+    if raw_height.isdigit() and int(raw_height) > 0:
+        set_setting('camera.height', raw_height)
+
+    raw_rotation = (request.form.get('camera_rotation') or '0').strip()
+    if raw_rotation in ('0', '90', '180', '270'):
+        set_setting('camera.rotation', raw_rotation)
+
+    set_setting('camera.preview_mirror', '1' if request.form.get('camera_preview_mirror') else '0')
+
+    reset_camera()
+    return _admin_block_redirect('system_camera', ok='Réglages caméra enregistrés. Caméra relancée avec les nouvelles valeurs.')
+
+
+@app.route('/admin/system/screen', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_system_set_screen():
+    """Écran / mode kiosque — appliqué au prochain lancement de run.bat
+    (pas d'effet immédiat, contrairement à la caméra ci-dessus)."""
+    set_setting('ui.kiosk_mode', '1' if request.form.get('ui_kiosk_mode') else '0')
+    raw_screen = (request.form.get('ui_kiosk_screen') or '0').strip()
+    set_setting('ui.kiosk_screen', raw_screen if raw_screen.isdigit() else '0')
+    return _admin_block_redirect('system_screen', ok='Réglages écran enregistrés (pris en compte au prochain lancement de run.bat).')
+
+
+@app.route('/admin/system/kiosk_unlock', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_system_set_kiosk_unlock():
+    """Déverrouillage plein écran (interface principale) — champ vidé =
+    retour à la valeur par défaut (voir _kiosk_unlock_settings())."""
+    raw_pin = re.sub(r'\D', '', request.form.get('kiosk_unlock_pin') or '')[:8]
+    set_setting('kiosk.unlock_pin', raw_pin)
+    raw_taps = (request.form.get('kiosk_unlock_taps') or '').strip()
+    set_setting('kiosk.unlock_taps', raw_taps if raw_taps.isdigit() and 2 <= int(raw_taps) <= 15 else '')
+    return _admin_block_redirect('system_kiosk_unlock', ok='Réglage de déverrouillage enregistré.')
 
 
 # ── Blocs admin repliables / réorganisables / déplaçables entre tuiles ───────
@@ -2783,6 +2812,9 @@ _ADMIN_BLOCKS = {
     'archive_export':      {'title': "Archiver un intervalle",                  'default_page': 'archive',     'template': 'blocks/archive_export.html',      'context_fn': None},
     'archive_cleanup':     {'title': "Nettoyer un intervalle",                  'default_page': 'archive',     'template': 'blocks/archive_cleanup.html',     'context_fn': None, 'variant': 'danger'},
     'texts_custom_fonts':  {'title': "Polices personnalisées",                  'default_page': 'texts',       'template': 'blocks/texts_custom_fonts.html',  'context_fn': '_block_ctx_texts_custom_fonts'},
+    'system_camera':       {'title': "Caméra",                                  'default_page': 'system',      'template': 'blocks/system_camera.html',       'context_fn': '_block_ctx_system_camera'},
+    'system_screen':       {'title': "Écran / mode kiosque",                    'default_page': 'system',      'template': 'blocks/system_screen.html',       'context_fn': '_block_ctx_system_screen'},
+    'system_kiosk_unlock': {'title': "Déverrouillage plein écran (interface principale)", 'default_page': 'system', 'template': 'blocks/system_kiosk_unlock.html', 'context_fn': '_block_ctx_system_kiosk_unlock'},
 }
 # (slug, libellé affiché dans le menu « Déplacer vers », endpoint Flask) —
 # seulement les tuiles qui exécutent déjà la boucle de rendu de blocs
@@ -2793,6 +2825,7 @@ _ADMIN_PAGES = [
     ('access',      'Admin',                'admin_access'),
     ('archive',     'Archive & nettoyage',  'admin_archive'),
     ('texts',       'Textes',               'admin_texts'),
+    ('system',      'Caméra & écran',       'admin_system'),
 ]
 _ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
 
@@ -2893,6 +2926,18 @@ def _block_ctx_access_password() -> dict:
 
 def _block_ctx_texts_custom_fonts() -> dict:
     return {'custom_fonts': list_custom_fonts()}
+
+
+def _block_ctx_system_camera() -> dict:
+    return {'camera': _admin_system_camera_values()}
+
+
+def _block_ctx_system_screen() -> dict:
+    return {'screen': _admin_system_screen_values()}
+
+
+def _block_ctx_system_kiosk_unlock() -> dict:
+    return {'kiosk_unlock': _kiosk_unlock_settings()}
 
 
 @app.route('/admin/ui/block_collapse', methods=['POST'])

@@ -1,0 +1,18 @@
+<form method="post" action="{{ url_for('admin_system_set_kiosk_unlock') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="text-fields">
+    <div class="text-field">
+      <label class="field-label" for="kiosk_unlock_pin">Code PIN</label>
+      <input type="text" id="kiosk_unlock_pin" name="kiosk_unlock_pin"
+             value="{{ kiosk_unlock.pin }}" inputmode="numeric" pattern="[0-9]*" maxlength="8">
+      <p class="field-default">Chiffres uniquement (2 à 8). Défaut : 1234. Saisi sur la borne via un clavier numérique tactile.</p>
+    </div>
+    <div class="text-field">
+      <label class="field-label" for="kiosk_unlock_taps">Appuis déclencheurs</label>
+      <input type="number" id="kiosk_unlock_taps" name="kiosk_unlock_taps"
+             value="{{ kiosk_unlock.taps }}" min="2" max="15">
+      <p class="field-default">Nombre d'appuis rapides dans le coin haut-gauche pour ouvrir le clavier. Défaut : 5.</p>
+    </div>
+  </div>
+  <button type="submit" class="action-btn primary" style="margin-top:14px">Enregistrer</button>
+</form>

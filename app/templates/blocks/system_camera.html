@@ -1,0 +1,36 @@
+<form method="post" action="{{ url_for('admin_system_set_camera') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="text-fields">
+    <div class="text-field">
+      <label class="field-label" for="camera_device">Caméra (index)</label>
+      <input type="number" id="camera_device" name="camera_device" value="{{ camera.device }}" min="0" max="10">
+      <p class="field-default">0 = première caméra détectée par Windows, 1 = deuxième, etc.</p>
+    </div>
+    <div class="text-field">
+      <label class="field-label" for="camera_rotation">Rotation</label>
+      <select id="camera_rotation" name="camera_rotation">
+        <option value="0"   {% if camera.rotation == 0   %}selected{% endif %}>0°</option>
+        <option value="90"  {% if camera.rotation == 90  %}selected{% endif %}>90°</option>
+        <option value="180" {% if camera.rotation == 180 %}selected{% endif %}>180°</option>
+        <option value="270" {% if camera.rotation == 270 %}selected{% endif %}>270°</option>
+      </select>
+    </div>
+    <div class="text-field">
+      <label class="field-label" for="camera_width">Largeur (px)</label>
+      <input type="number" id="camera_width" name="camera_width" value="{{ camera.width }}" min="1" step="1">
+    </div>
+    <div class="text-field">
+      <label class="field-label" for="camera_height">Hauteur (px)</label>
+      <input type="number" id="camera_height" name="camera_height" value="{{ camera.height }}" min="1" step="1">
+    </div>
+    <div class="text-field" style="grid-column:1/-1">
+      <label class="field-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+        <input type="checkbox" name="camera_preview_mirror" value="1"
+               {% if camera.preview_mirror %}checked{% endif %}
+               style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">
+        Effet miroir sur l'aperçu
+      </label>
+    </div>
+  </div>
+  <button type="submit" class="action-btn primary" style="margin-top:14px">Enregistrer</button>
+</form>

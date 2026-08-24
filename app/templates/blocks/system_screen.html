@@ -1,0 +1,23 @@
+<form method="post" action="{{ url_for('admin_system_set_screen') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="text-fields">
+    <div class="text-field" style="grid-column:1/-1">
+      <label class="field-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+        <input type="checkbox" name="ui_kiosk_mode" value="1"
+               {% if screen.kiosk_mode %}checked{% endif %}
+               style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">
+        Lancer le navigateur en plein écran (mode kiosque) au démarrage
+      </label>
+      <p class="field-default" style="margin-top:8px">
+        Décoché : ouverture dans une fenêtre de navigateur normale (pratique en développement).
+      </p>
+    </div>
+    <div class="text-field">
+      <label class="field-label" for="ui_kiosk_screen">Écran (index)</label>
+      <input type="number" id="ui_kiosk_screen" name="ui_kiosk_screen" value="{{ screen.kiosk_screen }}" min="0" max="10">
+      <p class="field-default">0 = premier écran (le plus à gauche), 1 = deuxième, etc.</p>
+    </div>
+  </div>
+  <p class="field-default" style="margin:14px 0 0">Pris en compte au prochain lancement de run.bat.</p>
+  <button type="submit" class="action-btn primary" style="margin-top:14px">Enregistrer</button>
+</form>
