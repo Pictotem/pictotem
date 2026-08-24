@@ -19,12 +19,15 @@ import socket
 import subprocess
 import threading
 import time
+import unicodedata
 import zipfile
 from contextlib import closing
 from datetime import datetime, timedelta
 
 import cv2
 import numpy as np
+import qrcode
+import qrcode.constants
 from flask import (Flask, Response, abort, jsonify, make_response, redirect,
                    render_template, request, send_file, send_from_directory,
                    session, url_for)
@@ -3288,6 +3291,339 @@ def _admin_guest_codes_redirect(success=None, error=None, sort='created_desc', q
     return redirect(url_for('admin_guest_codes', **params))
 
 
+# ── Génération de QR-codes imprimables (codes invités) ────────────────────────
+# Un média par ligne (bouton à côté de chaque code) ou une archive ZIP pour
+# toute la liste actuellement triée/filtrée — voir admin_guest_code_qr_file
+# et admin_guest_codes_qr_archive plus bas. Le QR-code ENCODE toujours
+# `row['code']` (jamais le texte associé) : c'est ce que /admin/guest_codes
+# résout ensuite en texte via get_guest_code_text (db.py). Le texte
+# optionnel n'est qu'une étiquette lisible imprimée à côté, pour l'humain.
+#
+# Réglages persistés (comme le reste de l'app) plutôt que ressaisis à
+# chaque génération — un seul jeu de réglages pour le bouton unitaire ET
+# l'archive complète, cohérent avec le principe déjà appliqué à l'export
+# CSV (mêmes tri/filtre pour les deux).
+
+_GUEST_CODES_QR_FORMATS = [
+    ('png', 'PNG (image, fond opaque)'),
+    ('jpg', 'JPG (image, fond opaque)'),
+    ('svg', 'SVG (vectoriel)'),
+]
+_GUEST_CODES_QR_TEXT_CONTENTS = [
+    ('texte', 'Le texte associé'),
+    ('code',  'Le code numérique'),
+    ('both',  'Les deux (texte — code)'),
+]
+# Sous-ensemble de _QR_LIVE_POSITIONS (sans 'center' : superposer du texte
+# lisible sur le QR-code lui-même le rendrait illisible par un scanner).
+_GUEST_CODES_QR_TEXT_POSITIONS = [
+    ('below', 'En dessous du QR-code'),
+    ('above', 'Au-dessus du QR-code'),
+    ('left',  'À gauche du QR-code'),
+    ('right', 'À droite du QR-code'),
+]
+_GUEST_CODES_QR_SIZE_UNITS = [('cm', 'cm'), ('mm', 'mm')]
+# Au-delà, le texte affiché à côté du QR est tronqué (avec « … ») — sans
+# cette borne, un texte du champ libre (jusqu'à 250 caractères) produirait
+# un média disproportionné (voir _guest_code_qr_text_content).
+_GUEST_CODES_QR_TEXT_MAX_CHARS = 60
+
+
+def _guest_codes_qr_export_settings() -> dict:
+    fmt = get_setting('guest_codes.qr_export.format', 'png')
+    if fmt not in dict(_GUEST_CODES_QR_FORMATS):
+        fmt = 'png'
+    unit = get_setting('guest_codes.qr_export.size_unit', 'cm')
+    if unit not in dict(_GUEST_CODES_QR_SIZE_UNITS):
+        unit = 'cm'
+    try:
+        size_value = max(0.5, min(30.0, float(get_setting('guest_codes.qr_export.size_value', '3') or '3')))
+    except (TypeError, ValueError):
+        size_value = 3.0
+    try:
+        dpi = max(72, min(1200, int(float(get_setting('guest_codes.qr_export.dpi', '300') or '300'))))
+    except (TypeError, ValueError):
+        dpi = 300
+    text_content = get_setting('guest_codes.qr_export.text_content', 'texte')
+    if text_content not in dict(_GUEST_CODES_QR_TEXT_CONTENTS):
+        text_content = 'texte'
+    text_position = get_setting('guest_codes.qr_export.text_position', 'below')
+    if text_position not in dict(_GUEST_CODES_QR_TEXT_POSITIONS):
+        text_position = 'below'
+    try:
+        text_size_mm = max(1.0, min(30.0, float(get_setting('guest_codes.qr_export.text_size_mm', '4') or '4')))
+    except (TypeError, ValueError):
+        text_size_mm = 4.0
+    try:
+        text_gap_mm = max(0.0, min(30.0, float(get_setting('guest_codes.qr_export.text_gap_mm', '2') or '2')))
+    except (TypeError, ValueError):
+        text_gap_mm = 2.0
+    return {
+        'format':        fmt,
+        'size_value':    size_value,
+        'size_unit':     unit,
+        'dpi':           dpi,
+        'bg_color':      get_setting('guest_codes.qr_export.bg_color', '') or '#ffffff',
+        'code_color':    get_setting('guest_codes.qr_export.code_color', '') or '#000000',
+        'text_enabled':  get_setting('guest_codes.qr_export.text_enabled', '0') == '1',
+        'text_content':  text_content,
+        'text_position': text_position,
+        'text_font':     get_setting('guest_codes.qr_export.text_font', '') or _PROMO_FONTS[0][0],
+        'text_size_mm':  text_size_mm,
+        'text_color':    get_setting('guest_codes.qr_export.text_color', '') or '#000000',
+        'text_gap_mm':   text_gap_mm,
+    }
+
+
+def _guest_codes_qr_mm(size_value: float, unit: str) -> float:
+    return size_value * 10.0 if unit == 'cm' else size_value
+
+
+def _px_to_mm(px: float, dpi: int) -> float:
+    return px / dpi * 25.4
+
+
+def _slugify_filename_part(text: str, max_len: int = 40) -> str:
+    text = unicodedata.normalize('NFKD', text or '').encode('ascii', 'ignore').decode('ascii')
+    text = re.sub(r'[^A-Za-z0-9]+', '-', text).strip('-').lower()
+    return text[:max_len] or 'code'
+
+
+def _guest_code_qr_text_content(row: dict, mode: str) -> str:
+    """Texte optionnel imprimé à côté du QR-code — tronqué au-delà de
+    _GUEST_CODES_QR_TEXT_MAX_CHARS car ce texte dimensionne directement le
+    média généré (voir _guest_code_qr_layout) : un texte trop long
+    produirait un fichier disproportionné plutôt qu'un badge imprimable.
+    Ne concerne jamais le contenu ENCODÉ dans le QR-code lui-même (toujours
+    row['code'], voir _guest_code_qr_matrix)."""
+    if mode == 'code':
+        text = row['code']
+    elif mode == 'both':
+        text = f"{row['texte']} — {row['code']}"
+    else:
+        text = row['texte']
+    text = (text or '').strip()
+    if len(text) > _GUEST_CODES_QR_TEXT_MAX_CHARS:
+        text = text[:_GUEST_CODES_QR_TEXT_MAX_CHARS].rstrip() + '…'
+    return text
+
+
+def _guest_code_qr_matrix(code: str):
+    """Matrice de modules (liste de listes de bool, marge de sécurité — le
+    « quiet zone » — incluse) du QR-code encodant `code`. Niveau de
+    correction M (15 %) : marge raisonnable pour un média imprimé/manipulé,
+    sans conséquence sur la taille vu le payload minuscule (2 à 10
+    chiffres, voir l'analyse faite pour la fonctionnalité codes invités)."""
+    qr = qrcode.QRCode(border=4, error_correction=qrcode.constants.ERROR_CORRECT_M)
+    qr.add_data(code)
+    qr.make(fit=True)
+    return qr.get_matrix()
+
+
+def _guest_code_qr_layout(code: str, texte: str, settings: dict) -> dict:
+    """Calcule, en pixels à la résolution settings['dpi'] (résolution de
+    travail interne — sert aussi de base géométrique pour le SVG, où elle
+    n'affecte pas la qualité puisque le rendu final est vectoriel), la
+    disposition complète du média à générer : taille du QR, position du
+    texte optionnel (mesurée via les vraies métriques de police, comme
+    _qr_live_burn_draw_one plus haut) et taille finale du canevas. Point de
+    calcul unique partagé par le rendu raster (PNG/JPG) et SVG, pour que
+    les deux formats produisent exactement la même disposition."""
+    dpi = settings['dpi']
+    qr_size_mm = _guest_codes_qr_mm(settings['size_value'], settings['size_unit'])
+    qr_size_px = max(10, round(qr_size_mm / 25.4 * dpi))
+    matrix = _guest_code_qr_matrix(code)
+    n = len(matrix)
+    module_px = qr_size_px / n
+
+    text = (_guest_code_qr_text_content({'code': code, 'texte': texte}, settings['text_content'])
+            if settings['text_enabled'] else '')
+
+    layout = {
+        'dpi': dpi, 'matrix': matrix, 'module_px': module_px, 'qr_size_px': qr_size_px,
+        'text': text, 'bg_color': settings['bg_color'], 'code_color': settings['code_color'],
+        'text_color': settings['text_color'],
+    }
+
+    if not text:
+        layout.update(canvas_w=qr_size_px, canvas_h=qr_size_px, qr_x=0, qr_y=0)
+        return layout
+
+    text_size_px = max(4, round(settings['text_size_mm'] / 25.4 * dpi))
+    gap_px = round(settings['text_gap_mm'] / 25.4 * dpi)
+    font = _qr_live_burn_font(settings['text_font'], text_size_px)
+    probe = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+    bbox = probe.textbbox((0, 0), text, font=font)
+    text_w = max(1, bbox[2] - bbox[0])
+    text_h = max(1, bbox[3] - bbox[1])
+
+    position = settings['text_position']
+    if position in ('above', 'below'):
+        canvas_w = max(qr_size_px, text_w)
+        canvas_h = qr_size_px + gap_px + text_h
+        qr_x = (canvas_w - qr_size_px) / 2
+        if position == 'above':
+            qr_y, text_top = text_h + gap_px, 0
+        else:
+            qr_y, text_top = 0, qr_size_px + gap_px
+        text_x = canvas_w / 2 - text_w / 2 - bbox[0]
+        text_y = text_top - bbox[1]
+    else:  # left / right
+        canvas_h = max(qr_size_px, text_h)
+        canvas_w = qr_size_px + gap_px + text_w
+        qr_y = (canvas_h - qr_size_px) / 2
+        if position == 'left':
+            text_left, qr_x = 0, text_w + gap_px
+        else:
+            text_left, qr_x = qr_size_px + gap_px, 0
+        text_x = text_left - bbox[0]
+        text_y = canvas_h / 2 - text_h / 2 - bbox[1]
+
+    layout.update(canvas_w=round(canvas_w), canvas_h=round(canvas_h),
+                   qr_x=round(qr_x), qr_y=round(qr_y), font=font,
+                   text_x=round(text_x), text_y=round(text_y),
+                   text_font_family=settings['text_font'], text_size_mm=settings['text_size_mm'])
+    return layout
+
+
+def _guest_code_qr_module_runs(matrix):
+    """Fusionne les modules sombres consécutifs de chaque ligne en
+    segments (row_index, col_start, col_end_exclusive) — moins de
+    rectangles à dessiner/écrire (PNG et SVG), et aucune ligne de jointure
+    visible entre deux modules adjacents de même couleur."""
+    for row_i, row in enumerate(matrix):
+        run_start = None
+        for col_i, dark in enumerate(row + [False]):  # sentinelle : force la clôture du dernier segment
+            if dark and run_start is None:
+                run_start = col_i
+            elif not dark and run_start is not None:
+                yield row_i, run_start, col_i
+                run_start = None
+
+
+def _render_guest_code_qr_raster(layout: dict):
+    canvas = Image.new('RGB', (layout['canvas_w'], layout['canvas_h']),
+                        _hex_to_rgb(layout['bg_color'], (255, 255, 255)))
+    draw = ImageDraw.Draw(canvas)
+    module_px = layout['module_px']
+    code_rgb = _hex_to_rgb(layout['code_color'], (0, 0, 0))
+    for row_i, col_start, col_end in _guest_code_qr_module_runs(layout['matrix']):
+        y0 = layout['qr_y'] + row_i * module_px
+        y1 = y0 + module_px
+        x0 = layout['qr_x'] + col_start * module_px
+        x1 = layout['qr_x'] + col_end * module_px
+        draw.rectangle([x0, y0, x1, y1], fill=code_rgb)
+    if layout['text']:
+        draw.text((layout['text_x'], layout['text_y']), layout['text'], font=layout['font'],
+                   fill=_hex_to_rgb(layout['text_color'], (0, 0, 0)))
+    return canvas
+
+
+def _render_guest_code_qr_svg(layout: dict) -> str:
+    """Même disposition que _render_guest_code_qr_raster (calculée une
+    seule fois par _guest_code_qr_layout), convertie en mm — un utilisateur
+    SVG (viewer, imprimante) affiche alors le média à sa taille physique
+    réelle. Limite connue : le texte est un élément <text> natif (modifiable
+    dans un éditeur vectoriel), rendu avec la police installée sur la
+    machine qui ouvre le fichier — pas nécessairement identique au rendu
+    PNG/JPG (polices Windows résolues côté serveur, voir _qr_live_burn_font)
+    si cette police n'est pas installée chez le lecteur du SVG."""
+    from xml.sax.saxutils import escape
+    dpi = layout['dpi']
+    canvas_w_mm = _px_to_mm(layout['canvas_w'], dpi)
+    canvas_h_mm = _px_to_mm(layout['canvas_h'], dpi)
+    module_mm = _px_to_mm(layout['module_px'], dpi)
+    qr_x_mm = _px_to_mm(layout['qr_x'], dpi)
+    qr_y_mm = _px_to_mm(layout['qr_y'], dpi)
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w_mm:.3f}mm" '
+        f'height="{canvas_h_mm:.3f}mm" viewBox="0 0 {canvas_w_mm:.3f} {canvas_h_mm:.3f}">',
+        f'<rect x="0" y="0" width="{canvas_w_mm:.3f}" height="{canvas_h_mm:.3f}" fill="{layout["bg_color"]}"/>',
+    ]
+    for row_i, col_start, col_end in _guest_code_qr_module_runs(layout['matrix']):
+        x = qr_x_mm + col_start * module_mm
+        y = qr_y_mm + row_i * module_mm
+        w = (col_end - col_start) * module_mm
+        parts.append(f'<rect x="{x:.3f}" y="{y:.3f}" width="{w:.3f}" height="{module_mm:.3f}" '
+                     f'fill="{layout["code_color"]}"/>')
+    if layout['text']:
+        text_x_mm = _px_to_mm(layout['text_x'], dpi)
+        text_y_mm = _px_to_mm(layout['text_y'], dpi)
+        # dominant-baseline="hanging" : ancre proche du haut du texte, même
+        # principe que l'ancrage top-left utilisé côté raster (PIL) — voir
+        # limite de correspondance exacte entre formats dans la docstring.
+        parts.append(
+            f"<text x=\"{text_x_mm:.3f}\" y=\"{text_y_mm:.3f}\" "
+            f"font-family='{layout['text_font_family']}' font-size=\"{layout['text_size_mm']:.3f}mm\" "
+            f"fill=\"{layout['text_color']}\" dominant-baseline=\"hanging\" text-anchor=\"start\">"
+            f"{escape(layout['text'])}</text>"
+        )
+    parts.append('</svg>')
+    return '\n'.join(parts)
+
+
+def _guest_code_qr_bytes(row: dict, settings: dict):
+    """Retourne (bytes, mimetype, extension) pour l'export imprimable d'un
+    code invité — utilisé par le téléchargement unitaire ET par l'archive
+    ZIP (mêmes réglages courants pour les deux, voir _guest_codes_qr_export_settings)."""
+    layout = _guest_code_qr_layout(row['code'], row['texte'], settings)
+    if settings['format'] == 'svg':
+        return _render_guest_code_qr_svg(layout).encode('utf-8'), 'image/svg+xml', 'svg'
+    canvas = _render_guest_code_qr_raster(layout)
+    buf = io.BytesIO()
+    if settings['format'] == 'jpg':
+        canvas.save(buf, format='JPEG', quality=92)
+        return buf.getvalue(), 'image/jpeg', 'jpg'
+    canvas.save(buf, format='PNG')
+    return buf.getvalue(), 'image/png', 'png'
+
+
+def _guest_code_qr_filename(row: dict, ext: str) -> str:
+    return f"{row['code']}_{_slugify_filename_part(row['texte'])}.{ext}"
+
+
+@app.route('/admin/guest_codes/<int:guest_code_id>/qr-file')
+@require_admin_auth
+def admin_guest_code_qr_file(guest_code_id):
+    row = get_guest_code_by_id(guest_code_id)
+    if not row:
+        abort(404)
+    data, mimetype, ext = _guest_code_qr_bytes(row, _guest_codes_qr_export_settings())
+    return Response(data, mimetype=mimetype, headers={
+        'Content-Disposition': f'attachment; filename="{_guest_code_qr_filename(row, ext)}"'
+    })
+
+
+@app.route('/admin/guest_codes/qr-archive.zip')
+@require_admin_auth
+def admin_guest_codes_qr_archive():
+    sort = request.args.get('sort', 'created_desc')
+    if sort not in dict(_GUEST_CODES_SORTS):
+        sort = 'created_desc'
+    q = request.args.get('q', '')
+    rows = list_guest_codes(sort=sort, q=q)
+    if not rows:
+        return _admin_guest_codes_redirect(error='Aucun code invité à exporter.', sort=sort, q=q)
+    settings = _guest_codes_qr_export_settings()
+    buf = io.BytesIO()
+    used_names = set()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for row in rows:
+            data, _mimetype, ext = _guest_code_qr_bytes(row, settings)
+            name = _guest_code_qr_filename(row, ext)
+            if name in used_names:  # collision improbable (code toujours unique) — filet de sécurité
+                name = f"{row['id']}_{name}"
+            used_names.add(name)
+            zf.writestr(name, data)
+    buf.seek(0)
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    logger.info('Codes invités : archive QR générée (%d fichier(s), format %s).', len(rows), settings['format'])
+    return Response(buf.getvalue(), mimetype='application/zip', headers={
+        'Content-Disposition': f'attachment; filename="codes-invites-qr-{stamp}.zip"'
+    })
+
+
 @app.route('/admin/guest_codes', methods=['GET', 'POST'])
 @require_admin_auth
 @csrf_protect
@@ -3420,6 +3756,55 @@ def admin_guest_codes():
             count = purge_guest_codes_first_n(int(raw_n), purge_sort)
             return _admin_guest_codes_redirect(success=f'{count} code(s) supprimé(s).', sort=sort, q=q)
 
+        if action == 'qr_export_settings':
+            fmt = request.form.get('format', 'png')
+            if fmt in dict(_GUEST_CODES_QR_FORMATS):
+                set_setting('guest_codes.qr_export.format', fmt)
+            unit = request.form.get('size_unit', 'cm')
+            if unit in dict(_GUEST_CODES_QR_SIZE_UNITS):
+                set_setting('guest_codes.qr_export.size_unit', unit)
+            raw_size = (request.form.get('size_value') or '').strip()
+            try:
+                if 0.5 <= float(raw_size) <= 30:
+                    set_setting('guest_codes.qr_export.size_value', raw_size)
+            except ValueError:
+                pass
+            raw_dpi = (request.form.get('dpi') or '').strip()
+            if raw_dpi.isdigit() and 72 <= int(raw_dpi) <= 1200:
+                set_setting('guest_codes.qr_export.dpi', raw_dpi)
+            bg_color = (request.form.get('bg_color') or '').strip()
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
+                set_setting('guest_codes.qr_export.bg_color', bg_color)
+            code_color = (request.form.get('code_color') or '').strip()
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', code_color):
+                set_setting('guest_codes.qr_export.code_color', code_color)
+            set_setting('guest_codes.qr_export.text_enabled', '1' if request.form.get('text_enabled') else '0')
+            text_content = request.form.get('text_content', 'texte')
+            if text_content in dict(_GUEST_CODES_QR_TEXT_CONTENTS):
+                set_setting('guest_codes.qr_export.text_content', text_content)
+            text_position = request.form.get('text_position', 'below')
+            if text_position in dict(_GUEST_CODES_QR_TEXT_POSITIONS):
+                set_setting('guest_codes.qr_export.text_position', text_position)
+            text_font = request.form.get('text_font', '')
+            if text_font in dict(_PROMO_FONTS):
+                set_setting('guest_codes.qr_export.text_font', text_font)
+            raw_text_size = (request.form.get('text_size_mm') or '').strip()
+            try:
+                if 1 <= float(raw_text_size) <= 30:
+                    set_setting('guest_codes.qr_export.text_size_mm', raw_text_size)
+            except ValueError:
+                pass
+            text_color = (request.form.get('text_color') or '').strip()
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', text_color):
+                set_setting('guest_codes.qr_export.text_color', text_color)
+            raw_gap = (request.form.get('text_gap_mm') or '').strip()
+            try:
+                if 0 <= float(raw_gap) <= 30:
+                    set_setting('guest_codes.qr_export.text_gap_mm', raw_gap)
+            except ValueError:
+                pass
+            return _admin_guest_codes_redirect(success='Réglages de génération QR mis à jour.', sort=sort, q=q)
+
         if action == 'qrcode_settings':
             set_setting('qrcode.enabled', '1' if request.form.get('enabled') else '0')
             set_setting('qrcode.live_overlay', '1' if request.form.get('live_overlay') else '0')
@@ -3538,6 +3923,11 @@ def admin_guest_codes():
         guest_codes=list_guest_codes(sort=list_sort, q=list_q),
         guest_codes_sorts=_GUEST_CODES_SORTS,
         guest_codes_bulk_max=_GUEST_CODES_BULK_MAX,
+        guest_codes_qr_export=_guest_codes_qr_export_settings(),
+        guest_codes_qr_formats=_GUEST_CODES_QR_FORMATS,
+        guest_codes_qr_text_contents=_GUEST_CODES_QR_TEXT_CONTENTS,
+        guest_codes_qr_text_positions=_GUEST_CODES_QR_TEXT_POSITIONS,
+        guest_codes_qr_size_units=_GUEST_CODES_QR_SIZE_UNITS,
         guest_codes_sort=list_sort,
         guest_codes_q=list_q,
         tags_fonts=_PROMO_FONTS,

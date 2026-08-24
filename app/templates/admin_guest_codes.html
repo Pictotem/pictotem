@@ -58,7 +58,8 @@
     .code-table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.05); vertical-align: middle; }
     .code-table .col-code { width: 110px; }
     .code-table .col-date { width: 150px; font-size: 12px; color: var(--muted); }
-    .code-table .col-act  { width: 190px; text-align: right; }
+    .code-table .col-act  { width: 260px; text-align: right; }
+    .code-table .col-act .btn-icon { text-decoration: none; display: inline-block; }
     .code-badge {
       font-family: monospace; font-weight: 700; font-size: 14px; letter-spacing: .04em;
       background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
@@ -187,6 +188,8 @@
       {% endif %}
       <a href="{{ url_for('admin_guest_codes_export_csv', sort=guest_codes_sort, q=guest_codes_q) }}"
          class="btn-icon" style="margin-left:auto" title="Exporter la vue actuelle en CSV">⬇ Export CSV</a>
+      <a href="{{ url_for('admin_guest_codes_qr_archive', sort=guest_codes_sort, q=guest_codes_q) }}"
+         class="btn-icon" title="Générer une archive ZIP avec un QR-code imprimable par ligne de la vue actuelle (réglages ci-dessous)">⬇ Archive QR (ZIP)</a>
     </form>
 
     {% if guest_codes %}
@@ -216,6 +219,8 @@
           <td><span class="code-badge">{{ gc.code }}</span></td>
           <td class="col-date">{{ gc.created_at | format_dt }}</td>
           <td class="col-act">
+            <a href="{{ url_for('admin_guest_code_qr_file', guest_code_id=gc.id) }}" class="btn-icon"
+               title="Télécharger le QR-code imprimable de cette ligne (réglages ci-dessous)">⬇ QR</a>
             <form method="post" style="display:inline">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="action" value="guest_code_regenerate">
@@ -269,6 +274,141 @@
       </div>
     </form>
   </div>
+
+  <!-- Génération de QR-codes imprimables : réglages communs au bouton
+       « ⬇ QR » de chaque ligne ci-dessus et à « ⬇ Archive QR (ZIP) » —
+       un seul jeu de réglages pour les deux, comme pour l'export CSV. -->
+  <form method="post" style="margin-top:24px">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="qr_export_settings">
+    <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+    <input type="hidden" name="q" value="{{ guest_codes_q }}">
+
+    <div class="form-card">
+      <p class="section-title">Génération de QR-codes imprimables</p>
+      <p class="section-hint">
+        Un média téléchargeable par code (bouton « ⬇ QR » sur chaque ligne ci-dessus) ou
+        l'archive complète de la vue actuelle (bouton « ⬇ Archive QR (ZIP) » ci-dessus, un
+        fichier par ligne). Le QR-code encode toujours le code numérique de la ligne — jamais le
+        texte associé — le texte optionnel ci-dessous n'est qu'une étiquette lisible imprimée à
+        côté.
+      </p>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Format de sortie</label>
+          <select name="format">
+            {% for value, label in guest_codes_qr_formats %}
+            <option value="{{ value }}" {% if guest_codes_qr_export.format == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Taille du QR-code</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="number" name="size_value" min="0.5" max="30" step="0.1"
+                   value="{{ guest_codes_qr_export.size_value }}" style="width:80px">
+            <select name="size_unit" style="width:70px">
+              {% for value, label in guest_codes_qr_size_units %}
+              <option value="{{ value }}" {% if guest_codes_qr_export.size_unit == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <p class="field-hint">Marge de sécurité (quiet zone) incluse — taille du carré complet du média.</p>
+        </div>
+        <div class="field">
+          <label>Résolution (DPI, PNG/JPG uniquement)</label>
+          <input type="number" name="dpi" min="72" max="1200" step="1" value="{{ guest_codes_qr_export.dpi }}">
+          <p class="field-hint">300 = qualité impression standard. Sans effet en SVG (vectoriel).</p>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Couleur de fond</label>
+          <div class="color-row">
+            <input type="color" id="cp_qrx_bg" value="{{ guest_codes_qr_export.bg_color }}"
+                   oninput="document.getElementById('qrx_bg_color').value=this.value">
+            <input type="text" id="qrx_bg_color" name="bg_color" class="color-hex"
+                   value="{{ guest_codes_qr_export.bg_color }}" maxlength="7"
+                   oninput="document.getElementById('cp_qrx_bg').value=this.value">
+          </div>
+        </div>
+        <div class="field">
+          <label>Couleur du code</label>
+          <div class="color-row">
+            <input type="color" id="cp_qrx_code" value="{{ guest_codes_qr_export.code_color }}"
+                   oninput="document.getElementById('qrx_code_color').value=this.value">
+            <input type="text" id="qrx_code_color" name="code_color" class="color-hex"
+                   value="{{ guest_codes_qr_export.code_color }}" maxlength="7"
+                   oninput="document.getElementById('cp_qrx_code').value=this.value">
+          </div>
+          <p class="field-hint">Un contraste insuffisant avec le fond rend le QR-code illisible par un scanner.</p>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="check-row">
+          <input type="checkbox" name="text_enabled" {% if guest_codes_qr_export.text_enabled %}checked{% endif %}>
+          <span>Ajouter un texte lisible à côté du QR-code</span>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Contenu du texte</label>
+          <select name="text_content">
+            {% for value, label in guest_codes_qr_text_contents %}
+            <option value="{{ value }}" {% if guest_codes_qr_export.text_content == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Position</label>
+          <select name="text_position">
+            {% for value, label in guest_codes_qr_text_positions %}
+            <option value="{{ value }}" {% if guest_codes_qr_export.text_position == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Police</label>
+          <select name="text_font">
+            {% for value, label in tags_fonts %}
+            <option value="{{ value }}" {% if guest_codes_qr_export.text_font == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Taille du texte (mm)</label>
+          <input type="number" name="text_size_mm" min="1" max="30" step="0.5" value="{{ guest_codes_qr_export.text_size_mm }}">
+        </div>
+        <div class="field">
+          <label>Espace entre le QR-code et le texte (mm)</label>
+          <input type="number" name="text_gap_mm" min="0" max="30" step="0.5" value="{{ guest_codes_qr_export.text_gap_mm }}">
+        </div>
+        <div class="field">
+          <label>Couleur du texte</label>
+          <div class="color-row">
+            <input type="color" id="cp_qrx_text" value="{{ guest_codes_qr_export.text_color }}"
+                   oninput="document.getElementById('qrx_text_color').value=this.value">
+            <input type="text" id="qrx_text_color" name="text_color" class="color-hex"
+                   value="{{ guest_codes_qr_export.text_color }}" maxlength="7"
+                   oninput="document.getElementById('cp_qrx_text').value=this.value">
+          </div>
+        </div>
+      </div>
+      <p class="field-hint">
+        Le texte « associé » ou « les deux » est tronqué au-delà de 60 caractères (avec « … ») —
+        au-delà, un média imprimable deviendrait disproportionné.
+      </p>
+    </div>
+
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
 
   <!-- Purge filtrée -->
   <div class="form-card" style="margin-top:24px">
