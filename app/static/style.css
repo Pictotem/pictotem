@@ -753,7 +753,18 @@ button, input, a { font: inherit; }
 }
 .qr-live-label {
   position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   max-width: min(70vw, 420px);
+  /* Largeur/hauteur fixes réglables depuis /admin/tags (bg_width_px/
+     bg_height_px) — 'auto' par défaut, comportement d'origine inchangé
+     (la forme s'ajuste au padding/texte). En mode « proportionnel au
+     QR-code détecté », ces variables sont écrasées en ligne par
+     renderQrLiveBoxes() (app.js) à chaque frame. */
+  width: var(--qr-live-width, auto);
+  height: var(--qr-live-height, auto);
   padding: var(--qr-live-padding, 7px 14px);
   border-radius: var(--qr-live-radius, 999px);
   clip-path: var(--qr-live-clip-path, none);

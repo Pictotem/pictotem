@@ -32,6 +32,11 @@
     .check-row  { display: flex; align-items: center; gap: 10px; }
     .check-row input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent); }
     .check-row span { font-size: 14px; }
+    /* Champs de taille manuelle (Taille %/Largeur/Hauteur) désactivés en
+       mode « proportionnel au QR-code détecté » — grisés mais toujours
+       soumis avec le formulaire (conservés comme valeurs de repli). */
+    .field-inactive { opacity: .45; }
+    .field-inactive input { cursor: not-allowed; }
     .btn-primary { background: var(--accent); color: #000; font-weight: 700; border: none;
                    border-radius: 10px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
     .btn-primary:hover { opacity: .85; }
@@ -287,6 +292,18 @@
             <p class="field-hint">Défaut : 100 %. Agrandit ou réduit la forme sans changer la taille du texte.</p>
           </div>
           <div class="field">
+            <label>Largeur de la forme (px)</label>
+            <input type="number" name="bg_width_px" id="qr_live_bg_width_px" min="20" max="800" step="5"
+                   placeholder="Auto" value="{{ qrcode_live_style.bg_width_px or '' }}" oninput="updateQrLivePreview()">
+            <p class="field-hint">Vide = automatique (la forme s'ajuste au texte).</p>
+          </div>
+          <div class="field">
+            <label>Hauteur de la forme (px)</label>
+            <input type="number" name="bg_height_px" id="qr_live_bg_height_px" min="20" max="800" step="5"
+                   placeholder="Auto" value="{{ qrcode_live_style.bg_height_px or '' }}" oninput="updateQrLivePreview()">
+            <p class="field-hint">Vide = automatique (la forme s'ajuste au texte).</p>
+          </div>
+          <div class="field">
             <label>Couleur de fond</label>
             <div class="color-row">
               <input type="color" id="cp_qr_bg" value="{{ qrcode_live_style.bg_color }}"
@@ -297,6 +314,18 @@
             </div>
           </div>
         </div>
+
+        <div class="check-row" style="margin-top:-6px;margin-bottom:10px">
+          <input type="checkbox" id="qr_live_bg_proportional" name="bg_proportional"
+                 {% if qrcode_live_style.bg_proportional %}checked{% endif %}
+                 onchange="updateQrLiveProportionalUi()">
+          <span>Proportionnel à la taille du QR-code détecté</span>
+        </div>
+        <p class="field-hint" style="margin-top:-6px;margin-bottom:14px">
+          Activé : la taille de la forme et celle du texte s'adaptent automatiquement, en direct,
+          à la taille du QR-code repéré devant l'objectif (pour le recouvrir sans le dépasser) —
+          les valeurs « Taille (%) », « Largeur » et « Hauteur » ci-dessus sont alors ignorées.
+        </p>
         <p class="field-hint" style="margin-top:-6px;margin-bottom:14px">
           La forme s'applique aussi en mode « Image de fond » ci-dessous (découpe l'image
           selon le contour choisi). Cercle, ovale et étoile conviennent mieux à un texte
@@ -584,14 +613,32 @@
     const textColor = document.getElementById('qr_live_text_color')?.value || '#ffffff';
     const bgMode = document.querySelector('input[name="bg_mode"]:checked')?.value || 'shape';
     const shape = document.getElementById('qr_live_bg_shape')?.value || 'pill';
+    const proportional = document.getElementById('qr_live_bg_proportional')?.checked || false;
     const sizePct = Number(document.getElementById('qr_live_bg_size_pct')?.value || 100) || 100;
+    const widthPx = Number(document.getElementById('qr_live_bg_width_px')?.value || 0) || 0;
+    const heightPx = Number(document.getElementById('qr_live_bg_height_px')?.value || 0) || 0;
     const shapeCss = QR_LIVE_SHAPE_CSS[shape] || QR_LIVE_SHAPE_CSS.pill;
+    chip.style.display = 'inline-flex';
+    chip.style.alignItems = 'center';
+    chip.style.justifyContent = 'center';
+    chip.style.boxSizing = 'border-box';
     chip.style.fontFamily = font;
     chip.style.fontSize = size + 'px';
     chip.style.color = textColor;
     chip.style.borderRadius = shapeCss.radius;
     chip.style.clipPath = shapeCss.clip;
-    chip.style.padding = scaleQrLivePadding(shapeCss.padding, sizePct / 100);
+    if (proportional) {
+      // Calculée en direct à partir du QR-code réellement détecté (voir
+      // renderQrLiveBoxes dans app.js) — pas de taille fixe à prévisualiser
+      // ici, on retombe sur l'ajustement automatique au texte.
+      chip.style.width = 'auto';
+      chip.style.height = 'auto';
+      chip.style.padding = scaleQrLivePadding(shapeCss.padding, 1);
+    } else {
+      chip.style.width = widthPx ? widthPx + 'px' : 'auto';
+      chip.style.height = heightPx ? heightPx + 'px' : 'auto';
+      chip.style.padding = scaleQrLivePadding(shapeCss.padding, sizePct / 100);
+    }
     if (bgMode === 'image' && QR_LIVE_EXISTING_BG_IMAGE_URL) {
       chip.style.backgroundImage = `url('${QR_LIVE_EXISTING_BG_IMAGE_URL}')`;
       chip.style.backgroundSize = '100% 100%';
@@ -612,10 +659,29 @@
     updateQrLivePreview();
   }
 
+  // Mode « proportionnel au QR-code détecté » : les champs Taille (%),
+  // Largeur et Hauteur n'ont alors plus d'effet (recalculés en direct côté
+  // client, voir renderQrLiveBoxes dans app.js) — on les grise pour éviter
+  // de laisser croire qu'ils s'appliquent encore.
+  function updateQrLiveProportionalUi() {
+    const proportional = document.getElementById('qr_live_bg_proportional')?.checked || false;
+    // On grise ces champs (readOnly, pas disabled) plutôt que de les
+    // désactiver : leur valeur reste ainsi soumise et enregistrée comme
+    // repli si l'option est décochée plus tard, au lieu d'être perdue.
+    ['qr_live_bg_size_pct', 'qr_live_bg_width_px', 'qr_live_bg_height_px'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.readOnly = proportional;
+      el.closest('.field')?.classList.toggle('field-inactive', proportional);
+    });
+    updateQrLivePreview();
+  }
+
   document.getElementById('qr_live_font')?.addEventListener('change', updateQrLivePreview);
   document.getElementById('qr_live_font_size')?.addEventListener('input', updateQrLivePreview);
   document.getElementById('qr_live_position')?.addEventListener('change', updateQrLivePreview);
   updateQrLiveBgModeUi();
+  updateQrLiveProportionalUi();
 </script>
 </body>
 </html>

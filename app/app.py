@@ -11,6 +11,7 @@ import csv
 import io
 import json
 import logging
+import os
 import re
 import secrets
 import shutil
@@ -722,6 +723,19 @@ def _scale_padding_css(padding_css: str, scale: float) -> str:
     return ' '.join(parts) if parts else padding_css
 
 
+def _qr_live_bg_dim_px(raw: str) -> int:
+    """Parse une dimension (largeur/hauteur) de la forme d'arrière-plan en
+    px. Chaîne vide/invalide → 0, ce qui signifie « auto » (comportement
+    d'origine : la forme s'ajuste au texte via bg_size_pct/padding)."""
+    raw = (raw or '').strip()
+    if not raw:
+        return 0
+    try:
+        return max(0, min(800, int(raw)))
+    except ValueError:
+        return 0
+
+
 def _qr_live_style_settings() -> dict:
     bg_mode = get_setting('qrcode.live_style.bg_mode', '') or 'shape'
     if bg_mode not in ('shape', 'image'):
@@ -735,6 +749,16 @@ def _qr_live_style_settings() -> dict:
         bg_size_pct = max(50, min(300, int(raw_size_pct)))
     except ValueError:
         bg_size_pct = 100
+    # Largeur/hauteur fixes (px) de la forme, en plus de la mise à l'échelle
+    # par pourcentage ci-dessus. 0 = auto (la forme s'ajuste au texte).
+    bg_width_px = _qr_live_bg_dim_px(get_setting('qrcode.live_style.bg_width_px', ''))
+    bg_height_px = _qr_live_bg_dim_px(get_setting('qrcode.live_style.bg_height_px', ''))
+    # Proportionnalité à la taille du QR-code détecté : quand actif, la
+    # taille de la forme ET du texte sont recalculées en direct côté client
+    # (voir renderQrLiveBoxes dans app.js) à partir de la boîte détectée —
+    # ceci remplace bg_size_pct/bg_width_px/bg_height_px/font_size ci-dessus,
+    # qui restent néanmoins enregistrés comme valeurs de repli.
+    bg_proportional = get_setting('qrcode.live_style.bg_proportional', '0') == '1'
     position = get_setting('qrcode.live_style.position', '') or 'above'
     if position not in dict(_QR_LIVE_POSITIONS):
         position = 'above'
@@ -743,6 +767,11 @@ def _qr_live_style_settings() -> dict:
         'bg_mode': bg_mode,
         'bg_shape': bg_shape,
         'bg_size_pct': bg_size_pct,
+        'bg_width_px': bg_width_px,
+        'bg_height_px': bg_height_px,
+        'bg_width_css': f'{bg_width_px}px' if bg_width_px else 'auto',
+        'bg_height_css': f'{bg_height_px}px' if bg_height_px else 'auto',
+        'bg_proportional': bg_proportional,
         'bg_radius_css': shape_css['radius'],
         'bg_clip_css': shape_css['clip'],
         'bg_padding_css': _scale_padding_css(shape_css['padding'], bg_size_pct / 100),
@@ -1936,6 +1965,26 @@ def admin_toggle_fullscreen():
     return redirect(url_for('admin_system', err=result.get('error', 'Bascule impossible.')))
 
 
+@app.route('/admin/system/restart', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_restart_app():
+    """Redémarre le processus de l'application depuis le back office —
+    contrairement au réglage caméra ci-dessus (rechargé à chaud via
+    reset_camera()), certains changements ne sont pris en compte qu'au
+    démarrage : fichiers Python, gabarits Jinja (mis en cache tant que le
+    processus tourne), fichier config.toml modifié à la main, etc.
+    Le redémarrage effectif (voir _do_restart_app) est différé de
+    quelques centaines de ms pour laisser cette réponse atteindre le
+    navigateur avant que le processus ne se remplace lui-même."""
+    logger.info('Redémarrage programmé depuis /admin/system (back office).')
+    threading.Timer(0.8, _do_restart_app).start()
+    return redirect(url_for(
+        'admin_system',
+        ok="Redémarrage en cours... la borne va être indisponible quelques secondes.",
+    ))
+
+
 @app.route('/admin/frames')
 @require_admin_auth
 def admin_frames():
@@ -2269,6 +2318,14 @@ def admin_tags():
             raw_bg_size = (request.form.get('bg_size_pct') or '100').strip()
             set_setting('qrcode.live_style.bg_size_pct',
                         str(max(50, min(300, int(raw_bg_size)))) if raw_bg_size.isdigit() else '100')
+            raw_bg_width = (request.form.get('bg_width_px') or '').strip()
+            set_setting('qrcode.live_style.bg_width_px',
+                        str(max(20, min(800, int(raw_bg_width)))) if raw_bg_width.isdigit() else '')
+            raw_bg_height = (request.form.get('bg_height_px') or '').strip()
+            set_setting('qrcode.live_style.bg_height_px',
+                        str(max(20, min(800, int(raw_bg_height)))) if raw_bg_height.isdigit() else '')
+            set_setting('qrcode.live_style.bg_proportional',
+                        '1' if request.form.get('bg_proportional') else '0')
             bg_color = (request.form.get('bg_color') or '').strip()
             if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
                 set_setting('qrcode.live_style.bg_color', bg_color)
@@ -3287,6 +3344,51 @@ class _KioskAPI:
 # fenêtre réelle) et la route admin /admin/system/fullscreen (qui déclenche
 # la bascule depuis le back office, sans passer par le pont JS).
 _kiosk_api = _KioskAPI()
+
+
+def _do_restart_app():
+    """Relance l'application — appelée en différé, depuis un thread à part
+    (voir threading.Timer dans /admin/system/restart), jamais directement
+    dans le thread d'une requête Flask.
+
+    Lance d'abord une INSTANCE NEUVE, indépendante, du même interpréteur
+    avec les mêmes arguments (subprocess.Popen détaché — n'hérite pas du
+    cycle de vie du processus courant), puis termine immédiatement et sans
+    condition le processus actuel via os._exit() (libère aussitôt le port
+    et la caméra pour la nouvelle instance).
+
+    Volontairement PAS de os.execv() ici (remplacement « en place » du
+    processus courant) : sous Windows, os.execv est émulé par la libc
+    (spawn + attente + sortie avec le code de sortie de l'enfant) et son
+    comportement s'est avéré, dans les faits, pas fiable à 100 % selon les
+    versions de Python/plateformes (le processus d'origine peut ne pas
+    attendre correctement, laissant l'appli fermée sans relance — voir
+    bpo-19124). Un Popen détaché suivi d'un os._exit() sépare clairement
+    les deux étapes (démarrage du nouveau, arrêt de l'ancien) sans dépendre
+    de cette émulation.
+
+    Volontairement PAS de _kiosk_api._window.destroy() avant l'arrêt non
+    plus : fermer la fenêtre ferait sortir webview.start() (thread
+    principal), qui atteindrait alors la fin du bloc
+    `if __name__ == '__main__'` et laisserait l'interpréteur se terminer
+    de lui-même — une sortie concurrente à celle provoquée ici, sans
+    bénéfice réel puisque os._exit() ci-dessous termine de toute façon tout
+    le processus (fenêtre comprise) en un seul appel, immédiat et garanti."""
+    logger.info("Redémarrage de l'application : lancement d'une nouvelle instance...")
+    try:
+        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(
+            [sys.executable] + sys.argv,
+            cwd=str(BASE_DIR),
+            creationflags=creationflags,
+            close_fds=True,
+        )
+    except Exception:
+        logger.exception("Échec du lancement de la nouvelle instance — redémarrage annulé, l'application actuelle continue de tourner.")
+        return
+    logger.info("Nouvelle instance lancée, arrêt de l'instance actuelle.")
+    time.sleep(0.2)  # laisse le message de log ci-dessus s'écrire sur disque
+    os._exit(0)
 
 
 def _run_native_window(port: int):

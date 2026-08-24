@@ -176,6 +176,12 @@ function renderQrLiveBoxes(boxes, frameW, frameH) {
   const offsetY = (containerH - frameH * scale) / 2;
   const position = cfg.qrLivePosition || 'above';
   const useBgImage = cfg.qrLiveBgMode === 'image' && !!cfg.qrLiveBgImageUrl;
+  // Proportionnalité à la taille du QR-code détecté (réglable depuis
+  // /admin/tags) : quand actif, on ignore la largeur/hauteur/taille de
+  // police configurées côté serveur et on recalcule ces trois valeurs à
+  // chaque frame à partir de la boîte réellement détectée, pour que la
+  // forme d'arrière-plan recouvre le QR-code repéré sans le dépasser.
+  const proportional = !!cfg.qrLiveBgProportional;
   boxes.forEach((b) => {
     // b.text = null + b.too_small = true : marqueurs du QR-code repérés
     // (détecteur ArUco, plus sensible) mais code trop petit dans l'image
@@ -197,6 +203,19 @@ function renderQrLiveBoxes(boxes, frameW, frameH) {
     el.textContent = label;
     el.style.left = `${anchor.x}px`;
     el.style.top = `${anchor.y}px`;
+    // Le message « trop petit » garde la taille configurée (auto/fixe) —
+    // la boîte détectée y est par définition trop petite pour y caler
+    // une étiquette lisible.
+    if (proportional && !b.too_small) {
+      const qrW = Math.max(0, screenX1 - screenX0);
+      const qrH = Math.max(0, screenY1 - screenY0);
+      if (qrW > 0 && qrH > 0) {
+        el.style.width = `${qrW}px`;
+        el.style.height = `${qrH}px`;
+        el.style.padding = '0';
+        el.style.fontSize = `${Math.max(8, Math.min(qrH * 0.32, qrW * 0.16))}px`;
+      }
+    }
     qrLiveOverlayLayer.appendChild(el);
   });
 }

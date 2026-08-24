@@ -151,6 +151,26 @@
   </div>
 
   <div class="text-section" style="margin-top:8px">
+    <h2>Redémarrage de l'application</h2>
+    <div class="text-fields">
+      <div class="text-field" style="grid-column:1/-1">
+        <p class="field-default" style="margin:0 0 12px">
+          Relance immédiatement l'application (même processus, sans repasser par
+          <code>run.bat</code>) : nécessaire pour appliquer certains changements qui ne sont
+          pris en compte qu'au démarrage — modification du code, des gabarits d'écran ou du
+          fichier <code>config.toml</code> fait en dehors de ce back office. L'écran de la borne
+          se ferme puis se rouvre automatiquement, quelques secondes.
+        </p>
+        <form method="post" action="{{ url_for('admin_restart_app') }}"
+              onsubmit="return confirm('Redémarrer l\'application maintenant ? La borne sera brièvement indisponible.')">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="action-btn">Redémarrer l'application maintenant</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="text-section" style="margin-top:8px">
     <h2>Démarrage automatique Windows</h2>
     <div class="text-fields">
       <div class="text-field" style="grid-column:1/-1">

@@ -67,6 +67,8 @@
       --qr-live-radius: {{ qrcode_live_style.bg_radius_css }};
       --qr-live-clip-path: {{ qrcode_live_style.bg_clip_css }};
       --qr-live-padding: {{ qrcode_live_style.bg_padding_css }};
+      --qr-live-width: {{ qrcode_live_style.bg_width_css }};
+      --qr-live-height: {{ qrcode_live_style.bg_height_css }};
       {% if qrcode_live_style.bg_mode == 'image' and qrcode_live_style.bg_image_url %}--qr-live-bg-image: url('{{ qrcode_live_style.bg_image_url }}');{% endif %}
     }
 
@@ -497,6 +499,8 @@
       qrLiveBgMode:              {{ qrcode_live_style.bg_mode | tojson }},
       qrLiveBgImageUrl:          {{ qrcode_live_style.bg_image_url | tojson }},
       qrLivePosition:            {{ qrcode_live_style.position | tojson }},
+      qrLiveBgProportional:      {{ 'true' if qrcode_live_style.bg_proportional else 'false' }},
+      qrLiveFontSize:            {{ qrcode_live_style.font_size }},
     };
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
