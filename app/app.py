@@ -1928,6 +1928,22 @@ def admin_system():
         'admin_system.html', config=CONFIG,
         camera=camera_values, screen=screen_values,
         kiosk_unlock=_kiosk_unlock_settings(),
+        alert_success=request.args.get('ok'),
+        alert_error=request.args.get('err'),
+    )
+
+
+@app.route('/admin/application')
+@require_admin_auth
+def admin_application():
+    """Tuile « Application » du back office — actions liées au processus de
+    l'application lui-même (plein écran, redémarrage, démarrage automatique
+    Windows), séparées des réglages caméra/écran de /admin/system. Pas de
+    POST ici : chaque action poste vers sa propre route dédiée ci-dessous,
+    déjà existante avant cette page (admin_toggle_fullscreen,
+    admin_restart_app, admin_toggle_autostart)."""
+    return render_template(
+        'admin_application.html', config=CONFIG,
         autostart_enabled=is_autostart_enabled(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
@@ -1946,8 +1962,8 @@ def admin_toggle_autostart():
     else:
         ok, msg = enable_autostart(BASE_DIR / 'run.bat')
     if ok:
-        return redirect(url_for('admin_system', ok=msg))
-    return redirect(url_for('admin_system', err=msg))
+        return redirect(url_for('admin_application', ok=msg))
+    return redirect(url_for('admin_application', err=msg))
 
 
 @app.route('/admin/system/fullscreen', methods=['POST'])
@@ -1955,14 +1971,14 @@ def admin_toggle_autostart():
 @csrf_protect
 def admin_toggle_fullscreen():
     """Bascule immédiate du plein écran de la fenêtre native déjà lancée
-    (distinct de ui_kiosk_mode ci-dessus, qui ne s'applique qu'au prochain
-    lancement de run.bat). Déjà protégé par l'authentification admin, donc
-    pas de mot de passe supplémentaire ici (contrairement à l'appel JS
-    équivalent déclenché depuis l'interface principale)."""
+    (distinct de ui_kiosk_mode dans /admin/system, qui ne s'applique qu'au
+    prochain lancement de run.bat). Déjà protégé par l'authentification
+    admin, donc pas de mot de passe supplémentaire ici (contrairement à
+    l'appel JS équivalent déclenché depuis l'interface principale)."""
     result = _kiosk_api._do_toggle('back office')
     if result.get('ok'):
-        return redirect(url_for('admin_system', ok='Plein écran basculé.'))
-    return redirect(url_for('admin_system', err=result.get('error', 'Bascule impossible.')))
+        return redirect(url_for('admin_application', ok='Plein écran basculé.'))
+    return redirect(url_for('admin_application', err=result.get('error', 'Bascule impossible.')))
 
 
 @app.route('/admin/system/restart', methods=['POST'])
@@ -1970,17 +1986,17 @@ def admin_toggle_fullscreen():
 @csrf_protect
 def admin_restart_app():
     """Redémarre le processus de l'application depuis le back office —
-    contrairement au réglage caméra ci-dessus (rechargé à chaud via
-    reset_camera()), certains changements ne sont pris en compte qu'au
+    contrairement au réglage caméra dans /admin/system (rechargé à chaud
+    via reset_camera()), certains changements ne sont pris en compte qu'au
     démarrage : fichiers Python, gabarits Jinja (mis en cache tant que le
     processus tourne), fichier config.toml modifié à la main, etc.
     Le redémarrage effectif (voir _do_restart_app) est différé de
     quelques centaines de ms pour laisser cette réponse atteindre le
     navigateur avant que le processus ne se remplace lui-même."""
-    logger.info('Redémarrage programmé depuis /admin/system (back office).')
+    logger.info('Redémarrage programmé depuis /admin/application (back office).')
     threading.Timer(0.8, _do_restart_app).start()
     return redirect(url_for(
-        'admin_system',
+        'admin_application',
         ok="Redémarrage en cours... la borne va être indisponible quelques secondes.",
     ))
 
