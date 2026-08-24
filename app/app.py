@@ -28,7 +28,7 @@ import numpy as np
 from flask import (Flask, Response, abort, jsonify, make_response, redirect,
                    render_template, request, send_file, send_from_directory,
                    session, url_for)
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from auth import (admin_password_status, auth_enabled, build_secret_key,
                   check_admin_password, check_gallery_password,
@@ -449,16 +449,43 @@ def capture_photo():
         if overlay is not None:
             display_frame = composite_frame_overlay(raw_frame, overlay)
 
+    detections = _qr_detect_for_capture(display_frame, 'la photo')
+    if detections and _qr_burn_settings()['photo']:
+        burn_layer = _render_qr_burn_layer(display_frame, detections)
+        if burn_layer is not None:
+            display_frame = _apply_qr_burn_layer_bgr(display_frame, burn_layer)
+
     filepath = PHOTO_DIR / filename
     filepath.write_bytes(encode_jpeg(display_frame))
     thumb_name = f'thumb-{stamp}.jpg'
     make_thumb(filepath, THUMBS_DIR / thumb_name)
     capture_id, media_uid = record_capture('photo', filename, thumb_name)
     logger.info('Photo capturée %s (cadre=%s)', filename, frame_id)
-    qr_tags = _scan_and_tag_qr_codes(capture_id, display_frame)
+    qr_tags = _qr_tag_detections(capture_id, detections)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
                     'filename': filename, 'qr_tags': qr_tags,
                     'url': f'/media/photo/{filename}', 'message': message_text()})
+
+
+def _ffmpeg_overlay_pass(input_path: Path, overlay_png_path: Path, output_path: Path, w: int, h: int):
+    """Une passe ffmpeg 'overlay' (image statique composée sur toutes les
+    frames d'une vidéo) — factorise le motif déjà utilisé pour le cadre
+    décoratif dans capture_video, réutilisé tel quel pour l'incrustation
+    QR-code (voir _qr_burn_settings). Retourne (ok: bool, message_erreur)."""
+    try:
+        proc = subprocess.run([
+            FFMPEG_EXE, '-y', '-i', str(input_path), '-i', str(overlay_png_path),
+            '-filter_complex', f'[1:v]scale={w}:{h}[ov];[0:v][ov]overlay=0:0',
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart', str(output_path),
+        ], capture_output=True, text=True)
+    except FileNotFoundError:
+        logger.error('ffmpeg introuvable (%s) — voir logs\\launcher.log (setup_ffmpeg.ps1).', FFMPEG_EXE)
+        return False, "ffmpeg introuvable sur cette machine (nécessaire pour les vidéos)."
+    if proc.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+        logger.error('ffmpeg overlay échoué : %s', proc.stderr)
+        return False, 'Application du cadre vidéo échouée'
+    return True, ''
 
 
 @app.route('/api/capture/video', methods=['POST'])
@@ -493,6 +520,20 @@ def capture_video():
         ov = get_overlay_bgra(overlay_path, w, h)
         if ov is not None:
             thumb_frame = composite_frame_overlay(first, ov)
+
+    # Incrustation QR-code sur la vidéo : détection sur la seule 1ère frame
+    # (le visiteur tient généralement le QR-code immobile devant l'objectif
+    # le temps de l'enregistrement) — le calque forme+texte qui en résulte
+    # est ensuite gravé sur TOUTES les frames via ffmpeg (même principe que
+    # le cadre décoratif ci-dessus, lui aussi statique sur toute la durée).
+    qr_burn_png_path = None
+    if _qr_burn_settings()['video']:
+        qr_detections = _qr_detect_for_capture(thumb_frame, 'la vidéo')
+        qr_burn_layer = _render_qr_burn_layer(thumb_frame, qr_detections)
+        if qr_burn_layer is not None:
+            thumb_frame = _apply_qr_burn_layer_bgr(thumb_frame, qr_burn_layer)
+            qr_burn_png_path = VIDEO_DIR / f'video-{stamp}-qrburn.png'
+            qr_burn_layer.save(qr_burn_png_path)
     cv2.imwrite(str(thumb_path), thumb_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
 
     writer = cv2.VideoWriter(str(avi_path), cv2.VideoWriter_fourcc(*'MJPG'), configured_fps, (w, h))
@@ -556,29 +597,39 @@ def capture_video():
         logger.error('ffmpeg transcode échoué : %s', proc.stderr)
         return jsonify({'ok': False, 'error': 'Transcodage vidéo échoué'}), 500
 
-    if has_overlay and CONFIG['capture']['video'].get('save_raw', False):
+    if (has_overlay or qr_burn_png_path is not None) and CONFIG['capture']['video'].get('save_raw', False):
         RAW_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(raw_mp4_path), str(RAW_VIDEO_DIR / final_filename))
         logger.info('Vidéo brute sauvegardée : %s', final_filename)
 
+    # Chaîne 0, 1 ou 2 passes ffmpeg 'overlay' selon ce qui est actif : cadre
+    # décoratif (has_overlay) puis/ou incrustation QR-code (qr_burn_png_path,
+    # calculée plus haut sur la 1ère frame). La sortie de chaque passe sert
+    # d'entrée à la suivante ; seule la dernière passe active écrit
+    # directement dans final_path.
+    pending_overlays = []
     if has_overlay:
-        try:
-            proc2 = subprocess.run([
-                FFMPEG_EXE, '-y', '-i', str(raw_mp4_path), '-i', str(overlay_path),
-                '-filter_complex', f'[1:v]scale={w}:{h}[ov];[0:v][ov]overlay=0:0',
-                '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart', str(final_path),
-            ], capture_output=True, text=True)
-        except FileNotFoundError:
-            raw_mp4_path.unlink(missing_ok=True)
-            logger.error('ffmpeg introuvable (%s) — voir logs\\launcher.log (setup_ffmpeg.ps1).', FFMPEG_EXE)
-            return jsonify({'ok': False, 'error': "ffmpeg introuvable sur cette machine (nécessaire pour les vidéos)."}), 500
-        raw_mp4_path.unlink(missing_ok=True)
-        if proc2.returncode != 0 or not final_path.exists() or final_path.stat().st_size == 0:
-            logger.error('ffmpeg overlay échoué : %s', proc2.stderr)
-            return jsonify({'ok': False, 'error': 'Application du cadre vidéo échouée'}), 500
-    else:
+        pending_overlays.append(overlay_path)
+    if qr_burn_png_path is not None:
+        pending_overlays.append(qr_burn_png_path)
+
+    if not pending_overlays:
         raw_mp4_path.rename(final_path)
+    else:
+        current_path = raw_mp4_path
+        for i, ov_png in enumerate(pending_overlays):
+            is_last = (i == len(pending_overlays) - 1)
+            step_output = final_path if is_last else VIDEO_DIR / f'video-{stamp}-step{i}.mp4'
+            ok, err = _ffmpeg_overlay_pass(current_path, ov_png, step_output, w, h)
+            current_path.unlink(missing_ok=True)
+            if not ok:
+                if qr_burn_png_path is not None:
+                    qr_burn_png_path.unlink(missing_ok=True)
+                return jsonify({'ok': False, 'error': err}), 500
+            current_path = step_output
+
+    if qr_burn_png_path is not None:
+        qr_burn_png_path.unlink(missing_ok=True)
 
     capture_id, media_uid = record_capture('video', final_filename, thumb_name)
     logger.info('Vidéo capturée %s', final_filename)
@@ -681,6 +732,19 @@ def _qrcode_settings() -> dict:
         'enabled': get_setting('qrcode.enabled', '0') == '1',
         'live_overlay': get_setting('qrcode.live_overlay', '0') == '1',
     }
+
+
+def _qr_burn_settings() -> dict:
+    """Incrustation (dure, dans le fichier final) de la forme + du texte
+    QR-code live sur les médias capturés — option indépendante par type de
+    média (photo/vidéo/photo strip), réglable depuis /admin/tags. Nécessite
+    « Activer la détection automatique de QR-codes » (qrcode.enabled)
+    ci-dessus, comme le tag automatique. Ne concerne jamais le message
+    d'erreur (qrcode.live_error_style.*) : voir _render_qr_burn_layer."""
+    photo = get_setting('qrcode.burn_into_media.photo', '0') == '1'
+    video = get_setting('qrcode.burn_into_media.video', '0') == '1'
+    strip = get_setting('qrcode.burn_into_media.strip', '0') == '1'
+    return {'photo': photo, 'video': video, 'strip': strip, 'any': photo or video or strip}
 
 
 # ── Apparence du texte QR-code affiché en direct (réglable depuis /admin/tags) ─
@@ -853,6 +917,299 @@ def _qr_live_style_settings() -> dict:
     }
 
 
+# ── Incrustation de la forme/texte QR-code live sur les médias capturés ───────
+# Option indépendante par type de média (voir _qr_burn_settings et
+# /admin/tags) : quand activée, la même forme + le même texte que l'aperçu
+# en direct sont gravés dans la photo/vidéo/photo strip finale, à
+# l'emplacement du QR-code réellement détecté sur CE média (nouvelle
+# détection, indépendante du polling /api/qr/live) — jamais le message
+# d'erreur (qrcode.live_error_style.*), qui n'a de sens que pour signaler un
+# problème EN DIRECT : un média déjà enregistré ne peut contenir qu'un
+# QR-code lisible ou rien.
+#
+# Reproduction en Pillow (résolution native de la capture) de ce que
+# style.css/.qr-live-label affiche en CSS (résolution de la fenêtre
+# navigateur) : mêmes réglages de forme/couleur/police/position, recalculés
+# en pixels réels plutôt qu'en unités CSS (em, %, calc()...). Volontairement
+# pas pixel-perfect (backdrop-filter, box-shadow, fine bordure ne sont pas
+# reproduits — purement cosmétique, invisible à l'échelle d'une photo) mais
+# visuellement fidèle : même forme, même texte, mêmes couleurs, même
+# position relative au QR-code.
+
+# Police système Windows correspondant à chaque option de _PROMO_FONTS
+# (police web CSS -> fichier .ttf réel), toujours en gras quand une variante
+# existe (font-weight:700 sur .qr-live-label). Chemin Windows en dur :
+# l'application ne tourne que sous Windows (comme set_windows_wallpaper,
+# _get_local_ip...) — voir C:\Windows\Fonts.
+_QR_LIVE_BURN_FONT_DIR = Path('C:/Windows/Fonts')
+_QR_LIVE_BURN_FONT_FILES = {
+    _PROMO_FONTS[0][0]: 'segoeuib.ttf',   # Segoe UI (gras)
+    _PROMO_FONTS[1][0]: 'georgiab.ttf',   # Georgia (gras)
+    _PROMO_FONTS[2][0]: 'trebucbd.ttf',   # Trebuchet MS (gras)
+    _PROMO_FONTS[3][0]: 'impact.ttf',     # Impact (pas de variante gras)
+    _PROMO_FONTS[4][0]: 'courbd.ttf',     # Courier New (gras)
+    _PROMO_FONTS[5][0]: 'comicbd.ttf',    # Comic Sans MS (gras)
+}
+_qr_live_burn_font_cache: dict = {}
+
+# Largeur de référence utilisée pour mettre à l'échelle les valeurs pensées
+# pour l'aperçu caméra en direct (taille de police, marge d'ancrage, rayon
+# des coins arrondis...) : ces réglages sont choisis par l'admin en
+# regardant l'aperçu (généralement affiché autour de cette résolution) ;
+# appliqués tels quels sur une capture haute résolution, ils paraîtraient
+# minuscules. Sans effet sur les valeurs déjà en % ou en em (suivent déjà la
+# taille de police, elle-même mise à l'échelle) ni sur le mode proportionnel
+# (déjà calculé à partir de la taille réelle du QR-code détecté dans
+# l'image, donc intrinsèquement à l'échelle).
+_QR_LIVE_BURN_REFERENCE_WIDTH = 1280
+_QR_LIVE_BURN_GAP_PX = 10  # QR_LIVE_GAP_PX côté client (app.js) — même valeur
+
+
+def _hex_to_rgb(hex_color: str, default: tuple = (13, 139, 143)) -> tuple:
+    h = (hex_color or '').lstrip('#')
+    try:
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except (ValueError, IndexError):
+        return default
+
+
+def _qr_live_burn_font(font_family: str, size_px: int):
+    """Charge (avec cache) la police TrueType Windows correspondant à
+    `font_family` (valeur brute de qrcode.live_style.font) à la taille
+    `size_px`. Repli sur la police par défaut de Pillow (bitmap, taille
+    fixe) si le fichier est introuvable — n'empêche jamais la capture."""
+    size_px = max(6, int(size_px))
+    cache_key = (font_family, size_px)
+    cached = _qr_live_burn_font_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    filename = _QR_LIVE_BURN_FONT_FILES.get(font_family, 'segoeuib.ttf')
+    try:
+        font = ImageFont.truetype(str(_QR_LIVE_BURN_FONT_DIR / filename), size_px)
+    except Exception:
+        try:
+            font = ImageFont.load_default(size=size_px)
+        except TypeError:
+            font = ImageFont.load_default()
+    _qr_live_burn_font_cache[cache_key] = font
+    return font
+
+
+def _qr_live_burn_padding_px(style: dict, font_size_px: float) -> tuple:
+    """Padding vertical/horizontal en pixels réels : base de la forme
+    choisie (_QR_LIVE_SHAPE_CSS), mise à l'échelle par bg_size_pct, plus la
+    marge additionnelle text_margin_px — équivalent numérique de
+    bg_padding_css (_scale_padding_css / _add_padding_margin_css) mais
+    résolu en px plutôt qu'en chaîne CSS (unité em résolue via
+    font_size_px, comme le ferait un navigateur pour cet élément)."""
+    base = _QR_LIVE_SHAPE_CSS[style['bg_shape']]['padding'].split()
+    values = []
+    for token in base:
+        m = re.match(r'^([\d.]+)(px|em)$', token)
+        if not m:
+            values.append(0.0)
+            continue
+        value, unit = float(m.group(1)), m.group(2)
+        values.append(value * font_size_px if unit == 'em' else value)
+    pad_v = values[0] if len(values) > 0 else 0.0
+    pad_h = values[1] if len(values) > 1 else pad_v
+    scale = style['bg_size_pct'] / 100
+    pad_v = pad_v * scale + style['text_margin_px']
+    pad_h = pad_h * scale + style['text_margin_px']
+    return pad_v, pad_h
+
+
+def _qr_live_burn_anchor(position: str, box: tuple, gap_px: float) -> tuple:
+    """Point d'ancrage (ax, ay) + fraction de la boîte à soustraire pour
+    obtenir son coin haut-gauche (fx, fy) — équivalent numérique de
+    computeQrLabelAnchor() + .qr-live-label.anchor-* (transform: translate)
+    dans app.js/style.css, appliqué ici directement en pixels image plutôt
+    qu'en pixels écran : pas de scale/offset à inverser, on dessine dans le
+    même repère que la détection (contrairement à l'aperçu live, qui doit
+    composer avec object-fit: cover sur l'élément <img> de prévisualisation)."""
+    x0, y0, x1, y1 = box
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    if position == 'below':
+        return cx, y1 + gap_px, 0.5, 0.0
+    if position == 'left':
+        return x0 - gap_px, cy, 1.0, 0.5
+    if position == 'right':
+        return x1 + gap_px, cy, 0.0, 0.5
+    if position == 'center':
+        return cx, cy, 0.5, 0.5
+    # 'above' (défaut)
+    return cx, max(0.0, y0 - gap_px), 0.5, 1.0
+
+
+def _qr_live_burn_ellipsize(draw, text: str, font, max_width: float) -> str:
+    """Tronque `text` avec une ellipse finale si sa largeur dépasse
+    max_width — équivalent de text-overflow:ellipsis (CSS), utilisé
+    uniquement quand la largeur de la forme est fixe (bg_width_px) et que le
+    texte décodé est trop long pour y tenir."""
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+    ellipsis = '…'
+    lo, hi = 0, len(text)
+    best = ellipsis
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        candidate = text[:mid].rstrip() + ellipsis
+        if draw.textlength(candidate, font=font) <= max_width:
+            best = candidate
+            lo = mid
+        else:
+            hi = mid - 1
+    return best
+
+
+def _qr_live_burn_shape_mask(shape: str, w: int, h: int, radius_px: float):
+    """Masque 'L' (w×h, blanc=opaque) reproduisant border-radius/clip-path
+    de la forme CSS correspondante (_QR_LIVE_SHAPE_CSS) — utilisé pour
+    habiller aussi bien un aplat de couleur qu'une image de fond
+    personnalisée (voir _qr_live_burn_fill_layer)."""
+    w, h = max(1, w), max(1, h)
+    mask = Image.new('L', (w, h), 0)
+    draw = ImageDraw.Draw(mask)
+    if shape == 'pill':
+        draw.rounded_rectangle((0, 0, w - 1, h - 1), radius=min(w, h) / 2, fill=255)
+    elif shape == 'rounded':
+        draw.rounded_rectangle((0, 0, w - 1, h - 1), radius=max(0.0, radius_px), fill=255)
+    elif shape in ('circle', 'oval'):
+        draw.ellipse((0, 0, w - 1, h - 1), fill=255)
+    elif shape == 'star':
+        star_pct = [
+            (50, 0), (61, 35), (98, 35), (68, 57), (79, 91),
+            (50, 70), (21, 91), (32, 57), (2, 35), (39, 35),
+        ]
+        points = [(px / 100 * (w - 1), py / 100 * (h - 1)) for px, py in star_pct]
+        draw.polygon(points, fill=255)
+    else:  # 'square' ou repli
+        draw.rectangle((0, 0, w - 1, h - 1), fill=255)
+    return mask
+
+
+def _qr_live_burn_fill_layer(style: dict, w: int, h: int):
+    """Contenu du fond, avant découpe par le masque de forme : aplat de
+    couleur (bg_mode='shape') ou image personnalisée étirée aux dimensions
+    de la forme (bg_mode='image' — background-size:100% 100% en CSS, donc
+    resize direct, pas de recadrage)."""
+    w, h = max(1, w), max(1, h)
+    if style['bg_mode'] == 'image' and style['bg_image_filename']:
+        img_path = QR_LIVE_DIR / style['bg_image_filename']
+        if img_path.exists():
+            try:
+                custom = Image.open(img_path).convert('RGBA')
+                return custom.resize((w, h), Image.LANCZOS)
+            except Exception:
+                logger.exception('QR live : image de fond illisible pour incrustation (%s).', img_path)
+    return Image.new('RGBA', (w, h), _hex_to_rgb(style['bg_color']) + (255,))
+
+
+def _qr_live_burn_draw_one(canvas, img_w: int, img_h: int, points, style: dict, text: str) -> bool:
+    """Dessine, en place sur `canvas` (image RGBA Pillow de la taille de la
+    capture), la forme + le texte configurés (qrcode.live_style.*) à
+    l'emplacement du QR-code repéré par `points` (coins renvoyés par le
+    détecteur ArUco, voir _qr_detect_boxes_robust). Retourne False si rien
+    n'a été dessiné (texte vide, boîte dégénérée...)."""
+    text = (text or '').strip()
+    if not text:
+        return False
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    box = (min(xs), min(ys), max(xs), max(ys))
+    img_scale = max(0.3, img_w / _QR_LIVE_BURN_REFERENCE_WIDTH)
+    draw = ImageDraw.Draw(canvas)
+
+    proportional = style['bg_proportional']
+    if proportional:
+        adjust = 1 + style['bg_proportional_adjust_pct'] / 100
+        box_w = max(0.0, box[2] - box[0]) * adjust
+        box_h = max(0.0, box[3] - box[1]) * adjust
+        if box_w <= 0 or box_h <= 0:
+            return False
+        font_size_px = max(8.0, min(box_h * 0.32, box_w * 0.16))
+        pad_v = pad_h = 0.0
+        font = _qr_live_burn_font(style['font'], round(font_size_px))
+    else:
+        font_size_px = max(6.0, style['font_size'] * img_scale)
+        font = _qr_live_burn_font(style['font'], round(font_size_px))
+        pad_v, pad_h = _qr_live_burn_padding_px(style, font_size_px)
+        box_w = style['bg_width_px'] * img_scale if style['bg_width_px'] else \
+            min(draw.textlength(text, font=font) + 2 * pad_h, img_w * 0.7)
+        box_h = style['bg_height_px'] * img_scale if style['bg_height_px'] else \
+            font_size_px * 1.25 + 2 * pad_v
+        if style['bg_shape'] == 'circle' and not style['bg_width_px'] and not style['bg_height_px']:
+            box_w = box_h = max(box_w, box_h)
+
+    if box_w < 4 or box_h < 4:
+        return False
+
+    gap_px = _QR_LIVE_BURN_GAP_PX * img_scale
+    ax, ay, fx, fy = _qr_live_burn_anchor(style['position'], box, gap_px)
+    left = ax - box_w * fx
+    top = ay - box_h * fy
+
+    mask = _qr_live_burn_shape_mask(style['bg_shape'], round(box_w), round(box_h), 14 * img_scale)
+    fill = _qr_live_burn_fill_layer(style, round(box_w), round(box_h))
+    canvas.paste(fill, (round(left), round(top)), mask)
+
+    # Texte dessiné sur un calque local à la boîte (box_w × box_h), collé
+    # ensuite via paste(..., mask=calque) — équivalent d'overflow:hidden sur
+    # .qr-live-label (CSS) : tout ce qui dépasserait de la boîte (texte trop
+    # long en mode proportionnel notamment, où le rétrécissement automatique
+    # de la police n'a que 2 bornes, largeur ET hauteur) est silencieusement
+    # rogné au lieu de déborder sur l'image, comme le fait le navigateur.
+    # paste(..., mask=texte) utilise le canal alpha du calque (anti-aliasing
+    # du texte inclus) plutôt qu'un simple pochoir binaire, et gère nativement
+    # une position (left, top) hors cadre (négative ou dépassant l'image).
+    label = text
+    if style['bg_width_px'] and not proportional:
+        label = _qr_live_burn_ellipsize(draw, label, font, max(4.0, box_w - 2 * pad_h))
+    box_w_i, box_h_i = max(1, round(box_w)), max(1, round(box_h))
+    text_layer = Image.new('RGBA', (box_w_i, box_h_i), (0, 0, 0, 0))
+    tdraw = ImageDraw.Draw(text_layer)
+    bbox = tdraw.textbbox((0, 0), label, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    tx = (box_w_i - tw) / 2 - bbox[0]
+    ty = (box_h_i - th) / 2 - bbox[1]
+    tdraw.text((tx, ty), label, font=font, fill=_hex_to_rgb(style['text_color']) + (255,))
+    canvas.paste(text_layer, (round(left), round(top)), text_layer)
+    return True
+
+
+def _render_qr_burn_layer(image_bgr, detections: list):
+    """Calque RGBA (mêmes dimensions que image_bgr) avec la forme + le texte
+    de chaque QR-code DÉCODÉ dessinés à son emplacement — jamais le message
+    d'erreur (voir l'en-tête de cette section). Retourne None si aucune
+    détection décodée n'a donné lieu à un dessin."""
+    decoded = [d for d in detections if d.get('text')]
+    if not decoded:
+        return None
+    h, w = image_bgr.shape[:2]
+    style = _qr_live_style_settings()
+    canvas = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    drew = False
+    for d in decoded:
+        try:
+            if _qr_live_burn_draw_one(canvas, w, h, d['points'], style, d['text']):
+                drew = True
+        except Exception:
+            logger.exception('QR live : échec incrustation forme/texte sur le média.')
+    return canvas if drew else None
+
+
+def _apply_qr_burn_layer_bgr(image_bgr, layer):
+    """Compose `layer` (RGBA, voir _render_qr_burn_layer) sur une image BGR
+    (numpy, OpenCV) et renvoie le résultat au même format — utilisé pour la
+    photo et le photo strip (la vidéo passe par un fichier PNG + ffmpeg, voir
+    capture_video)."""
+    if layer is None:
+        return image_bgr
+    base = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)).convert('RGBA')
+    composited = Image.alpha_composite(base, layer)
+    return cv2.cvtColor(np.array(composited.convert('RGB')), cv2.COLOR_RGB2BGR)
+
+
 # ── Message d'erreur QR-code (détecté mais illisible) ─────────────────────────
 # Affiché à la place du contenu décodé quand un QR-code est repéré (marqueurs
 # trouvés par le détecteur ArUco) mais reste illisible malgré les tentatives
@@ -894,20 +1251,28 @@ def _qr_live_error_style_settings() -> dict:
     }
 
 
-def _scan_and_tag_qr_codes(capture_id: int, image) -> list:
-    """Détecte les QR-codes présents dans `image` (tableau BGR déjà composé
-    avec son cadre) et les ajoute comme tags libres sur `capture_id`.
-    Retourne la liste des textes ajoutés (peut être vide). No-op immédiat
-    si l'add-on est désactivé. Utilise le pipeline de détection robuste
-    partagé avec l'aperçu en direct (_qr_detect_boxes_robust) : un QR-code
-    lu en direct doit aussi l'être sur la photo finale."""
+def _qr_detect_for_capture(image, capture_label: str = '') -> list:
+    """Détection QR-code pour une capture (photo/photo strip/1ère frame
+    vidéo) : ne s'exécute que si l'add-on est activé (qrcode.enabled) —
+    partagée par le tag automatique (_qr_tag_detections) ET l'incrustation
+    forme+texte sur le média (_render_qr_burn_layer), qui n'analysent donc
+    l'image qu'une seule fois par capture. Utilise le pipeline de détection
+    robuste partagé avec l'aperçu en direct (_qr_detect_boxes_robust) : un
+    QR-code lu en direct doit aussi l'être sur le média final."""
     if get_setting('qrcode.enabled', '0') != '1':
         return []
     try:
-        detections = _qr_detect_boxes_robust(image)
+        return _qr_detect_boxes_robust(image)
     except Exception:
-        logger.exception('QR-code : détection échouée pour la capture #%d.', capture_id)
+        logger.exception('QR-code : détection échouée pour %s.', capture_label or 'la capture')
         return []
+
+
+def _qr_tag_detections(capture_id: int, detections: list) -> list:
+    """Ajoute comme tags libres sur `capture_id` les QR-codes déjà détectés
+    (voir _qr_detect_for_capture, qui gère l'activation de l'add-on).
+    Retourne la liste des textes ajoutés (peut être vide). Anciennement
+    _scan_and_tag_qr_codes, qui recalculait sa propre détection."""
     decoded_texts = [d['text'] for d in detections if d.get('text')]
     if not decoded_texts:
         return []
@@ -983,9 +1348,9 @@ def _qr_retry_decode_upscaled(frame, pts, target_side=400, max_scale=10.0):
 
 def _qr_detect_boxes_robust(image) -> list:
     """Pipeline de détection/décodage QR-code robuste, partagé entre
-    l'aperçu en direct (/api/qr/live) et le marquage automatique
-    post-capture (_scan_and_tag_qr_codes), pour qu'un QR-code lu pendant le
-    cadrage soit aussi lu sur la photo finale : passe directe (détecteur
+    l'aperçu en direct (/api/qr/live) et le marquage automatique/l'incrustation
+    post-capture (_qr_detect_for_capture), pour qu'un QR-code lu pendant le
+    cadrage soit aussi lu sur le média final : passe directe (détecteur
     ArUco) → si rien trouvé, nouvelle tentative sur l'image entière
     agrandie (_QR_LIVE_FULLFRAME_UPSCALE) → pour chaque zone repérée mais
     non décodée, nouvelle tentative sur un recadrage agrandi
@@ -1159,7 +1524,7 @@ def _compose_photo_strip(frames, ps_cfg):
 
 # ── Photo strip : grand chiffre d'étape (paramétrable B-O) ────────────────────
 # Affiché plein écran pendant chaque prise du strip, en synchro avec le
-# petit label "Photo x/N" (voir _scan_and_tag_qr_codes plus haut pour le
+# petit label "Photo x/N" (voir _qr_detect_for_capture plus haut pour le
 # contexte général du strip). Modèle "{n}"/"{total}" identique à la
 # convention idle_timer_badge_text ("Retour dans {n}s"). Position résolue
 # côté serveur en propriétés CSS explicites (top/left/right/bottom/
@@ -1300,6 +1665,13 @@ def capture_photostrip_finish():
 
     ps_cfg = CONFIG.get('capture', {}).get('photo_strip', {})
     strip_img = _compose_photo_strip(frames, ps_cfg)
+
+    detections = _qr_detect_for_capture(strip_img, 'le photo strip')
+    if detections and _qr_burn_settings()['strip']:
+        burn_layer = _render_qr_burn_layer(strip_img, detections)
+        if burn_layer is not None:
+            strip_img = _apply_qr_burn_layer_bgr(strip_img, burn_layer)
+
     stamp = current_stamp()
     filename = f'strip-{stamp}.jpg'
     filepath = PHOTO_DIR / filename
@@ -1313,7 +1685,7 @@ def capture_photostrip_finish():
     make_thumb(filepath, THUMBS_DIR / thumb_name)
     capture_id, media_uid = record_capture('photo', filename, thumb_name)
     logger.info('Photo strip capturé %s (%d prises, cadre=%s)', filename, len(frames), session['frame_id'])
-    qr_tags = _scan_and_tag_qr_codes(capture_id, strip_img)
+    qr_tags = _qr_tag_detections(capture_id, detections)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
                     'filename': filename, 'qr_tags': qr_tags,
                     'url': f'/media/photo/{filename}', 'message': message_text()})
@@ -2642,6 +3014,9 @@ def admin_tags():
         if action == 'qrcode_settings':
             set_setting('qrcode.enabled', '1' if request.form.get('enabled') else '0')
             set_setting('qrcode.live_overlay', '1' if request.form.get('live_overlay') else '0')
+            set_setting('qrcode.burn_into_media.photo', '1' if request.form.get('burn_photo') else '0')
+            set_setting('qrcode.burn_into_media.video', '1' if request.form.get('burn_video') else '0')
+            set_setting('qrcode.burn_into_media.strip', '1' if request.form.get('burn_strip') else '0')
             return redirect(url_for('admin_tags', ok='Réglages QR-code mis à jour.'))
 
         if action == 'qrcode_live_style':
@@ -2749,6 +3124,7 @@ def admin_tags():
         settings=_tags_settings(), media_id=_media_id_settings(), tags=list_tags(),
         assignments=list_capture_tags_with_media(), tags_fonts=_PROMO_FONTS,
         qrcode_settings=_qrcode_settings(),
+        qrcode_burn_settings=_qr_burn_settings(),
         qrcode_live_style=_qr_live_style_settings(),
         qrcode_live_error_style=_qr_live_error_style_settings(),
         qrcode_live_positions=_QR_LIVE_POSITIONS,

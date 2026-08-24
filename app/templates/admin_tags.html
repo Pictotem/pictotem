@@ -196,6 +196,28 @@
           Indépendant du tag automatique ci-dessus — peut être activé seul.
         </p>
       </div>
+      <div class="field">
+        <div class="check-row">
+          <input type="checkbox" id="qrcode_burn_photo" name="burn_photo" {% if qrcode_burn_settings.photo %}checked{% endif %}>
+          <span>Incruster la forme + le texte sur la photo capturée</span>
+        </div>
+        <div class="check-row" style="margin-top:8px">
+          <input type="checkbox" id="qrcode_burn_video" name="burn_video" {% if qrcode_burn_settings.video %}checked{% endif %}>
+          <span>Incruster la forme + le texte sur la vidéo capturée</span>
+        </div>
+        <div class="check-row" style="margin-top:8px">
+          <input type="checkbox" id="qrcode_burn_strip" name="burn_strip" {% if qrcode_burn_settings.strip %}checked{% endif %}>
+          <span>Incruster la forme + le texte sur le photo strip capturé</span>
+        </div>
+        <p class="section-hint" style="margin-top:6px">
+          Grave définitivement dans le média final (photo, vidéo ou photo strip) la même forme et
+          le même texte que ceux affichés en direct au-dessus du QR-code présenté devant l'objectif
+          (réglages ci-dessous, « Apparence du texte affiché en direct ») — uniquement si le
+          QR-code a bien pu être décodé. Le message d'erreur (QR-code détecté mais illisible)
+          n'est jamais incrusté : il n'a de sens que pour signaler un problème en direct au
+          visiteur, pas sur un média déjà enregistré.
+        </p>
+      </div>
     </div>
 
     <button class="btn-primary" type="submit">Enregistrer</button>
