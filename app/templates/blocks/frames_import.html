@@ -1,0 +1,19 @@
+<div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;">
+  <div style="flex:1;min-width:220px;">
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;">
+      Importez un ZIP contenant des PNG d'overlay. Un fichier <code>pack.json</code> optionnel
+      permet de définir les identifiants, libellés et ordre d'affichage de chaque cadre.
+      Les cadres existants avec le même identifiant sont écrasés.
+    </p>
+    <form method="post" action="{{ url_for('admin_frames_import') }}" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="form-row">
+        <div class="file-field" style="flex:1;">
+          <label class="field-label">Fichier ZIP du pack</label>
+          <input type="file" name="pack" accept=".zip" required>
+        </div>
+      </div>
+      <button type="submit" class="action-btn small primary">Importer le pack</button>
+    </form>
+  </div>
+</div>

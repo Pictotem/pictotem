@@ -1,0 +1,28 @@
+<form method="post" action="{{ url_for('admin_frame_create') }}" enctype="multipart/form-data">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="form-row">
+    <div style="flex:1;min-width:140px">
+      <label class="field-label">Identifiant *</label>
+      <input type="text" name="id" placeholder="ex: gold" required pattern="[a-z0-9_-]+" title="Minuscules, chiffres, tirets uniquement">
+    </div>
+    <div style="flex:2;min-width:180px">
+      <label class="field-label">Libellé *</label>
+      <input type="text" name="label" placeholder="ex: Cadre Or" required>
+    </div>
+    <div style="flex:0 0 100px">
+      <label class="field-label">Ordre</label>
+      <input type="number" name="sort_order" value="99" min="1" max="999">
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="file-field">
+      <label class="field-label">Miniature (preview) — jpg/png/webp</label>
+      <input type="file" name="preview" accept=".jpg,.jpeg,.png,.webp,.gif">
+    </div>
+    <div class="file-field">
+      <label class="field-label">Overlay PNG (fond transparent)</label>
+      <input type="file" name="overlay" accept=".png">
+    </div>
+  </div>
+  <button type="submit" class="action-btn primary">Ajouter le cadre</button>
+</form>

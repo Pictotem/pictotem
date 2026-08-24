@@ -4,32 +4,25 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Administration galerie — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
+  <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
   <style>
     .admin-wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 60px; }
     .admin-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 36px; flex-wrap: wrap; }
     .admin-header h1 { font-size: 28px; font-weight: 700; margin: 0 0 4px; }
     .admin-header p { color: var(--muted); margin: 0; }
     .admin-nav { display: flex; gap: 10px; flex-wrap: wrap; }
-    .admin-section { margin-bottom: 40px; }
-    .admin-section h2 { font-size: 18px; font-weight: 700; margin: 0 0 20px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
     .flash-list { list-style: none; padding: 0; margin: 0 0 24px; }
     .flash-list li { padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; font-weight: 600; }
     .flash-list li.success { background: rgba(13,139,143,.18); border: 1px solid rgba(13,139,143,.4); color: #5cf5f9; }
     .flash-list li.error   { background: rgba(200,50,50,.18);  border: 1px solid rgba(200,50,50,.4);  color: #f97b7b; }
-    .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
-    .field-label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
-    .field-hint  { font-size: 12px; color: var(--muted); margin-top: 6px; }
-    textarea {
-      width: 100%; background: var(--surface-2); border: 1px solid var(--border);
-      color: var(--text); border-radius: 12px; padding: 12px 14px;
-      font: inherit; font-size: 15px; resize: vertical; min-height: 120px;
-      box-sizing: border-box;
-    }
-    textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .text-section { margin-bottom: 40px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+    .text-section h2 { font-size: 18px; font-weight: 700; margin: 0 0 20px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
   </style>
 </head>
-<body class="gallery-body">
+<body class="gallery-body" data-admin-page="gallery">
 <div class="admin-wrap">
 
   <div class="admin-header">
@@ -51,20 +44,29 @@
   <ul class="flash-list"><li class="error">{{ alert_error }}</li></ul>
   {% endif %}
 
-  <section class="admin-section">
-    <h2>Texte d'introduction</h2>
-    <div class="form-card">
-      <form method="post" action="{{ url_for('admin_gallery') }}">
-        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <label class="field-label" for="gallery_text">
-          Texte affiché en haut de la galerie (sous le titre)
-        </label>
-        <textarea id="gallery_text" name="gallery_text">{{ gallery_text }}</textarea>
-        <p class="field-hint">Supporte les retours à la ligne. Laissez vide pour ne rien afficher.</p>
-        <button type="submit" class="action-btn primary" style="margin-top:16px">Enregistrer</button>
-      </form>
+  {% for block in blocks %}
+  <div class="text-section{% if block.variant %} {{ block.variant }}{% endif %}{% if block.collapsed %} block-collapsed{% endif %}" data-block-id="{{ block.id }}">
+    <div class="block-header-row">
+      <span class="block-drag-handle" title="Glisser pour réordonner">⠿</span>
+      <h2>{{ block.title }}</h2>
+      <button type="button" class="block-collapse-toggle" aria-label="Replier / déplier">▾</button>
     </div>
-  </section>
+    <div class="admin-block-body">
+      {% include block.template %}
+    </div>
+    <form method="post" action="{{ url_for('admin_move_block') }}" class="block-move-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="block_id" value="{{ block.id }}">
+      <label>Déplacer vers</label>
+      <select name="target_page">
+        {% for slug, label, _ep in admin_pages %}
+        <option value="{{ slug }}" {% if slug == current_page %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Déplacer</button>
+    </form>
+  </div>
+  {% endfor %}
 
 </div>
 </body>

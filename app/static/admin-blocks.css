@@ -81,3 +81,28 @@ input[type=datetime-local] {
 .font-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .font-card .font-preview { font-size: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .font-card .font-name { font-size: 11px; color: rgba(255,255,255,.35); margin-top: 4px; }
+
+/* Blocs « Texte d'introduction » (gallery_text) et « Cadre d'accueil » /
+   « Importer un pack » / « Ajouter un cadre » (frames_*) — dupliqué depuis
+   admin_gallery.html / admin_frames.html, qui restent la source visuelle
+   "native". */
+.field-label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+.field-hint  { font-size: 12px; color: var(--muted); margin-top: 6px; }
+textarea {
+  width: 100%; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 12px; padding: 12px 14px;
+  font: inherit; font-size: 15px; resize: vertical; min-height: 120px;
+  box-sizing: border-box;
+}
+textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.form-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.form-row input[type=text],
+.form-row input[type=number] { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px; flex: 1; min-width: 140px; }
+.form-row input[type=text]::placeholder { color: var(--muted); }
+.file-field { display: flex; flex-direction: column; flex: 1; min-width: 180px; }
+.file-field input[type=file] { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; color: var(--muted); font-size: 14px; }
+/* Scopé à .action-btn (plutôt qu'une classe .danger nue) pour ne jamais
+   entrer en collision avec [data-block-id].danger ci-dessus (variante
+   "danger" d'un bloc entier, ex. archive_cleanup). */
+.action-btn.danger { background: rgba(180,40,40,.7) !important; border-color: rgba(255,100,100,.3) !important; color: #fff !important; }
+.action-btn.danger:hover { background: rgba(220,50,50,.9) !important; }

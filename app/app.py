@@ -2525,15 +2525,15 @@ def admin_frame_set_default(frame_id):
 def admin_welcome_frame_upload():
     file = request.files.get('welcome_frame')
     if not file or not file.filename:
-        return _admin_redirect(error='Aucun fichier sélectionné.')
+        return _admin_block_redirect('frames_welcome', err='Aucun fichier sélectionné.')
     ext = Path(file.filename).suffix.lower()
     if ext not in ALLOWED_OVERLAY_EXT:
-        return _admin_redirect(error='Le cadre d\'accueil doit être un PNG.')
+        return _admin_block_redirect('frames_welcome', err='Le cadre d\'accueil doit être un PNG.')
     filename = f'welcome-frame{ext}'
     FRAMES_DIR.mkdir(parents=True, exist_ok=True)
     file.save(str(FRAMES_DIR / filename))
     set_setting('welcome_frame_filename', filename)
-    return _admin_redirect(success='Cadre d\'accueil mis à jour.')
+    return _admin_block_redirect('frames_welcome', ok='Cadre d\'accueil mis à jour.')
 
 
 @app.route('/admin/welcome-frame/remove', methods=['POST'])
@@ -2544,7 +2544,7 @@ def admin_welcome_frame_remove():
     if fn:
         (FRAMES_DIR / fn).unlink(missing_ok=True)
         set_setting('welcome_frame_filename', '')
-    return _admin_redirect(success='Cadre d\'accueil supprimé.')
+    return _admin_block_redirect('frames_welcome', ok='Cadre d\'accueil supprimé.')
 
 
 @app.route('/admin/texts', methods=['GET', 'POST'])
@@ -2671,18 +2671,26 @@ def custom_fonts_css():
     return Response('\n'.join(parts), mimetype='text/css')
 
 
-@app.route('/admin/gallery', methods=['GET', 'POST'])
+@app.route('/admin/gallery')
+@require_admin_auth
+def admin_gallery():
+    """Tuile « Galerie » du back office. Pas de POST ici : le seul bloc de
+    cette page poste vers sa propre route dédiée ci-dessous."""
+    blocks, block_context = _admin_render_blocks('gallery')
+    return render_template('admin_gallery.html', config=CONFIG,
+                           blocks=blocks, current_page='gallery', admin_pages=_ADMIN_PAGES,
+                           alert_success=request.args.get('ok'),
+                           alert_error=request.args.get('err'),
+                           **block_context)
+
+
+@app.route('/admin/gallery/text', methods=['POST'])
 @require_admin_auth
 @csrf_protect
-def admin_gallery():
-    if request.method == 'POST':
-        text = (request.form.get('gallery_text') or '').strip()
-        set_setting('gallery_text', text)
-        return redirect(url_for('admin_gallery', ok='Texte mis à jour.'))
-    return render_template('admin_gallery.html', config=CONFIG,
-                           gallery_text=get_setting('gallery_text', ''),
-                           alert_success=request.args.get('ok'),
-                           alert_error=request.args.get('err'))
+def admin_gallery_set_text():
+    text = (request.form.get('gallery_text') or '').strip()
+    set_setting('gallery_text', text)
+    return _admin_block_redirect('gallery_text', ok='Texte mis à jour.')
 
 
 def _admin_system_camera_values() -> dict:
@@ -2815,6 +2823,10 @@ _ADMIN_BLOCKS = {
     'system_camera':       {'title': "Caméra",                                  'default_page': 'system',      'template': 'blocks/system_camera.html',       'context_fn': '_block_ctx_system_camera'},
     'system_screen':       {'title': "Écran / mode kiosque",                    'default_page': 'system',      'template': 'blocks/system_screen.html',       'context_fn': '_block_ctx_system_screen'},
     'system_kiosk_unlock': {'title': "Déverrouillage plein écran (interface principale)", 'default_page': 'system', 'template': 'blocks/system_kiosk_unlock.html', 'context_fn': '_block_ctx_system_kiosk_unlock'},
+    'gallery_text':        {'title': "Texte d'introduction",                    'default_page': 'gallery',     'template': 'blocks/gallery_text.html',        'context_fn': '_block_ctx_gallery_text'},
+    'frames_welcome':      {'title': "Cadre d'accueil",                         'default_page': 'frames',      'template': 'blocks/frames_welcome.html',      'context_fn': '_block_ctx_frames_welcome'},
+    'frames_import':       {'title': "Importer un pack",                        'default_page': 'frames',      'template': 'blocks/frames_import.html',       'context_fn': None},
+    'frames_new':          {'title': "Ajouter un cadre",                        'default_page': 'frames',      'template': 'blocks/frames_new.html',          'context_fn': None},
 }
 # (slug, libellé affiché dans le menu « Déplacer vers », endpoint Flask) —
 # seulement les tuiles qui exécutent déjà la boucle de rendu de blocs
@@ -2826,6 +2838,8 @@ _ADMIN_PAGES = [
     ('archive',     'Archive & nettoyage',  'admin_archive'),
     ('texts',       'Textes',               'admin_texts'),
     ('system',      'Caméra & écran',       'admin_system'),
+    ('gallery',     'Galerie',              'admin_gallery'),
+    ('frames',      'Cadres',               'admin_frames'),
 ]
 _ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
 
@@ -2938,6 +2952,15 @@ def _block_ctx_system_screen() -> dict:
 
 def _block_ctx_system_kiosk_unlock() -> dict:
     return {'kiosk_unlock': _kiosk_unlock_settings()}
+
+
+def _block_ctx_gallery_text() -> dict:
+    return {'gallery_text': get_setting('gallery_text', '')}
+
+
+def _block_ctx_frames_welcome() -> dict:
+    welcome_fn = get_setting('welcome_frame_filename', '')
+    return {'welcome_frame_url': f'/static/frames/{welcome_fn}' if welcome_fn else ''}
 
 
 @app.route('/admin/ui/block_collapse', methods=['POST'])
@@ -3302,13 +3325,17 @@ def admin_set_network_info_taps():
 @app.route('/admin/frames')
 @require_admin_auth
 def admin_frames():
-    welcome_fn = get_setting('welcome_frame_filename', '')
-    welcome_frame_url = f'/static/frames/{welcome_fn}' if welcome_fn else ''
+    """Tuile « Cadres ». La section « Cadres existants » (liste/CRUD, en
+    bas de page) reste hors du système de blocs : ce n'est pas un réglage
+    mais la gestion du contenu lui-même (comme admin_captures/admin_emails),
+    donc toujours affichée ici, indépendamment des blocs déplacés."""
+    blocks, block_context = _admin_render_blocks('frames')
     return render_template(
         'admin_frames.html', config=CONFIG, frames=list_frames(),
-        welcome_frame_url=welcome_frame_url,
+        blocks=blocks, current_page='frames', admin_pages=_ADMIN_PAGES,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
 
 
@@ -3320,16 +3347,16 @@ def admin_frame_create():
     label = (request.form.get('label') or '').strip()
     sort_order = int(request.form.get('sort_order') or 99)
     if not frame_id or not label:
-        return _admin_redirect(error='Identifiant et libellé sont obligatoires.')
+        return _admin_block_redirect('frames_new', err='Identifiant et libellé sont obligatoires.')
     if get_frame_by_id_db(frame_id):
-        return _admin_redirect(error=f'Un cadre avec l\'identifiant "{frame_id}" existe déjà.')
+        return _admin_block_redirect('frames_new', err=f'Un cadre avec l\'identifiant "{frame_id}" existe déjà.')
     try:
         preview_fn = _save_frame_file(request.files.get('preview'), frame_id, 'preview')
         overlay_fn = _save_frame_file(request.files.get('overlay'), frame_id, 'overlay')
     except ValueError as exc:
-        return _admin_redirect(error=str(exc))
+        return _admin_block_redirect('frames_new', err=str(exc))
     upsert_frame(frame_id, label, preview_fn, overlay_fn, sort_order)
-    return _admin_redirect(success=f'Cadre "{label}" ajouté.')
+    return _admin_block_redirect('frames_new', ok=f'Cadre "{label}" ajouté.')
 
 
 @app.route('/admin/frames/<frame_id>/edit', methods=['POST'])
@@ -5259,24 +5286,24 @@ def admin_frames_import():
 
     file = request.files.get('pack')
     if not file or not file.filename:
-        return _admin_redirect(error='Aucun fichier sélectionné.')
+        return _admin_block_redirect('frames_import', err='Aucun fichier sélectionné.')
     if not file.filename.lower().endswith('.zip'):
-        return _admin_redirect(error='Le fichier doit être un ZIP.')
+        return _admin_block_redirect('frames_import', err='Le fichier doit être un ZIP.')
 
     tmpdir = tempfile.mkdtemp()
     counts = None
     try:
         with zipfile.ZipFile(file.stream) as zf:
             if zf.testzip() is not None:
-                return _admin_redirect(error='ZIP corrompu.')
+                return _admin_block_redirect('frames_import', err='ZIP corrompu.')
             # Sécurité : refuser les chemins traversants
             for name in zf.namelist():
                 if name.startswith('/') or '..' in name:
-                    return _admin_redirect(error='ZIP non autorisé (chemin invalide).')
+                    return _admin_block_redirect('frames_import', err='ZIP non autorisé (chemin invalide).')
             zf.extractall(tmpdir)
         counts = _import_pack_from_dir(Path(tmpdir))
     except zipfile.BadZipFile:
-        return _admin_redirect(error='Fichier ZIP invalide.')
+        return _admin_block_redirect('frames_import', err='Fichier ZIP invalide.')
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -5286,7 +5313,7 @@ def admin_frames_import():
     skipped_total = counts['frames_skipped'] + counts['screensaver_skipped']
     if skipped_total:
         msg += f', {skipped_total} ignoré(s) (voir logs)'
-    return _admin_redirect(success=msg)
+    return _admin_block_redirect('frames_import', ok=msg)
 
 
 # ── Démarrage ─────────────────────────────────────────────────────────────────
