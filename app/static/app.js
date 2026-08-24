@@ -142,7 +142,10 @@ function showQrDetectedBadge(show, count = 0) {
 // reproduit le même calcul d'échelle/recadrage ici pour convertir les
 // coordonnées pixel de la frame scannée en position à l'écran.
 const QR_LIVE_POLL_MS = 600;
-const QR_TOO_SMALL_TEXT = 'QR-code détecté mais trop petit';
+// Repli si cfg.qrLiveErrorText est vide pour une raison quelconque — le
+// texte réellement affiché vient normalement du réglage /admin/tags
+// (qrcode.live_error_style.text, voir cfg.qrLiveErrorText plus bas).
+const QR_TOO_SMALL_TEXT = 'QR-code détecté mais illisible';
 const QR_LIVE_GAP_PX = 10;
 let qrLivePollTimer = null;
 
@@ -176,6 +179,9 @@ function renderQrLiveBoxes(boxes, frameW, frameH) {
   const offsetY = (containerH - frameH * scale) / 2;
   const position = cfg.qrLivePosition || 'above';
   const useBgImage = cfg.qrLiveBgMode === 'image' && !!cfg.qrLiveBgImageUrl;
+  // Message d'erreur (QR-code repéré mais illisible) : texte OU image,
+  // réglable indépendamment depuis /admin/tags (qrcode.live_error_style.*).
+  const useErrorBgImage = cfg.qrLiveErrorMode === 'image' && !!cfg.qrLiveErrorImageUrl;
   // Proportionnalité à la taille du QR-code détecté (réglable depuis
   // /admin/tags) : quand actif, on ignore la largeur/hauteur/taille de
   // police configurées côté serveur et on recalcule ces trois valeurs à
@@ -189,12 +195,18 @@ function renderQrLiveBoxes(boxes, frameW, frameH) {
   const proportionalScale = 1 + Math.max(-50, Math.min(50, Number(cfg.qrLiveBgProportionalAdjustPct) || 0)) / 100;
   boxes.forEach((b) => {
     // b.text = null + b.too_small = true : marqueurs du QR-code repérés
-    // (détecteur ArUco, plus sensible) mais code trop petit dans l'image
-    // pour être décodé — on le signale quand même plutôt que de rester
-    // silencieux (voir _qr_detector_aruco côté serveur).
+    // (détecteur ArUco, plus sensible) mais code illisible malgré les
+    // tentatives de rattrapage — on le signale quand même (message
+    // configurable, texte ou image) plutôt que de rester silencieux (voir
+    // _qr_detect_boxes_robust côté serveur).
     if (!b) return;
-    const label = b.too_small ? QR_TOO_SMALL_TEXT : b.text;
-    if (!label) return;
+    const isError = !!b.too_small;
+    // En mode image, le message ne porte pas de texte (l'image le remplace
+    // entièrement, pas de superposition) — sinon le texte configuré (avec
+    // repli sur QR_TOO_SMALL_TEXT si jamais vide) ou le texte décodé.
+    const label = isError ? (useErrorBgImage ? '' : (cfg.qrLiveErrorText || QR_TOO_SMALL_TEXT)) : b.text;
+    if (!isError && !label) return;
+    if (isError && !useErrorBgImage && !label) return;
     const screenX0 = b.x0 * scale + offsetX;
     const screenX1 = b.x1 * scale + offsetX;
     const screenY0 = b.y0 * scale + offsetY;
@@ -202,16 +214,20 @@ function renderQrLiveBoxes(boxes, frameW, frameH) {
     const anchor = computeQrLabelAnchor(position, screenX0, screenY0, screenX1, screenY1);
     const el = document.createElement('div');
     let cls = 'qr-live-label ' + anchor.cls;
-    if (b.too_small) cls += ' too-small';
-    else if (useBgImage) cls += ' bg-image';
+    if (isError) {
+      cls += ' too-small';
+      if (useErrorBgImage) cls += ' bg-image-error';
+    } else if (useBgImage) {
+      cls += ' bg-image';
+    }
     el.className = cls;
     el.textContent = label;
     el.style.left = `${anchor.x}px`;
     el.style.top = `${anchor.y}px`;
-    // Le message « trop petit » garde la taille configurée (auto/fixe) —
-    // la boîte détectée y est par définition trop petite pour y caler
-    // une étiquette lisible.
-    if (proportional && !b.too_small) {
+    // Le message d'erreur garde la taille configurée (auto/fixe) — la
+    // boîte détectée y est par définition trop petite pour y caler une
+    // étiquette lisible.
+    if (proportional && !isError) {
       const qrW = Math.max(0, screenX1 - screenX0) * proportionalScale;
       const qrH = Math.max(0, screenY1 - screenY0) * proportionalScale;
       if (qrW > 0 && qrH > 0) {

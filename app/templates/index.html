@@ -70,6 +70,16 @@
       --qr-live-width: {{ qrcode_live_style.bg_width_css }};
       --qr-live-height: {{ qrcode_live_style.bg_height_css }};
       {% if qrcode_live_style.bg_mode == 'image' and qrcode_live_style.bg_image_url %}--qr-live-bg-image: url('{{ qrcode_live_style.bg_image_url }}');{% endif %}
+
+      /* Message d'erreur QR-code (détecté mais illisible) — réglable
+         indépendamment depuis /admin/tags (voir _qr_live_error_style_settings
+         dans app.py). Partage forme/taille/position avec l'étiquette
+         ci-dessus (mêmes --qr-live-width/-radius/-clip-path/-padding). */
+      --qr-live-error-font: {{ qrcode_live_error_style.font|safe }};
+      --qr-live-error-font-size: {{ qrcode_live_error_style.font_size }}px;
+      --qr-live-error-text-color: {{ qrcode_live_error_style.text_color }};
+      --qr-live-error-bg-color: {{ qrcode_live_error_style.bg_color }};
+      {% if qrcode_live_error_style.mode == 'image' and qrcode_live_error_style.image_url %}--qr-live-error-bg-image: url('{{ qrcode_live_error_style.image_url }}');{% endif %}
     }
 
     /* Grand chiffre d'étape du photo strip (1, 2, 3...) affiché plein écran
@@ -502,6 +512,10 @@
       qrLiveBgProportional:      {{ 'true' if qrcode_live_style.bg_proportional else 'false' }},
       qrLiveBgProportionalAdjustPct: {{ qrcode_live_style.bg_proportional_adjust_pct }},
       qrLiveFontSize:            {{ qrcode_live_style.font_size }},
+      qrLiveErrorEnabled:        {{ 'true' if qrcode_live_error_style.enabled else 'false' }},
+      qrLiveErrorMode:           {{ qrcode_live_error_style.mode | tojson }},
+      qrLiveErrorText:           {{ qrcode_live_error_style.text | tojson }},
+      qrLiveErrorImageUrl:       {{ qrcode_live_error_style.image_url | tojson }},
     };
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>

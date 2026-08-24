@@ -801,13 +801,27 @@ button, input, a { font: inherit; }
   border: none;
   backdrop-filter: none;
 }
-/* QR-code repéré mais trop petit pour être décodé : toujours un style fixe
-   (ambre), indépendant de l'apparence configurée ci-dessus, pour rester
-   clairement distinct d'un contenu réellement lu. */
+/* QR-code repéré (marqueurs détectés) mais illisible malgré les tentatives
+   de rattrapage : message d'erreur réglable depuis /admin/tags (texte OU
+   image, couleurs, police, taille — qrcode.live_error_style.*), indépendant
+   de l'apparence du contenu réellement décodé ci-dessus. Reprend la forme/
+   taille/position de .qr-live-label (mêmes variables --qr-live-width,
+   --qr-live-radius, etc.) ; seules les couleurs/police/taille du texte et
+   l'éventuelle image de fond ont leurs propres variables --qr-live-error-*.
+   Défauts (ambre) = ancien comportement fixe avant que ce ne soit réglable. */
 .qr-live-label.too-small {
-  background: rgba(178,110,10,.92) !important;
-  background-image: none !important;
-  color: #ffffff !important;
+  background: var(--qr-live-error-bg-color, rgba(178,110,10,.92));
+  color: var(--qr-live-error-text-color, #ffffff);
+  font-family: var(--qr-live-error-font, inherit);
+  font-size: var(--qr-live-error-font-size, 15px);
+}
+.qr-live-label.too-small.bg-image-error {
+  background-image: var(--qr-live-error-bg-image);
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  background-color: transparent;
+  border: none;
+  backdrop-filter: none;
 }
 
 .login-body,

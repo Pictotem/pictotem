@@ -376,6 +376,7 @@ def index():
         photostrip_step=_photostrip_step_settings(),
         qrcode=_qrcode_settings(),
         qrcode_live_style=_qr_live_style_settings(),
+        qrcode_live_error_style=_qr_live_error_style_settings(),
     )
 
 
@@ -662,7 +663,6 @@ def _qrcode_settings() -> dict:
     return {
         'enabled': get_setting('qrcode.enabled', '0') == '1',
         'live_overlay': get_setting('qrcode.live_overlay', '0') == '1',
-        'too_small_message_enabled': get_setting('qrcode.too_small_message_enabled', '1') == '1',
     }
 
 
@@ -793,6 +793,47 @@ def _qr_live_style_settings() -> dict:
         'font_size': int(get_setting('qrcode.live_style.font_size', '') or '15'),
         'text_color': get_setting('qrcode.live_style.text_color', '') or '#ffffff',
         'position': position,
+    }
+
+
+# ── Message d'erreur QR-code (détecté mais illisible) ─────────────────────────
+# Affiché à la place du contenu décodé quand un QR-code est repéré (marqueurs
+# trouvés par le détecteur ArUco) mais reste illisible malgré les tentatives
+# de rattrapage (voir _qr_detect_boxes_robust / api_qr_live) — texte OU image
+# au choix, avec sa propre police/taille/couleurs, indépendant du style du
+# contenu décodé avec succès (_qr_live_style_settings ci-dessus), avec lequel
+# il ne partage que la forme/taille/position (bg_shape, bg_width_px,
+# bg_height_px, bg_proportional, position — voir style.css .qr-live-label).
+def _qr_live_error_style_settings() -> dict:
+    raw_enabled = get_setting('qrcode.live_error_style.enabled', '')
+    if raw_enabled == '':
+        # Jamais réglé sous cette clé (mise à jour depuis une version
+        # antérieure) : reprend l'ancien réglage qrcode.too_small_message_enabled
+        # (activé par défaut) le temps d'un premier enregistrement depuis
+        # /admin/tags — voir le même principe pour le mot de passe admin.
+        enabled = get_setting('qrcode.too_small_message_enabled', '1') == '1'
+    else:
+        enabled = raw_enabled == '1'
+    mode = get_setting('qrcode.live_error_style.mode', '') or 'text'
+    if mode not in ('text', 'image'):
+        mode = 'text'
+    text = get_setting('qrcode.live_error_style.text', '').strip() or 'QR-code détecté mais illisible'
+    image_filename = get_setting('qrcode.live_error_style.image_filename', '')
+    raw_size = get_setting('qrcode.live_error_style.font_size', '') or '15'
+    try:
+        font_size = max(8, int(raw_size))
+    except ValueError:
+        font_size = 15
+    return {
+        'enabled': enabled,
+        'mode': mode,
+        'text': text,
+        'image_filename': image_filename,
+        'image_url': f'/static/qr_live/{image_filename}' if image_filename else '',
+        'text_color': get_setting('qrcode.live_error_style.text_color', '') or '#ffffff',
+        'bg_color': get_setting('qrcode.live_error_style.bg_color', '') or '#b26e0a',
+        'font': get_setting('qrcode.live_error_style.font', '') or _PROMO_FONTS[0][0],
+        'font_size': font_size,
     }
 
 
@@ -954,7 +995,7 @@ def api_qr_live():
     if frame is None:
         return jsonify({'ok': True, 'enabled': True, 'boxes': []})
     h, w = frame.shape[:2]
-    too_small_enabled = get_setting('qrcode.too_small_message_enabled', '1') == '1'
+    too_small_enabled = _qr_live_error_style_settings()['enabled']
     detections = _qr_detect_boxes_robust(frame)
 
     boxes = []
@@ -2436,8 +2477,6 @@ def admin_tags():
         if action == 'qrcode_settings':
             set_setting('qrcode.enabled', '1' if request.form.get('enabled') else '0')
             set_setting('qrcode.live_overlay', '1' if request.form.get('live_overlay') else '0')
-            set_setting('qrcode.too_small_message_enabled',
-                        '1' if request.form.get('too_small_message_enabled') else '0')
             return redirect(url_for('admin_tags', ok='Réglages QR-code mis à jour.'))
 
         if action == 'qrcode_live_style':
@@ -2497,12 +2536,53 @@ def admin_tags():
 
             return redirect(url_for('admin_tags', ok='Apparence du texte QR-code mise à jour.'))
 
+        if action == 'qrcode_live_error_style':
+            set_setting('qrcode.live_error_style.enabled',
+                        '1' if request.form.get('error_enabled') else '0')
+            error_mode = request.form.get('error_mode', 'text')
+            set_setting('qrcode.live_error_style.mode', error_mode if error_mode in ('text', 'image') else 'text')
+            error_text = (request.form.get('error_text') or '').strip()
+            set_setting('qrcode.live_error_style.text', error_text or 'QR-code détecté mais illisible')
+            error_font_value = request.form.get('error_font', '')
+            if error_font_value in dict(_PROMO_FONTS):
+                set_setting('qrcode.live_error_style.font', error_font_value)
+            raw_error_size = (request.form.get('error_font_size') or '').strip()
+            if raw_error_size.isdigit() and int(raw_error_size) >= 8:
+                set_setting('qrcode.live_error_style.font_size', raw_error_size)
+            error_text_color = (request.form.get('error_text_color') or '').strip()
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', error_text_color):
+                set_setting('qrcode.live_error_style.text_color', error_text_color)
+            error_bg_color = (request.form.get('error_bg_color') or '').strip()
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', error_bg_color):
+                set_setting('qrcode.live_error_style.bg_color', error_bg_color)
+
+            error_file = request.files.get('error_image')
+            if error_file and error_file.filename:
+                ext = Path(error_file.filename).suffix.lower()
+                if ext not in _QR_LIVE_ALLOWED_EXT:
+                    return redirect(url_for('admin_tags', err="Format non supporté pour l'image du message d'erreur (PNG, JPG, WEBP)."))
+                QR_LIVE_DIR.mkdir(parents=True, exist_ok=True)
+                old = get_setting('qrcode.live_error_style.image_filename', '')
+                if old:
+                    (QR_LIVE_DIR / old).unlink(missing_ok=True)
+                safe = f'qr-live-error-{int(datetime.now().timestamp() * 1000)}{ext}'
+                error_file.save(str(QR_LIVE_DIR / safe))
+                set_setting('qrcode.live_error_style.image_filename', safe)
+            elif request.form.get('error_image_delete'):
+                old = get_setting('qrcode.live_error_style.image_filename', '')
+                if old:
+                    (QR_LIVE_DIR / old).unlink(missing_ok=True)
+                    set_setting('qrcode.live_error_style.image_filename', '')
+
+            return redirect(url_for('admin_tags', ok="Message d'erreur QR-code mis à jour."))
+
     return render_template(
         'admin_tags.html', config=CONFIG,
         settings=_tags_settings(), media_id=_media_id_settings(), tags=list_tags(),
         assignments=list_capture_tags_with_media(), tags_fonts=_PROMO_FONTS,
         qrcode_settings=_qrcode_settings(),
         qrcode_live_style=_qr_live_style_settings(),
+        qrcode_live_error_style=_qr_live_error_style_settings(),
         qrcode_live_positions=_QR_LIVE_POSITIONS,
         qrcode_live_shapes=_QR_LIVE_SHAPES,
         alert_success=request.args.get('ok'),
