@@ -67,6 +67,8 @@
     .upload-zone input[type=file] { display: none; }
     .upload-label { color: var(--accent); font-size: 14px; cursor: pointer; display: block; margin-bottom: 6px; }
     .upload-hint  { font-size: 12px; color: var(--muted); }
+    .upload-hint code { background: var(--surface-2); border: 1px solid var(--border);
+                        border-radius: 4px; padding: 1px 5px; color: var(--text); }
     #upload-name  { margin-top: 4px; font-size: 13px; color: var(--text); }
 
     .field textarea {
@@ -413,6 +415,11 @@
               <label>Contenu (texte ou URL — laisser vide pour pointer vers la galerie)</label>
               <input type="text" name="qr_text" value="{{ page.qr_text }}"
                      placeholder="Laisser vide = lien vers la galerie" style="max-width:100%">
+              <p class="upload-hint">
+                Emplacements dynamiques disponibles, résolus à chaque génération du QR code :
+                <code>{ip}</code> (adresse IP actuelle) et <code>{port}</code> (port de l'application).
+                Ex. <code>http://{ip}:{port}/mon-lien</code>.
+              </p>
             </div>
             <div class="field-row">
               <div class="field field-third">

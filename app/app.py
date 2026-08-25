@@ -5030,16 +5030,32 @@ def _promo_page_public(page: dict) -> dict:
     }
 
 
+def _resolve_promo_qr_placeholders(raw: str) -> str:
+    """Remplace les emplacements dynamiques du texte du QR code d'une page
+    promo par leur valeur courante — voir /admin/slideshow → Pages promo →
+    QR code. Résolu à CHAQUE génération d'image (jamais stocké résolu en
+    base) : {ip} et {port} restent donc corrects même si l'IP change (DHCP,
+    changement de réseau, redémarrage du PC...), sans repasser par l'admin.
+    Pratique pour QRcoder une adresse d'accès direct plutôt que le lien de
+    galerie par défaut, ex. « http://{ip}:{port}/mon-lien »."""
+    if '{ip}' not in raw and '{port}' not in raw:
+        return raw
+    info = get_network_info()
+    return raw.replace('{ip}', info['ip']).replace('{port}', str(info['port']))
+
+
 @app.route('/promo/qr/<int:page_id>.png')
 def promo_qr_png(page_id):
     """QR code d'une page promo — contenu et couleur propres à la page (repli
     sur l'URL de la galerie si aucun texte/URL personnalisé n'est défini),
-    voir _promo_page_public. Public (comme /qr.png) : affiché sur /bestof,
-    sans authentification."""
+    voir _promo_page_public. {ip}/{port} y sont résolus à la volée (voir
+    _resolve_promo_qr_placeholders). Public (comme /qr.png) : affiché sur
+    /bestof, sans authentification."""
     page = get_promo_page(page_id)
     if not page:
         abort(404)
-    data = (page['qr_text'] or '').strip() or build_gallery_url()
+    raw_text = (page['qr_text'] or '').strip()
+    data = _resolve_promo_qr_placeholders(raw_text) if raw_text else build_gallery_url()
     color = page['qr_color'] if re.fullmatch(r'#[0-9a-fA-F]{6}', page['qr_color'] or '') else '#000000'
     return send_file(generate_qr_png_custom(data, fill_color=color),
                       mimetype='image/png', download_name=f'promo-{page_id}-qr.png')
