@@ -60,7 +60,10 @@
       border: 1px solid rgba(255,255,255,.15);
     }
 
-    /* Slide promo (fond + QR + texte) — voir /admin/slideshow */
+    /* Pages promo (fond + QR + texte WYSIWYG) — voir /admin/slideshow →
+       Pages promo. Plusieurs pages actives tournent en rotation, chacune
+       avec sa propre fréquence, son temps de pause et son effet visuel
+       (classes .effect-* ci-dessous) — voir buildPromoContent(). */
     .slide.slide-promo { display: block; }
     .promo-bg {
       position: absolute; inset: 0; width: 100%; height: 100%;
@@ -78,21 +81,59 @@
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       gap: 36px; text-align: center; padding: 60px; box-sizing: border-box;
     }
+    /* QR en position "coin" (voir .promo-qr-pos-* plus bas) : le QR sort du
+       flux de .promo-content, qui n'a alors plus que le texte à centrer. */
+    .promo-content-textonly { gap: 0; }
     .promo-text { max-width: 900px; }
-    .promo-text p {
-      margin: 0 0 16px; line-height: 1.4;
-    }
+    .promo-text p { margin: 0 0 16px; line-height: 1.4; }
     .promo-text p:last-child { margin-bottom: 0; }
+    .promo-text ul, .promo-text ol { text-align: left; display: inline-block; margin: 0 0 16px; }
     .promo-qr-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
     .promo-qr-card {
       background: #fff; padding: 16px; border-radius: 20px;
       box-shadow: 0 14px 44px rgba(0,0,0,.45); line-height: 0;
     }
     .promo-qr-card img { display: block; }
-    .promo-qr-caption {
-      font-family: system-ui, sans-serif; font-size: 16px; color: #fff;
-      text-shadow: 0 2px 10px rgba(0,0,0,.6);
+    /* QR en position "coin" : hors du flux de .promo-content, ancré à un
+       angle de l'écran, indépendant du texte (voir qrPosition dans
+       buildPromoContent()). */
+    .promo-qr-wrap.promo-qr-pos-top-left,
+    .promo-qr-wrap.promo-qr-pos-top-right,
+    .promo-qr-wrap.promo-qr-pos-bottom-left,
+    .promo-qr-wrap.promo-qr-pos-bottom-right {
+      position: absolute; z-index: 4; margin: 0;
     }
+    .promo-qr-pos-top-left     { top: 48px; left: 48px; }
+    .promo-qr-pos-top-right    { top: 48px; right: 48px; }
+    .promo-qr-pos-bottom-left  { bottom: 48px; left: 48px; }
+    .promo-qr-pos-bottom-right { bottom: 48px; right: 48px; }
+
+    /* Effets visuels (voir /admin/slideshow → Pages promo → « Effet visuel
+       à l'apparition »), appliqués à .slide-promo via une classe effect-*
+       posée par showNext() — indépendants du fondu-enchaîné entre slides,
+       qui reste géré globalement par .slide.active (transition d'opacité).
+       --promo-duration (posée par buildPromoContent(), = temps de pause de
+       la page) cale la durée de l'effet kenburns sur tout le temps
+       d'affichage de la slide plutôt qu'une durée fixe arbitraire. */
+    @keyframes promoSlideUp { from { transform: translateY(46px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes promoZoomIn  { from { transform: scale(.86); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes promoBounce  { 0% { transform: translateY(-34px); opacity: 0; } 60% { transform: translateY(10px); opacity: 1; } 100% { transform: translateY(0); } }
+    @keyframes promoKenburns { from { transform: scale(1); } to { transform: scale(1.09); } }
+    @keyframes promoPulseQr  { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+
+    .slide-promo.effect-slide-up .promo-content,
+    .slide-promo.effect-slide-up .promo-content-textonly { animation: promoSlideUp .7s ease both; }
+    .slide-promo.effect-zoom-in .promo-content,
+    .slide-promo.effect-zoom-in .promo-content-textonly { animation: promoZoomIn .7s ease both; }
+    .slide-promo.effect-bounce .promo-content,
+    .slide-promo.effect-bounce .promo-content-textonly { animation: promoBounce .9s ease both; }
+    .slide-promo.effect-kenburns .promo-bg {
+      animation: promoKenburns var(--promo-duration, 8s) ease-in-out both;
+    }
+    .slide-promo.effect-pulse-qr .promo-qr-card {
+      animation: promoPulseQr 1.8s ease-in-out infinite;
+    }
+
   </style>
 </head>
 <body>
@@ -111,7 +152,7 @@
   let idx = 0;
   let current = 'A';
   let settings = { delay: 5, order: 'chrono', refreshInterval: 300 };
-  let promoCfg = { enabled: false, frequency: 6 };
+  let promoPages = [];
   let showMediaId = false;
   let showTags = false;
   let tagsStyle = { font: 'system-ui, sans-serif', bg_color: '#0d8b8f', text_color: '#ffffff', font_size: 14 };
@@ -138,14 +179,23 @@
     return result;
   }
 
-  // Insère une slide promo toutes les N slides "réelles" (photos/vidéos/images
-  // intermédiaires), sans compter les slides promo elles-mêmes.
+  // Insère une slide promo par page active, chacune à sa propre fréquence
+  // (« 1 fois toutes les N slides réelles »). Plusieurs pages peuvent
+  // coïncider au même point : elles sont alors insérées dans l'ordre de
+  // passage (promoPages déjà trié par sort_order — voir list_promo_pages
+  // côté serveur). Ne compte que les slides "réelles" (photos/vidéos/images
+  // intermédiaires), jamais les slides promo elles-mêmes.
   function insertPromo(base) {
-    if (!promoCfg.enabled || !promoCfg.frequency) return base;
+    const active = promoPages.filter((p) => p.frequency > 0);
+    if (!active.length) return base;
     const result = [];
-    base.forEach((s, i) => {
+    let realCount = 0;
+    base.forEach((s) => {
       result.push(s);
-      if ((i + 1) % promoCfg.frequency === 0) result.push({ type: 'promo' });
+      realCount++;
+      active.forEach((p) => {
+        if (realCount % p.frequency === 0) result.push({ type: 'promo', page: p });
+      });
     });
     return result;
   }
@@ -160,9 +210,12 @@
       base = interleave(data.captures, data.slideshow_images);
     }
     const withPromo = insertPromo(base);
-    // Aucun média, mais page promo activée : on la diffuse seule en boucle
-    // plutôt que d'afficher "Aucun média à afficher.".
-    if (!withPromo.length && promoCfg.enabled) return [{ type: 'promo' }];
+    // Aucun média, mais au moins une page promo active : on les diffuse
+    // seules en boucle plutôt que d'afficher "Aucun média à afficher.".
+    if (!withPromo.length) {
+      const active = promoPages.filter((p) => p.frequency > 0);
+      if (active.length) return active.map((p) => ({ type: 'promo', page: p }));
+    }
     return withPromo;
   }
 
@@ -172,32 +225,42 @@
     return div.innerHTML;
   }
 
-  function buildPromoContent(el) {
+  function buildPromoContent(el, page) {
     el.innerHTML = '';
-    const bg = promoCfg.background_url
-      ? `<img class="promo-bg" src="${escapeHtml(promoCfg.background_url)}" alt="">`
+    el.style.setProperty('--promo-duration', (page.pause_seconds || 8) + 's');
+
+    const bg = page.background_url
+      ? `<img class="promo-bg" src="${escapeHtml(page.background_url)}" alt="">`
       : `<div class="promo-bg-fallback"></div>`;
-    const textHtml = (promoCfg.text || '')
-      .split('\n')
-      .filter((line) => line.trim() !== '')
-      .map((line) => `<p>${escapeHtml(line)}</p>`)
-      .join('');
-    const textStyle = `font-family:${promoCfg.text_font || 'system-ui, sans-serif'};`
-      + `font-size:${promoCfg.text_size || 28}px;color:${promoCfg.text_color || '#ffffff'};`;
-    const overlay = promoCfg.overlay_enabled !== false ? `<div class="promo-overlay"></div>` : '';
-    el.innerHTML = `
-      ${bg}
-      ${overlay}
-      <div class="promo-content">
-        <div class="promo-text" style='${textStyle}'>${textHtml}</div>
-        <div class="promo-qr-wrap">
-          <div class="promo-qr-card">
-            <img src="${escapeHtml(promoCfg.qr_url)}" width="${promoCfg.qr_size || 220}" height="${promoCfg.qr_size || 220}" alt="QR code galerie">
-          </div>
-          <div class="promo-qr-caption">Scannez pour voir &amp; voter</div>
+    const textStyle = `font-family:${page.text_font || 'system-ui, sans-serif'};`
+      + `font-size:${page.text_size || 28}px;color:${page.text_color || '#ffffff'};`;
+    const overlay = page.overlay_enabled !== false ? `<div class="promo-overlay"></div>` : '';
+    const qrPosition = page.qr_position || 'center';
+    const qrCard = page.qr_enabled
+      ? `<div class="promo-qr-card">
+           <img src="${escapeHtml(page.qr_url)}" width="${page.qr_size || 220}" height="${page.qr_size || 220}" alt="QR code">
+         </div>`
+      : '';
+
+    if (page.qr_enabled && qrPosition !== 'center') {
+      el.innerHTML = `
+        ${bg}
+        ${overlay}
+        <div class="promo-content promo-content-textonly">
+          <div class="promo-text" style='${textStyle}'>${page.html_content || ''}</div>
         </div>
-      </div>
-    `;
+        <div class="promo-qr-wrap promo-qr-pos-${qrPosition}">${qrCard}</div>
+      `;
+    } else {
+      el.innerHTML = `
+        ${bg}
+        ${overlay}
+        <div class="promo-content">
+          <div class="promo-text" style='${textStyle}'>${page.html_content || ''}</div>
+          ${page.qr_enabled ? `<div class="promo-qr-wrap">${qrCard}</div>` : ''}
+        </div>
+      `;
+    }
   }
 
   function showNext() {
@@ -215,14 +278,14 @@
     const curEl  = document.getElementById('slide' + current);
     const nextEl = document.getElementById('slide' + next);
 
-    nextEl.className = 'slide' + (slide.type === 'promo' ? ' slide-promo' : '');
+    nextEl.className = 'slide' + (slide.type === 'promo' ? ` slide-promo effect-${slide.page.effect || 'fade'}` : '');
 
     let called = false;
     const advance = () => { if (!called) { called = true; showNext(); } };
 
     if (slide.type === 'promo') {
-      buildPromoContent(nextEl);
-      const t = setTimeout(advance, settings.delay * 1000);
+      buildPromoContent(nextEl, slide.page);
+      const t = setTimeout(advance, (slide.page.pause_seconds || 8) * 1000);
       cleanup = () => clearTimeout(t);
     } else if (slide.type === 'video') {
       nextEl.innerHTML = '';
@@ -285,7 +348,7 @@
   }
 
   let lastData = null; // dernières captures/images reçues, réutilisées pour reconstruire
-                        // la liste sans re-fetch quand seule la promo est rafraîchie
+                        // la liste sans re-fetch quand seules les pages promo sont rafraîchies
 
   async function fetchSlides() {
     const res = await fetch('/api/bestof/slides');
@@ -307,7 +370,7 @@
     try {
       const data = await fetchSlides();
       lastData = data;
-      promoCfg = data.promo || promoCfg;
+      promoPages = data.promo_pages || promoPages;
       showMediaId = !!data.show_media_id;
       showTags = !!data.show_tags;
       tagsStyle = data.tags_style || tagsStyle;
@@ -319,20 +382,22 @@
     }
   }
 
-  // La page promo (fond/texte/QR/fréquence) est interrogée à cadence fixe et
-  // rapide, indépendamment de slideshow.refresh_interval (qui ne cadence que
-  // le rafraîchissement complet — captures, images intermédiaires — et peut
-  // être lent, voire désactivé) : un changement dans /admin/slideshow →
-  // Page promo s'applique donc toujours en quelques secondes, sans devoir
-  // recharger la page ni attendre le refresh complet.
-  async function refreshPromoSettings() {
+  // Les pages promo (fond/texte/QR/fréquence/pause/effet) sont interrogées à
+  // cadence fixe et rapide, indépendamment de slideshow.refresh_interval (qui
+  // ne cadence que le rafraîchissement complet — captures, images
+  // intermédiaires — et peut être lent, voire désactivé) : un changement fait
+  // dans /admin/slideshow → Pages promo s'applique donc toujours en quelques
+  // secondes, sans devoir recharger la page ni attendre le rafraîchissement
+  // complet.
+  async function refreshPromoPages() {
     try {
-      const res = await fetch('/api/bestof/promo-settings');
-      promoCfg = await res.json();
+      const res = await fetch('/api/bestof/promo-pages');
+      const data = await res.json();
+      promoPages = data.pages || [];
       if (lastData) applySlides(buildSlides(lastData));
     } catch (e) { /* on garde les réglages actuels */ }
   }
-  setInterval(refreshPromoSettings, 15000);
+  setInterval(refreshPromoPages, 15000);
 
   try {
     const data = await fetchSlides();
@@ -342,7 +407,7 @@
       order:           data.order || 'chrono',
       refreshInterval: data.refresh_interval ?? 300,
     };
-    promoCfg = data.promo || promoCfg;
+    promoPages = data.promo_pages || [];
     showMediaId = !!data.show_media_id;
     showTags = !!data.show_tags;
     tagsStyle = data.tags_style || tagsStyle;

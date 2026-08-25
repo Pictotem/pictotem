@@ -5,6 +5,8 @@ import re
 import socket
 import subprocess
 from datetime import datetime
+from html import escape
+from html.parser import HTMLParser
 from pathlib import Path
 
 import qrcode
@@ -71,6 +73,112 @@ def generate_qr_png(url: str) -> io.BytesIO:
         img.save(buf, format='PNG')
         _QR_CACHE[url] = buf.getvalue()
     return io.BytesIO(_QR_CACHE[url])
+
+
+# Cache QR personnalisés (pages promo) : clé = (contenu, couleur, taille de
+# rendu). Distinct de _QR_CACHE ci-dessus (QR fixe noir/blanc → galerie).
+_QR_CACHE_CUSTOM: dict = {}
+
+
+def generate_qr_png_custom(data: str, fill_color: str = '#000000',
+                            back_color: str = '#ffffff', box_size: int = 10) -> io.BytesIO:
+    """QR code personnalisable (contenu, couleur) pour les pages promo — voir
+    /admin/slideshow → Pages promo. Distinct de generate_qr_png (QR fixe noir
+    sur blanc vers la galerie, utilisé ailleurs dans l'app) : ici le contenu
+    ET la couleur varient par page promo, donc la clé de cache inclut les
+    deux. `box_size` fixe la résolution de rendu — le QR est ensuite affiché
+    à la taille voulue via les attributs HTML width/height (comme
+    generate_qr_png), pas besoin de régénérer juste pour changer l'affichage."""
+    data = data or ''
+    fill_color = fill_color or '#000000'
+    back_color = back_color or '#ffffff'
+    key = (data, fill_color, back_color, box_size)
+    if key not in _QR_CACHE_CUSTOM:
+        logger.info('Génération QR code personnalisé (page promo)')
+        qr = qrcode.QRCode(box_size=box_size, border=2)
+        qr.add_data(data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color=fill_color, back_color=back_color)
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        _QR_CACHE_CUSTOM[key] = buf.getvalue()
+    return io.BytesIO(_QR_CACHE_CUSTOM[key])
+
+
+# ── Texte WYSIWYG des pages promo ────────────────────────────────────────────
+# Nettoyage du HTML produit par l'éditeur (voir static/promo-editor.js) avant
+# stockage en base : liste blanche de balises de mise en forme basique
+# (gras/italique/souligné/listes/paragraphes), seul attribut toléré :
+# style="text-align: ..." — pas de script, pas de lien, pas de gestionnaire
+# d'évènement. L'admin est seule à pouvoir écrire ce contenu, mais autant
+# rester prudent (défense en profondeur, coût quasi nul).
+
+_PROMO_HTML_ALLOWED_TAGS = {
+    'p': set(), 'br': set(), 'b': set(), 'strong': set(), 'i': set(), 'em': set(),
+    'u': set(), 'ul': set(), 'ol': set(), 'li': set(), 'div': {'style'}, 'span': {'style'},
+}
+_PROMO_HTML_STYLE_RE = re.compile(r'^text-align\s*:\s*(left|center|right|justify)\s*;?$')
+
+
+class _PromoHtmlSanitizer(HTMLParser):
+    """`_skip_depth` compte les balises NON autorisées actuellement ouvertes
+    (compteur simple, pas une pile par nom de balise : suffisant ici, le
+    contenu vient soit de l'éditeur WYSIWYG soit d'un admin de confiance) —
+    tant qu'il est > 0, le texte rencontré (handle_data) est ignoré, pour ne
+    jamais laisser fuir en clair le contenu d'un <script>/<style> retiré."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out = []
+        self._skip_depth = 0
+
+    def _emit_start(self, tag, attrs):
+        allowed_attrs = _PROMO_HTML_ALLOWED_TAGS[tag]
+        kept = []
+        for name, value in attrs:
+            if (name == 'style' and 'style' in allowed_attrs and value
+                    and _PROMO_HTML_STYLE_RE.match(value.strip())):
+                kept.append(f'style="{escape(value.strip(), quote=True)}"')
+        attr_str = (' ' + ' '.join(kept)) if kept else ''
+        self.out.append(f'<{tag}{attr_str}>')
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _PROMO_HTML_ALLOWED_TAGS:
+            self._emit_start(tag, attrs)
+        else:
+            self._skip_depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        if tag in _PROMO_HTML_ALLOWED_TAGS:
+            self._emit_start(tag, attrs)
+
+    def handle_endtag(self, tag):
+        if tag in _PROMO_HTML_ALLOWED_TAGS:
+            if tag != 'br':
+                self.out.append(f'</{tag}>')
+        elif self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data):
+        if self._skip_depth == 0:
+            self.out.append(escape(data))
+
+
+def sanitize_promo_html(raw_html: str) -> str:
+    """Nettoie le HTML d'une page promo avant stockage (voir
+    _PROMO_HTML_ALLOWED_TAGS ci-dessus) — retourne une chaîne vide si le
+    contenu est vide ou si le nettoyage échoue plutôt que de faire planter
+    l'enregistrement de la page."""
+    if not raw_html:
+        return ''
+    parser = _PromoHtmlSanitizer()
+    try:
+        parser.feed(raw_html)
+        parser.close()
+    except Exception:
+        logger.exception('Échec de nettoyage HTML page promo, contenu ignoré')
+        return ''
+    return ''.join(parser.out)
 
 
 def make_thumb(src_path, dst_path, size=(480, 800)):

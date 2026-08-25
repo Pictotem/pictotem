@@ -72,11 +72,15 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 create_guest_code, update_guest_code_texte, regenerate_guest_code,
                 delete_guest_code_db, upsert_guest_code, purge_guest_codes_by_date,
                 purge_guest_codes_first_n, generate_guest_code,
-                list_custom_fonts, create_custom_font, delete_custom_font_db)
+                list_custom_fonts, create_custom_font, delete_custom_font_db,
+                list_promo_backgrounds, add_promo_background, delete_promo_background_db,
+                list_promo_pages, get_promo_page, create_promo_page, update_promo_page,
+                delete_promo_page_db, move_promo_page)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
-                   enable_autostart, generate_qr_png, get_network_info,
-                   is_autostart_enabled, make_thumb, message_text, print_photo,
-                   set_windows_wallpaper, validate_printer)
+                   enable_autostart, generate_qr_png, generate_qr_png_custom,
+                   get_network_info, is_autostart_enabled, make_thumb, message_text,
+                   print_photo, sanitize_promo_html, set_windows_wallpaper,
+                   validate_printer)
 
 # ── Application Flask ─────────────────────────────────────────────────────────
 
@@ -2839,8 +2843,6 @@ _ADMIN_BLOCKS = {
     'tags_media_id':       {'title': "ID unique par média",                     'default_page': 'tags',        'template': 'blocks/tags_media_id.html',       'context_fn': '_block_ctx_tags_media_id'},
     'tags_display':        {'title': "Affichage sur /bestof",                   'default_page': 'tags',        'template': 'blocks/tags_display.html',        'context_fn': '_block_ctx_tags_display'},
     'slideshow_settings':      {'title': "Paramètres",                          'default_page': 'slideshow',   'template': 'blocks/slideshow_settings.html',      'context_fn': '_block_ctx_slideshow_settings'},
-    'slideshow_promo_settings': {'title': "Page promo",                         'default_page': 'slideshow',   'template': 'blocks/slideshow_promo_settings.html', 'context_fn': '_block_ctx_slideshow_promo_settings'},
-    'slideshow_promo_bg':      {'title': "Fond de la page promo",               'default_page': 'slideshow',   'template': 'blocks/slideshow_promo_bg.html',      'context_fn': '_block_ctx_slideshow_promo_bg'},
     'screensaver_settings':    {'title': "Paramètres",                          'default_page': 'screensaver', 'template': 'blocks/screensaver_settings.html',    'context_fn': '_block_ctx_screensaver_settings'},
     'guest_uploads_settings':   {'title': "Paramètres",                         'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_settings.html',   'context_fn': '_block_ctx_guest_uploads_settings'},
     'guest_uploads_share_link': {'title': "Lien de partage",                    'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_share_link.html', 'context_fn': '_block_ctx_guest_uploads_share_link'},
@@ -3190,17 +3192,6 @@ def _block_ctx_tags_display() -> dict:
 
 def _block_ctx_slideshow_settings() -> dict:
     return {'slideshow_settings': _slideshow_settings()}
-
-
-def _block_ctx_slideshow_promo_settings() -> dict:
-    return {'slideshow_promo': _promo_settings(), 'slideshow_promo_fonts': _all_fonts()}
-
-
-def _block_ctx_slideshow_promo_bg() -> dict:
-    # Même source que _block_ctx_slideshow_promo_settings (clé
-    # 'slideshow_promo' partagée à l'identique) : les deux blocs lisent
-    # _promo_settings(), sans risque si cohabités sur une même page.
-    return {'slideshow_promo': _promo_settings()}
 
 
 def _block_ctx_screensaver_settings() -> dict:
@@ -4971,12 +4962,18 @@ def admin_buttons_set_style():
 SLIDESHOW_DIR = BASE_DIR / 'app' / 'static' / 'slideshow'
 _SLIDESHOW_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp', '.gif'}
 
-# ── Slide promo (info QR) ────────────────────────────────────────────────────
-# Slide auto-générée (fond + QR code galerie + texte), insérée périodiquement
-# dans le diaporama /bestof pour informer les invités : présence du photobox,
-# galerie en ligne avec vote, upload de photos depuis smartphone. Rendue
-# côté client (bestof.html) à partir des réglages ci-dessous — pas d'image
-# à régénérer côté serveur, tout est piloté par CSS/JS.
+# ── Pages promo (info QR) ────────────────────────────────────────────────────
+# CRUD v2.0 : plusieurs pages promo (fond + texte WYSIWYG + QR code) en
+# rotation dans le diaporama /bestof pour informer les invités : présence du
+# photobox, galerie en ligne avec vote, upload de photos depuis smartphone —
+# ou tout autre message/QR défini par l'admin. Chaque page a sa propre
+# fréquence d'apparition, son temps de pause, son effet visuel. Rendues côté
+# client (bestof.html) à partir de _promo_page_public() ci-dessous — pas
+# d'image à régénérer côté serveur pour le fond/texte, seul le QR est un PNG
+# généré à la volée (voir promo_qr_png). CRUD complet : db.py
+# (list_promo_pages, create_promo_page, update_promo_page,
+# delete_promo_page_db, move_promo_page, list_promo_backgrounds,
+# add_promo_background, delete_promo_background_db).
 
 PROMO_DIR = BASE_DIR / 'app' / 'static' / 'promo'
 _PROMO_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp'}
@@ -4988,47 +4985,64 @@ _PROMO_FONTS = [
     ('"Courier New", monospace',          'Courier New'),
     ('"Comic Sans MS", cursive',          'Comic Sans MS'),
 ]
-_PROMO_DEFAULT_TEXT = (
-    "Un photobox est à votre disposition !\n"
-    "Retrouvez toutes les photos sur la galerie en ligne et votez pour vos favorites.\n"
-    "Vous pouvez aussi envoyer vos propres photos depuis votre smartphone."
-)
+# Effets visuels disponibles à l'apparition d'une page promo (voir bestof.html
+# → .slide-promo.effect-* pour les animations CSS correspondantes). 'fade' ne
+# rajoute rien : le fondu-enchaîné entre slides existe déjà globalement.
+_PROMO_EFFECTS = [
+    ('fade',     'Fondu (par défaut)'),
+    ('slide-up', 'Glissement vers le haut'),
+    ('zoom-in',  'Zoom avant'),
+    ('kenburns', 'Ken Burns (fond en lent zoom continu)'),
+    ('bounce',   'Rebond'),
+    ('pulse-qr', 'Pulsation du QR code'),
+]
+_PROMO_QR_POSITIONS = [
+    ('center',       'Centré, sous le texte'),
+    ('top-left',     'Coin haut-gauche'),
+    ('top-right',    'Coin haut-droit'),
+    ('bottom-left',  'Coin bas-gauche'),
+    ('bottom-right', 'Coin bas-droit'),
+]
 
 
-def _promo_settings():
-    return {
-        'enabled':         get_setting('slideshow.promo_enabled', '0') == '1',
-        'frequency':       max(1, int(get_setting('slideshow.promo_frequency', '6') or '6')),
-        'background':      get_setting('slideshow.promo_background_filename', ''),
-        'overlay_enabled': get_setting('slideshow.promo_overlay_enabled', '1') == '1',
-        'qr_size':         max(60, int(get_setting('slideshow.promo_qr_size', '220') or '220')),
-        'text':            get_setting('slideshow.promo_text', '') or _PROMO_DEFAULT_TEXT,
-        'text_size':       max(10, int(get_setting('slideshow.promo_text_size', '28') or '28')),
-        'text_font':       get_setting('slideshow.promo_text_font', _PROMO_FONTS[0][0]),
-        'text_color':      get_setting('slideshow.promo_text_color', '#ffffff'),
-    }
-
-
-def _promo_public_data():
-    """Représentation JSON de la page promo, partagée par /api/bestof/slides
+def _promo_page_public(page: dict) -> dict:
+    """Représentation JSON d'une page promo, partagée par /api/bestof/slides
     (rafraîchissement complet, cadencé par slideshow.refresh_interval) et
-    /api/bestof/promo-settings (interrogée à cadence fixe et rapide par le
+    /api/bestof/promo-pages (interrogée à cadence fixe et rapide par le
     kiosque déjà ouvert, pour appliquer les changements du back office sans
     attendre — voir bestof.html)."""
-    p = _promo_settings()
     return {
-        'enabled':         p['enabled'],
-        'frequency':       p['frequency'],
-        'background_url':  (url_for('static', filename=f'promo/{p["background"]}')
-                             if p['background'] else ''),
-        'overlay_enabled': p['overlay_enabled'],
-        'qr_url':          url_for('qr_png'),
-        'qr_size':         p['qr_size'],
-        'text':            p['text'],
-        'text_size':       p['text_size'],
-        'text_font':       p['text_font'],
-        'text_color':     p['text_color'],
+        'id':              page['id'],
+        'frequency':       max(1, page['frequency']),
+        'pause_seconds':   max(1, page['pause_seconds']),
+        'background_url':  (url_for('static', filename=f'promo/{page["background_filename"]}')
+                             if page['background_filename'] else ''),
+        'overlay_enabled': bool(page['overlay_enabled']),
+        'html_content':    page['html_content'] or '',
+        'text_font':       page['text_font'],
+        'text_size':       page['text_size'],
+        'text_color':      page['text_color'],
+        'effect':          page['effect'],
+        'qr_enabled':      bool(page['qr_enabled']),
+        'qr_url':          url_for('promo_qr_png', page_id=page['id']),
+        'qr_size':         max(60, page['qr_size']),
+        'qr_position':     page['qr_position'],
     }
+
+
+@app.route('/promo/qr/<int:page_id>.png')
+def promo_qr_png(page_id):
+    """QR code d'une page promo — contenu et couleur propres à la page (repli
+    sur l'URL de la galerie si aucun texte/URL personnalisé n'est défini),
+    voir _promo_page_public. Public (comme /qr.png) : affiché sur /bestof,
+    sans authentification."""
+    page = get_promo_page(page_id)
+    if not page:
+        abort(404)
+    data = (page['qr_text'] or '').strip() or build_gallery_url()
+    color = page['qr_color'] if re.fullmatch(r'#[0-9a-fA-F]{6}', page['qr_color'] or '') else '#000000'
+    return send_file(generate_qr_png_custom(data, fill_color=color),
+                      mimetype='image/png', download_name=f'promo-{page_id}-qr.png')
 
 
 def _slideshow_settings():
@@ -5125,7 +5139,7 @@ def api_bestof_slides():
         'delay':            s['delay'],
         'order':            s['order'],
         'refresh_interval': s['refresh_interval'],
-        'promo':            _promo_public_data(),
+        'promo_pages':       [_promo_page_public(p) for p in list_promo_pages() if p['active']],
         'show_media_id':    _media_id_settings()['show_on_bestof'],
         'show_tags':        tags_cfg['show_on_bestof'],
         'tags_style':       {
@@ -5137,27 +5151,27 @@ def api_bestof_slides():
     })
 
 
-@app.route('/api/bestof/promo-settings')
-def api_bestof_promo_settings():
-    """Réglages légers de la page promo, interrogés à cadence fixe par le
-    kiosque déjà ouvert (voir bestof.html) — indépendant de
-    slideshow.refresh_interval, qui ne cadence que le rafraîchissement complet
-    (captures, images intermédiaires) et peut être réglé sur une valeur lente,
-    voire désactivée, sans que ça ralentisse l'application des changements
-    faits dans /admin/slideshow → Page promo."""
-    return jsonify(_promo_public_data())
+@app.route('/api/bestof/promo-pages')
+def api_bestof_promo_pages():
+    """Pages promo actives, interrogées à cadence fixe par le kiosque déjà
+    ouvert (voir bestof.html) — indépendant de slideshow.refresh_interval,
+    qui ne cadence que le rafraîchissement complet (captures, images
+    intermédiaires) et peut être réglé sur une valeur lente, voire désactivé,
+    sans que ça ralentisse l'application des changements faits dans
+    /admin/slideshow → Pages promo."""
+    return jsonify({'pages': [_promo_page_public(p) for p in list_promo_pages() if p['active']]})
 
 
 @app.route('/admin/slideshow', methods=['GET', 'POST'])
 @require_admin_auth
 @csrf_protect
 def admin_slideshow():
-    """Tuile « Slideshow Best Of ». « Paramètres », « Page promo » et
-    « Fond de la page promo » ont chacune leur propre route dédiée
-    ci-dessous et rejoignent le système de blocs. « Images intermédiaires »
-    (upload/suppression) reste ici, hors du système de blocs : ce n'est pas
-    un réglage mais la gestion du contenu lui-même (comme
-    admin_captures/admin_emails)."""
+    """Tuile « Slideshow Best Of ». « Paramètres » a sa propre route dédiée
+    ci-dessous et rejoint le système de blocs. « Images intermédiaires »
+    (upload/suppression), « Pages promo » et « Bibliothèque de fonds »
+    restent ici, hors système de blocs : ce ne sont pas des réglages mais la
+    gestion de contenu lui-même (CRUD à plusieurs entrées, comme
+    admin_captures/admin_frames)."""
     if request.method == 'POST':
         action = request.form.get('action', 'settings')
 
@@ -5196,6 +5210,11 @@ def admin_slideshow():
         blocks=blocks, current_page='slideshow', admin_pages=_admin_all_pages(),
         page_label=_admin_page_label('slideshow', 'Slideshow Best Of'),
         images=images,
+        promo_pages=list_promo_pages(),
+        promo_backgrounds=list_promo_backgrounds(),
+        promo_fonts=_all_fonts(),
+        promo_effects=_PROMO_EFFECTS,
+        promo_qr_positions=_PROMO_QR_POSITIONS,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -5218,63 +5237,130 @@ def admin_slideshow_set_settings():
     return _admin_block_redirect('slideshow_settings', ok='Paramètres mis à jour.')
 
 
-@app.route('/admin/slideshow/promo_settings', methods=['POST'])
+# ── Pages promo — CRUD ───────────────────────────────────────────────────────
+
+@app.route('/admin/slideshow/promo/create', methods=['POST'])
 @require_admin_auth
 @csrf_protect
-def admin_slideshow_set_promo_settings():
-    set_setting('slideshow.promo_enabled', '1' if request.form.get('promo_enabled') else '0')
-    set_setting('slideshow.promo_overlay_enabled',
-                '1' if request.form.get('promo_overlay_enabled') else '0')
-    raw_freq = (request.form.get('promo_frequency') or '').strip()
+def admin_promo_page_create():
+    create_promo_page()
+    return redirect(url_for('admin_slideshow', ok='Page promo créée — complétez-la ci-dessous.'))
+
+
+@app.route('/admin/slideshow/promo/<int:page_id>/update', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_promo_page_update(page_id):
+    if not get_promo_page(page_id):
+        abort(404)
+
+    fields = {
+        'active':          1 if request.form.get('active') else 0,
+        'overlay_enabled': 1 if request.form.get('overlay_enabled') else 0,
+        'qr_enabled':      1 if request.form.get('qr_enabled') else 0,
+    }
+
+    raw_order = (request.form.get('sort_order') or '').strip()
+    if raw_order.lstrip('-').isdigit():
+        fields['sort_order'] = int(raw_order)
+
+    raw_freq = (request.form.get('frequency') or '').strip()
     if raw_freq.isdigit() and int(raw_freq) > 0:
-        set_setting('slideshow.promo_frequency', raw_freq)
-    raw_qr = (request.form.get('promo_qr_size') or '').strip()
-    if raw_qr.isdigit() and int(raw_qr) >= 60:
-        set_setting('slideshow.promo_qr_size', raw_qr)
-    set_setting('slideshow.promo_text', request.form.get('promo_text', '').strip())
-    raw_tsize = (request.form.get('promo_text_size') or '').strip()
+        fields['frequency'] = int(raw_freq)
+
+    raw_pause = (request.form.get('pause_seconds') or '').strip()
+    if raw_pause.isdigit() and int(raw_pause) > 0:
+        fields['pause_seconds'] = int(raw_pause)
+
+    raw_tsize = (request.form.get('text_size') or '').strip()
     if raw_tsize.isdigit() and int(raw_tsize) >= 10:
-        set_setting('slideshow.promo_text_size', raw_tsize)
-    font_value = request.form.get('promo_text_font', '')
+        fields['text_size'] = int(raw_tsize)
+
+    raw_qsize = (request.form.get('qr_size') or '').strip()
+    if raw_qsize.isdigit() and int(raw_qsize) >= 60:
+        fields['qr_size'] = int(raw_qsize)
+
+    font_value = request.form.get('text_font', '')
     if font_value in dict(_all_fonts()):
-        set_setting('slideshow.promo_text_font', font_value)
-    color_value = request.form.get('promo_text_color', '').strip()
+        fields['text_font'] = font_value
+
+    color_value = request.form.get('text_color', '').strip()
     if re.fullmatch(r'#[0-9a-fA-F]{6}', color_value):
-        set_setting('slideshow.promo_text_color', color_value)
-    return _admin_block_redirect('slideshow_promo_settings', ok='Réglages de la page promo mis à jour.')
+        fields['text_color'] = color_value
+
+    qr_color_value = request.form.get('qr_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', qr_color_value):
+        fields['qr_color'] = qr_color_value
+
+    effect_value = request.form.get('effect', '')
+    if effect_value in dict(_PROMO_EFFECTS):
+        fields['effect'] = effect_value
+
+    position_value = request.form.get('qr_position', '')
+    if position_value in dict(_PROMO_QR_POSITIONS):
+        fields['qr_position'] = position_value
+
+    fields['qr_text'] = (request.form.get('qr_text', '') or '').strip()[:500]
+
+    raw_bg = (request.form.get('background_id') or '').strip()
+    if raw_bg == '':
+        fields['background_id'] = None
+    elif raw_bg.isdigit():
+        fields['background_id'] = int(raw_bg)
+
+    fields['html_content'] = sanitize_promo_html(request.form.get('html_content', ''))
+
+    update_promo_page(page_id, **fields)
+    return redirect(url_for('admin_slideshow', ok='Page promo mise à jour.'))
 
 
-@app.route('/admin/slideshow/promo_bg_upload', methods=['POST'])
+@app.route('/admin/slideshow/promo/<int:page_id>/delete', methods=['POST'])
 @require_admin_auth
 @csrf_protect
-def admin_slideshow_promo_bg_upload():
+def admin_promo_page_delete(page_id):
+    page = delete_promo_page_db(page_id)
+    if not page:
+        return redirect(url_for('admin_slideshow', err='Page promo introuvable.'))
+    return redirect(url_for('admin_slideshow', ok='Page promo supprimée.'))
+
+
+@app.route('/admin/slideshow/promo/<int:page_id>/move', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_promo_page_move(page_id):
+    direction = request.form.get('direction', '')
+    if direction in ('up', 'down'):
+        move_promo_page(page_id, direction)
+    return redirect(url_for('admin_slideshow', ok='Ordre mis à jour.'))
+
+
+@app.route('/admin/slideshow/promo/bg_upload', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_promo_bg_upload():
     file = request.files.get('background')
     if not file or not file.filename:
-        return _admin_block_redirect('slideshow_promo_bg', err='Aucun fichier sélectionné.')
+        return redirect(url_for('admin_slideshow', err='Aucun fichier sélectionné.'))
     ext = Path(file.filename).suffix.lower()
     if ext not in _PROMO_ALLOWED_EXT:
-        return _admin_block_redirect('slideshow_promo_bg', err='Format non supporté (PNG, JPG, WEBP).')
+        return redirect(url_for('admin_slideshow', err='Format non supporté (PNG, JPG, WEBP).'))
     PROMO_DIR.mkdir(parents=True, exist_ok=True)
-    # Un seul fond actif à la fois : on retire l'ancien fichier avant d'enregistrer le nouveau.
-    old = get_setting('slideshow.promo_background_filename', '')
-    if old:
-        (PROMO_DIR / old).unlink(missing_ok=True)
     safe = f'promo-bg-{int(datetime.now().timestamp())}{ext}'
     file.save(str(PROMO_DIR / safe))
-    set_setting('slideshow.promo_background_filename', safe)
-    return _admin_block_redirect('slideshow_promo_bg', ok='Fond mis à jour.')
+    label = (request.form.get('label', '') or '').strip()[:80]
+    add_promo_background(safe, label)
+    return redirect(url_for('admin_slideshow', ok='Fond ajouté à la bibliothèque.'))
 
 
-@app.route('/admin/slideshow/promo_bg_delete', methods=['POST'])
+@app.route('/admin/slideshow/promo/bg/<int:bg_id>/delete', methods=['POST'])
 @require_admin_auth
 @csrf_protect
-def admin_slideshow_promo_bg_delete():
-    old = get_setting('slideshow.promo_background_filename', '')
-    if old:
-        (PROMO_DIR / old).unlink(missing_ok=True)
-        set_setting('slideshow.promo_background_filename', '')
-        return _admin_block_redirect('slideshow_promo_bg', ok='Fond supprimé.')
-    return _admin_block_redirect('slideshow_promo_bg', err='Aucun fond à supprimer.')
+def admin_promo_bg_delete(bg_id):
+    bg = delete_promo_background_db(bg_id)
+    if bg:
+        (PROMO_DIR / bg['filename']).unlink(missing_ok=True)
+        return redirect(url_for('admin_slideshow', ok='Fond supprimé de la bibliothèque.'))
+    return redirect(url_for('admin_slideshow', err='Fond introuvable.'))
 
 
 # ── Écran de veille (interface principale) ──────────────────────────────────

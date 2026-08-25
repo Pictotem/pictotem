@@ -254,6 +254,101 @@ def init_db():
             created_at TEXT NOT NULL
         )
         """)
+
+        # Pages promo (voir /admin/slideshow → Pages promo, app.py) : CRUD
+        # v2.0 remplaçant l'ancienne page promo unique (réglages
+        # slideshow.promo_* dans `settings` + fond unique dans PROMO_DIR).
+        # Bibliothèque de fonds partagée par toutes les pages promo.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS promo_backgrounds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS promo_pages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            frequency INTEGER NOT NULL DEFAULT 6,
+            pause_seconds INTEGER NOT NULL DEFAULT 8,
+            html_content TEXT NOT NULL DEFAULT '',
+            background_id INTEGER,
+            overlay_enabled INTEGER NOT NULL DEFAULT 1,
+            text_font TEXT NOT NULL DEFAULT 'system-ui, "Segoe UI", sans-serif',
+            text_size INTEGER NOT NULL DEFAULT 28,
+            text_color TEXT NOT NULL DEFAULT '#ffffff',
+            effect TEXT NOT NULL DEFAULT 'fade',
+            qr_enabled INTEGER NOT NULL DEFAULT 1,
+            qr_text TEXT NOT NULL DEFAULT '',
+            qr_size INTEGER NOT NULL DEFAULT 220,
+            qr_position TEXT NOT NULL DEFAULT 'center',
+            qr_color TEXT NOT NULL DEFAULT '#000000',
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_promo_pages_sort_order ON promo_pages(sort_order)')
+
+        # Migration v2.0 : reprise ponctuelle de l'ancienne page promo unique
+        # vers le nouveau CRUD multi-pages — seulement si promo_pages est
+        # encore vide ET qu'un réglage v1 existe (install déjà en prod avant
+        # la v2.0). Sur une install neuve, promo_pages reste simplement vide
+        # (l'admin crée ses pages promo depuis /admin/slideshow).
+        try:
+            already = conn.execute('SELECT COUNT(*) AS n FROM promo_pages').fetchone()['n']
+            legacy_row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'slideshow.promo_enabled'"
+            ).fetchone()
+            if already == 0 and legacy_row is not None:
+                def _legacy(key, default=''):
+                    r = conn.execute('SELECT value FROM settings WHERE key = ?', (key,)).fetchone()
+                    return r['value'] if r else default
+
+                bg_id = None
+                bg_filename = _legacy('slideshow.promo_background_filename')
+                if bg_filename:
+                    cur = conn.execute(
+                        'INSERT INTO promo_backgrounds(filename, label, created_at) VALUES(?,?,?)',
+                        (bg_filename, 'Fond repris de la v1', datetime.now().isoformat(timespec='seconds'))
+                    )
+                    bg_id = cur.lastrowid
+
+                legacy_text = _legacy('slideshow.promo_text')
+                html_content = ''.join(
+                    f'<p>{line}</p>' for line in legacy_text.split(chr(10)) if line.strip()
+                ) if legacy_text else ''
+
+                conn.execute("""
+                    INSERT INTO promo_pages(
+                        active, sort_order, frequency, pause_seconds, html_content,
+                        background_id, overlay_enabled, text_font, text_size, text_color,
+                        effect, qr_enabled, qr_text, qr_size, qr_position, qr_color, created_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    1 if _legacy('slideshow.promo_enabled') == '1' else 0,
+                    0,
+                    int(_legacy('slideshow.promo_frequency', '6') or '6'),
+                    int(_legacy('slideshow.delay', '5') or '5'),
+                    html_content,
+                    bg_id,
+                    1 if _legacy('slideshow.promo_overlay_enabled', '1') == '1' else 0,
+                    _legacy('slideshow.promo_text_font', 'system-ui, "Segoe UI", sans-serif'),
+                    int(_legacy('slideshow.promo_text_size', '28') or '28'),
+                    _legacy('slideshow.promo_text_color', '#ffffff'),
+                    'fade',
+                    1,
+                    '',
+                    int(_legacy('slideshow.promo_qr_size', '220') or '220'),
+                    'center',
+                    '#000000',
+                    datetime.now().isoformat(timespec='seconds'),
+                ))
+                conn.commit()
+        except Exception:
+            logger.exception('Migration page promo v1 -> v2 échouée (ignorée, CRUD reste utilisable vide)')
+
         conn.commit()
 
 
@@ -569,6 +664,140 @@ def delete_slideshow_image_db(image_id):
         conn.execute('DELETE FROM slideshow_images WHERE id = ?', (image_id,))
         conn.commit()
     return img
+
+
+# ── Pages promo (diaporama /bestof) ──────────────────────────────────────────
+# CRUD v2.0 : plusieurs pages promo en rotation dans /bestof, chacune avec son
+# fond (choisi dans la bibliothèque partagée promo_backgrounds), sa fréquence,
+# son temps de pause, son texte WYSIWYG, sa police/taille/couleur, son effet
+# visuel et son QR code (texte, taille, position, couleur) — voir app.py pour
+# la validation des champs et le rendu (/bestof, admin_slideshow).
+
+def list_promo_backgrounds():
+    with closing(db_conn()) as conn:
+        rows = conn.execute('SELECT * FROM promo_backgrounds ORDER BY created_at DESC').fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_promo_background(filename, label=''):
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            'INSERT INTO promo_backgrounds(filename, label, created_at) VALUES(?,?,?)',
+            (filename, label, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def delete_promo_background_db(bg_id):
+    """Supprime de la DB et retourne le dict (l'appelant gère le fichier sur
+    disque) — les pages promo qui utilisaient ce fond retombent sur le
+    dégradé par défaut (background_id remis à NULL) plutôt que de pointer
+    vers un fond qui n'existe plus."""
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM promo_backgrounds WHERE id = ?', (bg_id,)).fetchone()
+        if not row:
+            return None
+        bg = dict(row)
+        conn.execute('UPDATE promo_pages SET background_id = NULL WHERE background_id = ?', (bg_id,))
+        conn.execute('DELETE FROM promo_backgrounds WHERE id = ?', (bg_id,))
+        conn.commit()
+    return bg
+
+
+_PROMO_PAGE_COLUMNS = (
+    'active', 'sort_order', 'frequency', 'pause_seconds', 'html_content',
+    'background_id', 'overlay_enabled', 'text_font', 'text_size', 'text_color',
+    'effect', 'qr_enabled', 'qr_text', 'qr_size', 'qr_position', 'qr_color',
+)
+
+
+def _promo_page_row_to_dict(row, bg_by_id):
+    d = dict(row)
+    bg = bg_by_id.get(d['background_id'])
+    d['background_filename'] = bg['filename'] if bg else ''
+    return d
+
+
+def list_promo_pages():
+    with closing(db_conn()) as conn:
+        rows = conn.execute('SELECT * FROM promo_pages ORDER BY sort_order ASC, id ASC').fetchall()
+        bgs = conn.execute('SELECT * FROM promo_backgrounds').fetchall()
+    bg_by_id = {b['id']: dict(b) for b in bgs}
+    return [_promo_page_row_to_dict(r, bg_by_id) for r in rows]
+
+
+def get_promo_page(page_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM promo_pages WHERE id = ?', (page_id,)).fetchone()
+        if not row:
+            return None
+        bgs = conn.execute('SELECT * FROM promo_backgrounds').fetchall()
+    bg_by_id = {b['id']: dict(b) for b in bgs}
+    return _promo_page_row_to_dict(row, bg_by_id)
+
+
+def create_promo_page():
+    """Crée une page promo vide (inactive par défaut, à compléter dans
+    l'admin) en fin de rotation (sort_order = max + 1)."""
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        max_order = conn.execute('SELECT COALESCE(MAX(sort_order), -1) AS m FROM promo_pages').fetchone()['m']
+        cur = conn.execute("""
+            INSERT INTO promo_pages(
+                active, sort_order, frequency, pause_seconds, html_content,
+                background_id, overlay_enabled, text_font, text_size, text_color,
+                effect, qr_enabled, qr_text, qr_size, qr_position, qr_color, created_at
+            ) VALUES (0, ?, 6, 8, '', NULL, 1, 'system-ui, "Segoe UI", sans-serif', 28, '#ffffff',
+                      'fade', 1, '', 220, 'center', '#000000', ?)
+        """, (max_order + 1, created_at))
+        conn.commit()
+        return cur.lastrowid
+
+
+def update_promo_page(page_id, **fields):
+    """Met à jour uniquement les colonnes listées dans _PROMO_PAGE_COLUMNS
+    parmi celles fournies (déjà validées côté app.py) ; ignore silencieusement
+    toute clé inconnue plutôt que de planter."""
+    cols = [k for k in fields if k in _PROMO_PAGE_COLUMNS]
+    if not cols:
+        return
+    set_clause = ', '.join(f'{c} = ?' for c in cols)
+    values = [fields[c] for c in cols] + [page_id]
+    with closing(db_conn()) as conn:
+        conn.execute(f'UPDATE promo_pages SET {set_clause} WHERE id = ?', values)
+        conn.commit()
+
+
+def delete_promo_page_db(page_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM promo_pages WHERE id = ?', (page_id,)).fetchone()
+        if not row:
+            return None
+        page = dict(row)
+        conn.execute('DELETE FROM promo_pages WHERE id = ?', (page_id,))
+        conn.commit()
+    return page
+
+
+def move_promo_page(page_id, direction):
+    """Échange sort_order avec le voisin immédiat ('up' ou 'down') — raccourci
+    pratique pour les boutons ▲▼ de la liste ; le champ « Ordre de passage »
+    du formulaire d'édition reste la façon de fixer une valeur précise."""
+    with closing(db_conn()) as conn:
+        rows = conn.execute('SELECT id, sort_order FROM promo_pages ORDER BY sort_order ASC, id ASC').fetchall()
+        ids = [r['id'] for r in rows]
+        if page_id not in ids:
+            return
+        i = ids.index(page_id)
+        j = i - 1 if direction == 'up' else i + 1
+        if j < 0 or j >= len(ids):
+            return
+        a, b = rows[i], rows[j]
+        conn.execute('UPDATE promo_pages SET sort_order = ? WHERE id = ?', (b['sort_order'], a['id']))
+        conn.execute('UPDATE promo_pages SET sort_order = ? WHERE id = ?', (a['sort_order'], b['id']))
+        conn.commit()
 
 
 # ── Écran de veille (images dédiées) ─────────────────────────────────────────

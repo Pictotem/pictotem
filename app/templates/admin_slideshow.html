@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="{{ url_for('custom_fonts_css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
   <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='promo-editor.js') }}" defer></script>
   <style>
     .admin-wrap  { max-width: 900px; margin: 0 auto; padding: 40px 20px 60px; }
     .back-link   { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
@@ -86,6 +87,50 @@
     .promo-bg-preview img {
       width: 140px; height: 79px; object-fit: cover; border-radius: 8px; flex-shrink: 0;
     }
+
+    .field-third { flex: 1; min-width: 140px; }
+
+    .promo-page-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+                        margin-bottom: 20px; overflow: hidden; }
+    .promo-page-inactive { opacity: .6; }
+    .promo-page-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px;
+                        border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    .promo-page-toggle-open { background: none; border: none; color: var(--muted); font-size: 16px;
+                               cursor: pointer; padding: 2px 6px; }
+    .promo-page-collapsed .promo-page-toggle-open { transform: rotate(-90deg); }
+    .promo-page-title { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 10px; }
+    .promo-page-meta { color: var(--muted); font-size: 13px; margin-left: auto; }
+    .promo-page-move { display: flex; gap: 4px; }
+    .promo-page-move form { margin: 0; }
+    .promo-page-move button { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+                               border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
+    .promo-page-move button:hover { border-color: var(--accent); }
+    .promo-page-body { padding: 20px; }
+    .promo-page-collapsed .promo-page-body { display: none; }
+    .promo-badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+                   padding: 2px 9px; border-radius: 999px; }
+    .promo-badge-on  { background: rgba(50,200,100,.18); color: #4ecca0; }
+    .promo-badge-off { background: rgba(150,150,150,.18); color: var(--muted); }
+
+    .wysiwyg-toolbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+    .wysiwyg-toolbar button { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+                               border-radius: 6px; min-width: 32px; height: 30px; cursor: pointer; font-size: 13px; }
+    .wysiwyg-toolbar button:hover { border-color: var(--accent); }
+    .wysiwyg-sep { width: 1px; background: var(--border); margin: 2px 4px; }
+    .wysiwyg-editable { min-height: 110px; background: var(--surface-2); border: 1px solid var(--border);
+                         color: var(--text); border-radius: 10px; padding: 12px 14px; font-size: 15px; }
+    .wysiwyg-editable:focus { outline: none; border-color: var(--accent); }
+    .wysiwyg-editable:empty:before { content: attr(data-placeholder); color: var(--muted); }
+
+    .promo-bg-picker { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); margin-bottom: 4px; }
+    .promo-bg-choice { display: block; cursor: pointer; border: 2px solid transparent; position: relative; }
+    .promo-bg-choice input { position: absolute; top: 8px; left: 8px; z-index: 2; }
+    .promo-bg-choice.selected { border-color: var(--accent); }
+    .promo-bg-choice:has(input:checked) { border-color: var(--accent); }
+    .promo-bg-none { aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center;
+                     background: linear-gradient(135deg, #0d8b8f 0%, #145b5e 55%, #111315 100%);
+                     color: #fff; font-size: 12px; text-align: center; padding: 8px; }
+    .qr-subcard h2 { font-size: 15px; margin-bottom: 4px; }
   </style>
 </head>
 <body class="gallery-body" data-admin-page="slideshow">
@@ -175,6 +220,239 @@
           <button class="btn-primary" type="submit">Ajouter</button>
         </div>
       </div>
+    </form>
+  </div>
+
+  <!-- Bibliothèque de fonds (partagée par toutes les pages promo) -->
+  <div class="section" id="promo-backgrounds">
+    <p class="section-title">Bibliothèque de fonds
+      <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
+        Fonds partagés, sélectionnables sur n'importe quelle page promo ci-dessous
+      </span>
+    </p>
+
+    {% if promo_backgrounds %}
+    <div class="img-grid">
+      {% for bg in promo_backgrounds %}
+      <div class="img-card">
+        <img src="{{ url_for('static', filename='promo/' + bg.filename) }}"
+             alt="{{ bg.label or bg.filename }}" loading="lazy">
+        <div class="img-card-foot">
+          <span class="img-card-name" title="{{ bg.label or bg.filename }}">{{ bg.label or bg.filename }}</span>
+          <form method="post" action="{{ url_for('admin_promo_bg_delete', bg_id=bg.id) }}"
+                onsubmit="return confirm('Supprimer ce fond de la bibliothèque ?')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button class="btn-danger" type="submit">✕</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:var(--muted);font-size:14px;margin-bottom:20px">
+      Aucun fond dans la bibliothèque — un dégradé par défaut est utilisé tant qu'aucun fond n'est choisi.
+    </p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('admin_promo_bg_upload') }}" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="upload-zone">
+        <label class="upload-label" for="promo-bg-input">Choisir une image de fond…</label>
+        <input type="file" id="promo-bg-input" name="background" accept=".png,.jpg,.jpeg,.webp"
+               onchange="document.getElementById('promo-bg-name').textContent = this.files[0]?.name || ''">
+        <span id="promo-bg-name"></span>
+        <div class="field" style="margin-top:12px;max-width:320px">
+          <label>Nom (optionnel)</label>
+          <input type="text" name="label" maxlength="80" placeholder="ex. Fond bleu nuit">
+        </div>
+        <p class="upload-hint">PNG, JPG, WEBP — résolution recommandée : 1920×1080</p>
+        <div style="margin-top:14px">
+          <button class="btn-primary" type="submit">Ajouter à la bibliothèque</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- Pages promo -->
+  <div class="section" id="promo-pages">
+    <p class="section-title">Pages promo
+      <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
+        Insérées dans le diaporama selon leur propre fréquence, en rotation dans l'ordre de passage
+      </span>
+    </p>
+
+    {% if promo_pages %}
+    {% for page in promo_pages %}
+    <div class="promo-page-card{% if not page.active %} promo-page-inactive{% endif %}" id="promo-page-{{ page.id }}">
+      <div class="promo-page-head">
+        <button type="button" class="promo-page-toggle-open" aria-label="Déplier / replier">▾</button>
+        <span class="promo-page-title">
+          Page #{{ page.id }}
+          {% if page.active %}<span class="promo-badge promo-badge-on">Active</span>
+          {% else %}<span class="promo-badge promo-badge-off">Inactive</span>{% endif %}
+        </span>
+        <span class="promo-page-meta">Ordre {{ page.sort_order }} · 1 fois / {{ page.frequency }} slides · {{ page.pause_seconds }}s</span>
+        <div class="promo-page-move">
+          <form method="post" action="{{ url_for('admin_promo_page_move', page_id=page.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="direction" value="up">
+            <button type="submit" title="Monter dans l'ordre de passage">▲</button>
+          </form>
+          <form method="post" action="{{ url_for('admin_promo_page_move', page_id=page.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="direction" value="down">
+            <button type="submit" title="Descendre dans l'ordre de passage">▼</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="promo-page-body">
+        <form method="post" action="{{ url_for('admin_promo_page_update', page_id=page.id) }}" class="promo-page-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+          <div class="checkbox-field">
+            <input type="checkbox" id="active-{{ page.id }}" name="active" {% if page.active %}checked{% endif %}>
+            <label for="active-{{ page.id }}">Page active (diffusée dans le diaporama)</label>
+          </div>
+
+          <div class="field-row">
+            <div class="field field-third">
+              <label>Ordre de passage</label>
+              <input type="number" name="sort_order" value="{{ page.sort_order }}" style="max-width:120px">
+            </div>
+            <div class="field field-third">
+              <label>Fréquence (1 fois toutes les N slides)</label>
+              <input type="number" name="frequency" min="1" max="200" value="{{ page.frequency }}" style="max-width:120px">
+            </div>
+            <div class="field field-third">
+              <label>Temps de pause (s)</label>
+              <input type="number" name="pause_seconds" min="1" max="120" value="{{ page.pause_seconds }}" style="max-width:120px">
+            </div>
+          </div>
+
+          <div class="checkbox-field">
+            <input type="checkbox" id="overlay-{{ page.id }}" name="overlay_enabled" {% if page.overlay_enabled %}checked{% endif %}>
+            <label for="overlay-{{ page.id }}">Assombrir le fond (lisibilité du texte et du QR code)</label>
+          </div>
+
+          <div class="field">
+            <label>Effet visuel à l'apparition</label>
+            <select name="effect" style="max-width:320px">
+              {% for value, label in promo_effects %}
+              <option value="{{ value }}" {% if page.effect == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Fond</label>
+            <div class="img-grid promo-bg-picker">
+              <label class="img-card promo-bg-choice{% if not page.background_id %} selected{% endif %}">
+                <input type="radio" name="background_id" value="" {% if not page.background_id %}checked{% endif %}>
+                <div class="promo-bg-none">Dégradé par défaut</div>
+              </label>
+              {% for bg in promo_backgrounds %}
+              <label class="img-card promo-bg-choice{% if page.background_id == bg.id %} selected{% endif %}">
+                <input type="radio" name="background_id" value="{{ bg.id }}" {% if page.background_id == bg.id %}checked{% endif %}>
+                <img src="{{ url_for('static', filename='promo/' + bg.filename) }}"
+                     alt="{{ bg.label or bg.filename }}" loading="lazy">
+              </label>
+              {% endfor %}
+            </div>
+            <p class="upload-hint">Ajoutez ou supprimez des fonds depuis la bibliothèque ci-dessus.</p>
+          </div>
+
+          <div class="field">
+            <label>Texte</label>
+            <div class="wysiwyg-toolbar" data-target="wysiwyg-{{ page.id }}">
+              <button type="button" data-cmd="bold" title="Gras"><b>G</b></button>
+              <button type="button" data-cmd="italic" title="Italique"><i>I</i></button>
+              <button type="button" data-cmd="underline" title="Souligné"><u>S</u></button>
+              <span class="wysiwyg-sep"></span>
+              <button type="button" data-cmd="insertUnorderedList" title="Liste à puces">•≡</button>
+              <button type="button" data-cmd="insertOrderedList" title="Liste numérotée">1≡</button>
+              <span class="wysiwyg-sep"></span>
+              <button type="button" data-cmd="justifyLeft" title="Aligner à gauche">⇤</button>
+              <button type="button" data-cmd="justifyCenter" title="Centrer">⇔</button>
+              <button type="button" data-cmd="justifyRight" title="Aligner à droite">⇥</button>
+              <span class="wysiwyg-sep"></span>
+              <button type="button" data-cmd="removeFormat" title="Effacer la mise en forme">⌫</button>
+            </div>
+            <div class="wysiwyg-editable" id="wysiwyg-{{ page.id }}" contenteditable="true"
+                 data-placeholder="Un photobox est à votre disposition !">{{ page.html_content | safe }}</div>
+            <input type="hidden" name="html_content">
+          </div>
+
+          <div class="field-row">
+            <div class="field field-half">
+              <label>Taille du texte (px)</label>
+              <input type="number" name="text_size" min="10" max="120" value="{{ page.text_size }}" style="max-width:140px">
+            </div>
+            <div class="field field-half">
+              <label>Police</label>
+              <select name="text_font">
+                {% for value, label in promo_fonts %}
+                <option value="{{ value }}" {% if page.text_font == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Couleur du texte</label>
+            <input type="color" name="text_color" value="{{ page.text_color }}">
+          </div>
+
+          <div class="form-card qr-subcard" style="background:var(--surface-2);margin:20px 0 18px">
+            <h2>QR code</h2>
+            <div class="checkbox-field" style="margin-top:14px">
+              <input type="checkbox" id="qr-enabled-{{ page.id }}" name="qr_enabled" {% if page.qr_enabled %}checked{% endif %}>
+              <label for="qr-enabled-{{ page.id }}">Afficher un QR code sur cette page</label>
+            </div>
+            <div class="field">
+              <label>Contenu (texte ou URL — laisser vide pour pointer vers la galerie)</label>
+              <input type="text" name="qr_text" value="{{ page.qr_text }}"
+                     placeholder="Laisser vide = lien vers la galerie" style="max-width:100%">
+            </div>
+            <div class="field-row">
+              <div class="field field-third">
+                <label>Taille (px)</label>
+                <input type="number" name="qr_size" min="60" max="800" value="{{ page.qr_size }}" style="max-width:120px">
+              </div>
+              <div class="field field-third">
+                <label>Couleur</label>
+                <input type="color" name="qr_color" value="{{ page.qr_color }}">
+              </div>
+              <div class="field field-third">
+                <label>Position</label>
+                <select name="qr_position">
+                  {% for value, label in promo_qr_positions %}
+                  <option value="{{ value }}" {% if page.qr_position == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn-primary" type="submit">Enregistrer la page</button>
+          <a class="preview-link" href="{{ url_for('bestof') }}" target="_blank">↗ Voir le slideshow</a>
+        </form>
+
+        <form method="post" action="{{ url_for('admin_promo_page_delete', page_id=page.id) }}"
+              onsubmit="return confirm('Supprimer définitivement cette page promo ?')" style="margin-top:14px">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button class="btn-danger" type="submit">Supprimer cette page</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:var(--muted);font-size:14px;margin-bottom:20px">Aucune page promo — créez-en une ci-dessous.</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('admin_promo_page_create') }}" style="margin-top:8px">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="btn-primary" type="submit">+ Nouvelle page promo</button>
     </form>
   </div>
 
