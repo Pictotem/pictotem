@@ -1,51 +1,119 @@
-// Éditeur WYSIWYG minimal des pages promo (voir templates/admin_slideshow.html
-// → section "Pages promo") : une barre d'outils par page agit sur sa propre
-// zone contenteditable (data-target sur .wysiwyg-toolbar ↔ id sur
-// .wysiwyg-editable), via document.execCommand — volontairement basique
-// (gras/italique/souligné/listes/alignement), aucune dépendance externe, pas
-// de CDN (l'app tourne en kiosque, potentiellement sans accès internet). Le
-// HTML produit est nettoyé côté serveur avant stockage (voir
-// utils.sanitize_promo_html) : seules ces mises en forme survivent de toute
-// façon, tout le reste (recopié depuis une autre page par exemple) est
-// silencieusement retiré à l'enregistrement.
+// Éditeur WYSIWYG des pages promo (voir templates/admin_slideshow.html →
+// section "Pages promo") — construit sur Quill (vendorisé en local, voir
+// static/quill.js/quill.snow.css : PAS de CDN, l'app tourne en kiosque,
+// potentiellement sans accès internet). Une instance Quill par page promo,
+// toolbar déclarative en HTML (voir admin_slideshow.html), reliée au champ
+// caché html_content à l'envoi du formulaire.
+//
+// Deux choix volontaires plutôt que de tout déléguer à des modules tiers :
+//  - Alignement du texte : attributor Quill natif (voir AlignStyle
+//    ci-dessous), mais en variante "style" (text-align inline) plutôt que
+//    "class" (défaut Quill) — la variante par défaut poserait class="ql-align-*"
+//    sur les <p>, une classe CSS que sanitize_promo_html (utils.py) ne peut
+//    pas valider aussi simplement qu'une déclaration de style unique. Même
+//    résultat visuel, format de sortie mieux aligné avec le nettoyeur serveur
+//    déjà en place.
+//  - Redimensionnement + alignement d'image : PAS d'extension tierce
+//    (quill-image-resize-module et consorts ne sont plus maintenus/pas
+//    forcément compatibles Quill 2, et devraient de toute façon être
+//    empaquetés nous-mêmes pour rester utilisables hors-ligne). On réutilise
+//    à la place le code déjà écrit et testé pour l'ancien éditeur (poignée
+//    de redimensionnement + barre flottante d'alignement), simplement relié
+//    à Quill via un blot Image personnalisé (StyledImage, voir plus bas) qui
+//    apprend à Quill à conserver l'attribut style="…" d'une image (Quill ne
+//    connaît nativement que alt/width/height, jamais style) -- sans ça, le
+//    redimensionnement/alignement survivrait à la session en cours mais
+//    disparaîtrait au rechargement de la page.
 (function () {
-  document.addEventListener('click', function (e) {
-    const btn = e.target.closest('.wysiwyg-toolbar button[data-cmd]');
-    if (!btn) return;
-    e.preventDefault();
-    const toolbar = btn.closest('.wysiwyg-toolbar');
-    const editable = document.getElementById(toolbar.getAttribute('data-target'));
-    if (!editable) return;
-    editable.focus();
-    // data-html (voir bouton "Insérer un tableau") : execCommand('insertHTML', …)
-    // avec un fragment fixe plutôt qu'une simple commande de mise en forme.
-    document.execCommand(btn.getAttribute('data-cmd'), false, btn.dataset.html || null);
+  if (typeof Quill === 'undefined') return;
+
+  // ── Personnalisation Quill (une seule fois, avant toute instanciation) ──
+  const AlignStyle = Quill.import('attributors/style/align');
+  Quill.register(AlignStyle, true);
+
+  const ImageFormat = Quill.import('formats/image');
+  class StyledImage extends ImageFormat {
+    static formats(domNode) {
+      const formats = super.formats(domNode) || {};
+      if (domNode.hasAttribute('style')) formats.style = domNode.getAttribute('style');
+      return formats;
+    }
+    format(name, value) {
+      if (name === 'style') {
+        if (value) this.domNode.setAttribute('style', value);
+        else this.domNode.removeAttribute('style');
+      } else {
+        super.format(name, value);
+      }
+    }
+  }
+  Quill.register(StyledImage, true);
+
+  // ── Une instance Quill par page promo ───────────────────────────────────
+  // Map id de conteneur ("wysiwyg-<page.id>") -> instance Quill, pour
+  // retrouver la bonne instance à l'envoi du formulaire (voir tout en bas).
+  const quillInstances = new Map();
+
+  document.querySelectorAll('.promo-quill-editor').forEach(function (editorEl) {
+    const toolbarEl = document.getElementById('toolbar-' + editorEl.id.replace(/^wysiwyg-/, ''));
+    if (!toolbarEl) return;
+    const quill = new Quill(editorEl, {
+      theme: 'snow',
+      // Quill lit son placeholder via l'option JS ci-dessous (jamais un
+      // attribut HTML lu automatiquement) -- recopié depuis data-placeholder
+      // (voir admin_slideshow.html) pour garder le texte au même endroit
+      // (le template), plutôt que de le coder en dur ici.
+      placeholder: editorEl.getAttribute('data-placeholder') || '',
+      modules: {
+        toolbar: {
+          container: toolbarEl,
+          handlers: {
+            // Remplace le comportement par défaut du bouton image de Quill
+            // (upload de fichier local en base64) par notre sélecteur
+            // médiathèque/captures (voir plus bas).
+            image: function () { openMediaPicker(quill); },
+          },
+        },
+        table: true,
+      },
+    });
+    quillInstances.set(editorEl.id, quill);
+
+    const tableBtn = toolbarEl.querySelector('.promo-ql-table-btn');
+    if (tableBtn) {
+      tableBtn.addEventListener('click', function () {
+        const range = quill.getSelection(true);
+        quill.setSelection(range.index, 0, 'user');
+        quill.getModule('table').insertTable(3, 3);
+      });
+    }
+
+    const qrBtn = toolbarEl.querySelector('.promo-ql-qr-btn');
+    if (qrBtn) {
+      qrBtn.addEventListener('click', function () {
+        const range = quill.getSelection(true);
+        quill.insertText(range.index,
+          '{qrcode="" taille="150" color="#000000" bgcolor="#ffffff"}', 'user');
+      });
+    }
   });
 
   // ── Sélecteur d'image (médiathèque + captures) ──────────────────────────
   // Un seul modal partagé par toutes les pages promo (voir
-  // admin_slideshow.html → #media-picker-modal). La sélection dans la zone
-  // contenteditable est perdue dès qu'on clique dans le modal : on la
-  // sauvegarde (Range) à l'ouverture et on la restaure juste avant
-  // d'insérer l'image choisie.
-  let _mediaPickerTarget = null;
+  // admin_slideshow.html → #media-picker-modal). La sélection Quill active
+  // est perdue dès qu'on clique dans le modal : on la sauvegarde (Range
+  // Quill {index, length}) à l'ouverture et on l'utilise à l'insertion.
+  let _mediaPickerQuill = null;
   let _mediaPickerRange = null;
 
-  document.addEventListener('click', function (e) {
-    const btn = e.target.closest('.wysiwyg-media-btn');
-    if (!btn) return;
-    e.preventDefault();
-    _mediaPickerTarget = document.getElementById(btn.getAttribute('data-target'));
-    const sel = window.getSelection();
-    _mediaPickerRange = (sel && sel.rangeCount && _mediaPickerTarget
-                          && _mediaPickerTarget.contains(sel.anchorNode))
-      ? sel.getRangeAt(0).cloneRange()
-      : null;
+  function openMediaPicker(quill) {
+    _mediaPickerQuill = quill;
+    _mediaPickerRange = quill.getSelection(true);
     const modal = document.getElementById('media-picker-modal');
     if (!modal) return;
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
-  });
+  }
 
   document.addEventListener('click', function (e) {
     const modal = document.getElementById('media-picker-modal');
@@ -70,39 +138,39 @@
     }
 
     const item = e.target.closest('.media-picker-item');
-    if (item && _mediaPickerTarget) {
+    if (item && _mediaPickerQuill) {
       const url = item.getAttribute('data-url') || '';
-      _mediaPickerTarget.focus();
-      if (_mediaPickerRange) {
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(_mediaPickerRange);
-      }
+      const quill = _mediaPickerQuill;
+      const range = _mediaPickerRange || quill.getSelection(true);
+      quill.insertEmbed(range.index, 'image', url, 'user');
+      quill.setSelection(range.index + 1, 0, 'user');
       // Largeur par défaut à l'insertion : sans elle, une capture en pleine
       // résolution s'afficherait à sa taille native (souvent énorme) avant
       // que l'admin ait pu la redimensionner. Reste ensuite ajustable par
       // glisser sur le coin (voir .wysiwyg-img-selected) ou par les boutons
       // d'alignement (voir la barre #wysiwyg-img-toolbar ci-dessous).
-      document.execCommand('insertHTML', false,
-        '<img src="' + escapeHtmlAttr(url) + '" alt="" style="width:240px">');
+      // getLeaf(range.index) résoudrait au bloc PRÉCÉDENT quand l'image suit
+      // immédiatement du texte (limite entre deux blots) -- range.index + 1
+      // (une position à l'intérieur de l'unique emplacement qu'occupe
+      // l'image) résout correctement dans tous les cas, vérifié y compris
+      // quand l'image est en tout début de zone (rien avant elle).
+      const [leaf] = quill.getLeaf(range.index + 1);
+      if (leaf && leaf.domNode && leaf.domNode.tagName === 'IMG') {
+        leaf.domNode.style.width = '240px';
+      }
       modal.classList.add('hidden');
       modal.setAttribute('aria-hidden', 'true');
     }
   });
 
-  function escapeHtmlAttr(str) {
-    const div = document.createElement('div');
-    div.textContent = str == null ? '' : String(str);
-    return div.innerHTML.replace(/"/g, '&quot;');
-  }
-
   // ── Redimensionnement + alignement d'une image du WYSIWYG ───────────────
   // Cliquer une image la sélectionne : poignée de redimensionnement MAISON
   // (le CSS `resize` natif sur <img> s'est révélé trop peu fiable selon les
   // navigateurs — poignée invisible), barre flottante d'alignement, et deux
-  // champs Largeur/Hauteur (px) appliqués immédiatement à la frappe. La
-  // largeur/hauteur choisie est TOUJOURS écrite en style inline dès
-  // l'action (glisser ou frappe), jamais différée à la désélection.
+  // champs Largeur/Hauteur (px) appliqués immédiatement à la frappe. Mutation
+  // DIRECTE du style de l'image (pas d'appel à quill.format) -- testé et
+  // confirmé fiable avec le blot StyledImage ci-dessus : Quill ne revient
+  // jamais dessus, ni pendant la session, ni en relecture après enregistrement.
   let _selectedImg = null;
 
   function _positionImgToolbar(img) {
@@ -147,7 +215,7 @@
   }
 
   document.addEventListener('mousedown', function (e) {
-    const img = e.target.closest('.wysiwyg-editable img');
+    const img = e.target.closest('.promo-quill-editor .ql-editor img');
     const onControls = e.target.closest('#wysiwyg-img-toolbar, #wysiwyg-img-resize-handle');
     if (img) {
       if (_selectedImg && _selectedImg !== img) _deselectImg();
@@ -267,10 +335,10 @@
     if (_selectedImg) _positionImgToolbar(_selectedImg);
   });
 
-  // Recopie le HTML de la zone éditable dans le champ caché juste avant
-  // l'envoi du formulaire (capture=true : passe avant toute autre écoute
-  // 'submit', pour être sûr que le champ est à jour même si le navigateur
-  // déclenche la validation native entre-temps).
+  // Recopie le HTML de l'instance Quill de la page dans son champ caché
+  // juste avant l'envoi du formulaire (capture=true : passe avant toute
+  // autre écoute 'submit', pour être sûr que le champ est à jour même si le
+  // navigateur déclenche la validation native entre-temps).
   document.addEventListener('submit', function (e) {
     const form = e.target;
     if (!form.classList || !form.classList.contains('promo-page-form')) return;
@@ -279,9 +347,10 @@
     // enregistrée) partirait dans le contenu (elle serait de toute façon
     // retirée par le nettoyeur serveur, mais autant rester propre).
     if (_selectedImg && form.contains(_selectedImg)) _deselectImg();
-    const editable = form.querySelector('.wysiwyg-editable');
+    const editorEl = form.querySelector('.promo-quill-editor');
     const hidden = form.querySelector('input[type=hidden][name=html_content]');
-    if (editable && hidden) hidden.value = editable.innerHTML;
+    const quill = editorEl && quillInstances.get(editorEl.id);
+    if (quill && hidden) hidden.value = quill.root.innerHTML;
   }, true);
 
   // Met en évidence le fond actuellement sélectionné dans le sélecteur radio

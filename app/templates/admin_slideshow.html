@@ -8,7 +8,9 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('custom_fonts_css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='quill.snow.css') }}">
   <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='quill.js') }}" defer></script>
   <script src="{{ url_for('static', filename='promo-editor.js') }}" defer></script>
   <style>
     .admin-wrap  { max-width: 900px; margin: 0 auto; padding: 40px 20px 60px; }
@@ -114,24 +116,50 @@
     .promo-badge-on  { background: rgba(50,200,100,.18); color: #4ecca0; }
     .promo-badge-off { background: rgba(150,150,150,.18); color: var(--muted); }
 
-    .wysiwyg-toolbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
-    .wysiwyg-toolbar button { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
-                               border-radius: 6px; min-width: 32px; height: 30px; cursor: pointer; font-size: 13px; }
-    .wysiwyg-toolbar button:hover { border-color: var(--accent); }
-    .wysiwyg-sep { width: 1px; background: var(--border); margin: 2px 4px; }
-    .wysiwyg-editable { min-height: 110px; background: var(--surface-2); border: 1px solid var(--border);
-                         color: var(--text); border-radius: 10px; padding: 12px 14px; font-size: 15px; }
-    .wysiwyg-editable:focus { outline: none; border-color: var(--accent); }
-    .wysiwyg-editable:empty:before { content: attr(data-placeholder); color: var(--muted); }
-    .wysiwyg-editable img { max-width: 100%; cursor: pointer; }
-    /* Image sélectionnée (voir promo-editor.js) : le support du CSS `resize`
-       sur <img> s'est révélé trop peu fiable selon les navigateurs (poignée
-       parfois invisible) -- remplacé par une poignée maison, positionnée en
-       JS sur le coin bas-droit de l'image (voir #wysiwyg-img-resize-handle
-       ci-dessous). Simple surlignage ici, aucun style de mise en page. */
-    .wysiwyg-editable img.wysiwyg-img-selected {
+    /* Éditeur WYSIWYG (Quill, voir static/promo-editor.js) reskinné en sombre
+       pour coller au reste de l'admin -- le thème "snow" de Quill est clair
+       par défaut. */
+    .promo-quill-toolbar.ql-toolbar.ql-snow {
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px 10px 0 0;
+      padding: 6px; border-bottom: none;
+    }
+    .promo-quill-editor.ql-container.ql-snow {
+      border: 1px solid var(--border); border-radius: 0 0 10px 10px; background: var(--surface-2);
+      font-size: 15px; font-family: inherit;
+    }
+    .promo-quill-editor .ql-editor { color: var(--text); min-height: 110px; padding: 12px 14px; }
+    .promo-quill-editor .ql-editor.ql-blank::before { color: var(--muted); font-style: normal; }
+    .promo-quill-toolbar .ql-stroke { stroke: var(--text); }
+    .promo-quill-toolbar .ql-fill { fill: var(--text); }
+    .promo-quill-toolbar .ql-picker-label { color: var(--text); }
+    .promo-quill-toolbar button:hover .ql-stroke,
+    .promo-quill-toolbar button.ql-active .ql-stroke { stroke: var(--accent); }
+    .promo-quill-toolbar button:hover .ql-fill,
+    .promo-quill-toolbar button.ql-active .ql-fill { fill: var(--accent); }
+    .promo-quill-toolbar button:hover .ql-picker-label,
+    .promo-quill-toolbar .ql-picker-label:hover,
+    .promo-quill-toolbar .ql-picker.ql-expanded .ql-picker-label { color: var(--accent); }
+    .promo-quill-toolbar .ql-picker-options {
+      background: var(--surface); border: 1px solid var(--border);
+    }
+    .promo-quill-toolbar .ql-picker-item:hover { color: var(--accent); }
+    .promo-quill-toolbar button.promo-ql-table-btn,
+    .promo-quill-toolbar button.promo-ql-qr-btn {
+      width: auto; padding: 0 6px; font-size: 13px; color: var(--text);
+      background: none; border: none; cursor: pointer;
+    }
+    .promo-quill-toolbar button.promo-ql-table-btn:hover,
+    .promo-quill-toolbar button.promo-ql-qr-btn:hover { color: var(--accent); }
+    .promo-quill-editor .ql-editor img { cursor: pointer; }
+    /* Image sélectionnée (voir promo-editor.js) : poignée de redimensionnement
+       maison, positionnée en JS sur le coin bas-droit de l'image (voir
+       #wysiwyg-img-resize-handle ci-dessous). Simple surlignage ici, aucun
+       style de mise en page. */
+    .promo-quill-editor .ql-editor img.wysiwyg-img-selected {
       outline: 2px solid var(--accent); outline-offset: 2px;
     }
+    .promo-quill-editor .ql-editor table { border-collapse: collapse; }
+    .promo-quill-editor .ql-editor td { border: 1px solid var(--border); padding: 4px 8px; }
     .wysiwyg-img-toolbar { position: fixed; z-index: 999; display: flex; align-items: center; gap: 2px;
                             background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
                             padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
@@ -421,25 +449,23 @@
 
           <div class="field">
             <label>Texte</label>
-            <div class="wysiwyg-toolbar" data-target="wysiwyg-{{ page.id }}">
-              <button type="button" data-cmd="bold" title="Gras"><b>G</b></button>
-              <button type="button" data-cmd="italic" title="Italique"><i>I</i></button>
-              <button type="button" data-cmd="underline" title="Souligné"><u>S</u></button>
-              <span class="wysiwyg-sep"></span>
-              <button type="button" data-cmd="insertUnorderedList" title="Liste à puces">•≡</button>
-              <button type="button" data-cmd="insertOrderedList" title="Liste numérotée">1≡</button>
-              <span class="wysiwyg-sep"></span>
-              <button type="button" data-cmd="justifyLeft" title="Aligner à gauche">⇤</button>
-              <button type="button" data-cmd="justifyCenter" title="Centrer">⇔</button>
-              <button type="button" data-cmd="justifyRight" title="Aligner à droite">⇥</button>
-              <span class="wysiwyg-sep"></span>
-              <button type="button" class="wysiwyg-media-btn" data-target="wysiwyg-{{ page.id }}" title="Insérer une image (médiathèque ou capture)">🖼</button>
-              <button type="button" data-cmd="insertHTML" data-html="<table><tbody><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></tbody></table>" title="Insérer un tableau 3×3">▦</button>
-              <button type="button" data-cmd="insertText" data-html='{qrcode="", taille="150", color="#000000", bgcolor="#ffffff"}' title="Insérer un QR code">▤QR</button>
-              <span class="wysiwyg-sep"></span>
-              <button type="button" data-cmd="removeFormat" title="Effacer la mise en forme">⌫</button>
+            <div id="toolbar-{{ page.id }}" class="promo-quill-toolbar">
+              <button type="button" class="ql-bold" title="Gras"></button>
+              <button type="button" class="ql-italic" title="Italique"></button>
+              <button type="button" class="ql-underline" title="Souligné"></button>
+              <button type="button" class="ql-list" value="ordered" title="Liste numérotée"></button>
+              <button type="button" class="ql-list" value="bullet" title="Liste à puces"></button>
+              <select class="ql-align" title="Alignement">
+                <option selected></option>
+                <option value="center"></option>
+                <option value="right"></option>
+              </select>
+              <button type="button" class="ql-image" title="Insérer une image (médiathèque ou capture)"></button>
+              <button type="button" class="promo-ql-table-btn" title="Insérer un tableau 3×3">▦</button>
+              <button type="button" class="promo-ql-qr-btn" title="Insérer un QR code">▤QR</button>
+              <button type="button" class="ql-clean" title="Effacer la mise en forme"></button>
             </div>
-            <div class="wysiwyg-editable" id="wysiwyg-{{ page.id }}" contenteditable="true"
+            <div id="wysiwyg-{{ page.id }}" class="promo-quill-editor"
                  data-placeholder="Un photobox est à votre disposition !">{{ page.html_content | safe }}</div>
             <input type="hidden" name="html_content">
             <p class="upload-hint">

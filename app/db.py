@@ -6,11 +6,75 @@ import random
 import sqlite3
 from contextlib import closing
 from datetime import datetime
+from html import escape as _html_escape
+from html.parser import HTMLParser
 from pathlib import Path
 
 from config_loader import CONFIG, DB_PATH, EMAILS_JSONL
 
 logger = logging.getLogger('pictotem')
+
+
+class _BareImageWrapper(HTMLParser):
+    """Migration ponctuelle (v2.0.3, voir _wrap_bare_images_for_quill ci-dessous
+    et son appel dans init_db) : enveloppe dans son propre <p>...</p> toute
+    balise <img> se trouvant directement à la racine du contenu (pas déjà
+    nichée dans un <p>/<div>/<td>/etc.). Rendue nécessaire par le passage à
+    Quill côté admin (voir static/promo-editor.js) : contrairement à l'ancien
+    éditeur (execCommand insertHTML), qui pouvait laisser un <img> "nu" dans
+    le flux, Quill fusionne systématiquement au chargement un <img> non
+    enveloppé dans le bloc suivant (paragraphe suivant, ou première cellule
+    d'un tableau suivant) -- ce qui déplacerait visiblement l'image dans les
+    pages promo déjà enregistrées, dès leur première ouverture dans le
+    nouvel éditeur. Idempotente : une image déjà nichée (profondeur > 0,
+    notamment déjà dans son propre <p>) n'est jamais ré-enveloppée."""
+
+    _VOID_TAGS = {'img', 'br'}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out = []
+        self._depth = 0
+
+    def _tag_str(self, tag, attrs):
+        attr_str = ''.join(f' {n}="{_html_escape(v, quote=True)}"' for n, v in attrs if v is not None)
+        return f'<{tag}{attr_str}>'
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'img' and self._depth == 0:
+            self.out.append('<p>' + self._tag_str(tag, attrs) + '</p>')
+            return
+        self.out.append(self._tag_str(tag, attrs))
+        if tag not in self._VOID_TAGS:
+            self._depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        if tag == 'img' and self._depth == 0:
+            self.out.append('<p>' + self._tag_str(tag, attrs) + '</p>')
+        else:
+            self.out.append(self._tag_str(tag, attrs))
+
+    def handle_endtag(self, tag):
+        if tag in self._VOID_TAGS:
+            return
+        if self._depth > 0:
+            self._depth -= 1
+        self.out.append(f'</{tag}>')
+
+    def handle_data(self, data):
+        self.out.append(_html_escape(data))
+
+
+def _wrap_bare_images_for_quill(html):
+    if not html or '<img' not in html:
+        return html or ''
+    parser = _BareImageWrapper()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        return html
+    return ''.join(parser.out)
 
 
 def db_conn():
@@ -332,6 +396,22 @@ def init_db():
             conn.commit()
         except Exception:
             pass  # colonne déjà présente
+
+        # Migration v2.0.3 (éditeur -> Quill) : enveloppe les <img> "nues"
+        # dans le html_content déjà enregistré -- voir _wrap_bare_images_for_quill
+        # ci-dessus. Relit/réécrit chaque page une seule fois par démarrage ;
+        # idempotente et bon marché (quelques pages promo tout au plus), donc
+        # volontairement PAS conditionnée à un flag "déjà migré" séparé.
+        try:
+            rows = conn.execute('SELECT id, html_content FROM promo_pages').fetchall()
+            for row in rows:
+                fixed = _wrap_bare_images_for_quill(row['html_content'] or '')
+                if fixed != (row['html_content'] or ''):
+                    conn.execute('UPDATE promo_pages SET html_content = ? WHERE id = ?',
+                                 (fixed, row['id']))
+            conn.commit()
+        except Exception:
+            logger.exception("Migration <img> nues -> <p><img></p> échouée (ignorée)")
 
         # Migration v2.0 : reprise ponctuelle de l'ancienne page promo unique
         # vers le nouveau CRUD multi-pages — seulement si promo_pages est

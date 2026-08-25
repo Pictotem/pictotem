@@ -114,15 +114,37 @@ def generate_qr_png_custom(data: str, fill_color: str = '#000000',
 # rester prudent (défense en profondeur, coût quasi nul).
 
 _PROMO_HTML_ALLOWED_TAGS = {
-    'p': set(), 'br': set(), 'b': set(), 'strong': set(), 'i': set(), 'em': set(),
-    'u': set(), 'ul': set(), 'ol': set(), 'li': set(), 'div': {'style'}, 'span': {'style'},
+    # v2.0.3 : éditeur WYSIWYG migré vers Quill (voir static/promo-editor.js)
+    # -- 'p'/'li' gagnent 'style' (alignement, voir _PROMO_HTML_STYLE_RE plus
+    # bas -- Quill est configuré pour émettre l'alignement en style inline
+    # plutôt qu'en classe CSS, justement pour rester validable ici), 'li'
+    # gagne 'data-list'/'class' (type de liste + niveau d'indentation, voir
+    # _PROMO_HTML_LI_DATA_LIST_RE/_PROMO_HTML_LI_CLASS_RE), 'span' gagne
+    # 'class' (marqueur UI ".ql-ui" -- pastille de puce/numéro générée par
+    # Quill, voir bestof.html), 'td' gagne 'data-row' (identifiant de ligne
+    # utilisé par le module table de Quill pour retrouver quelles cellules
+    # appartiennent à la même ligne -- doit survivre pour rester éditable
+    # après réenregistrement, voir _PROMO_HTML_DATA_ROW_RE).
+    'p': {'style'}, 'br': set(), 'b': set(), 'strong': set(), 'i': set(), 'em': set(),
+    'u': set(), 'ul': set(), 'ol': set(), 'li': {'style', 'data-list', 'class'},
+    'div': {'style'}, 'span': {'style', 'class'},
     # v2.0.1 : image (sélecteur médiathèque/captures du WYSIWYG -- voir
     # static/promo-editor.js) et tableaux basiques.
     'img': {'src', 'alt', 'style'},
     'table': set(), 'thead': set(), 'tbody': set(), 'tr': set(),
-    'td': {'colspan', 'rowspan'}, 'th': {'colspan', 'rowspan'},
+    'td': {'colspan', 'rowspan', 'data-row'}, 'th': {'colspan', 'rowspan'},
 }
 _PROMO_HTML_STYLE_RE = re.compile(r'^text-align\s*:\s*(left|center|right|justify)\s*;?$')
+# v2.0.3 : listes/tableaux Quill (voir static/promo-editor.js). data-list ne
+# peut valoir que ce que le WYSIWYG propose réellement (bouton liste
+# numérotée/à puces) ; class sur <li> ne sert qu'à l'indentation (Tab dans
+# l'éditeur, jamais exposé par un bouton dédié) -- une seule classe
+# ql-indent-N (N de 1 à 9), jamais combinée à autre chose. data-row identifie
+# la ligne d'une cellule de tableau pour le module table de Quill (valeur
+# opaque générée par Quill, jamais interprétée -- juste bornée en forme).
+_PROMO_HTML_LI_DATA_LIST_RE = re.compile(r'^(ordered|bullet)$')
+_PROMO_HTML_LI_CLASS_RE = re.compile(r'^ql-indent-[1-9]$')
+_PROMO_HTML_DATA_ROW_RE = re.compile(r'^[A-Za-z0-9_-]{1,40}$')
 # v2.0.2 : redimensionnement/alignement d'image (voir static/promo-editor.js
 # -- poignée de redimensionnement + boutons gauche/centre/droite/normal).
 # Contrairement à _PROMO_HTML_STYLE_RE ci-dessus (une seule déclaration,
@@ -132,15 +154,41 @@ _PROMO_HTML_STYLE_RE = re.compile(r'^text-align\s*:\s*(left|center|right|justify
 # tapé à la main par l'admin), mais on valide quand même strictement, au
 # cas où le HTML aurait été modifié hors de l'éditeur (collé depuis
 # ailleurs, etc.).
+# v2.0.3 : le navigateur RECOMPOSE de lui-même 4 propriétés margin-* posées
+# individuellement (img.style.marginTop = ..., etc. -- voir
+# static/promo-editor.js) en un unique raccourci `margin: … … … …` dès que
+# le HTML est relu depuis le DOM (innerHTML) -- un comportement du CSSOM,
+# constaté avec Quill mais qui existait déjà à l'identique avec l'ancien
+# éditeur (execCommand), simplement jamais couvert par un test avant
+# l'ajout des vérifications de bout en bout en navigateur réel de cette
+# migration. Sans cette entrée, le raccourci n'était reconnu par aucune des
+# quatre propriétés margin-* ci-dessous et disparaissait entièrement à
+# l'enregistrement -- l'alignement (marges) d'une image ne survivait donc
+# jamais un enregistrement, silencieusement.
+#
+# v2.0.3 (correctif) : le CSSOM du navigateur normalise aussi une valeur zéro
+# SANS unité (posée en JS via `img.style.marginTop = '0'`) en `0px` dès qu'il
+# recompose le raccourci `margin` -- une valeur que le premier jet de cette
+# regex (n'acceptant que `0` nu) rejetait, ce qui faisait disparaître le
+# raccourci margin en entier dès qu'UNE seule des 4 valeurs valait zéro
+# (systématique ici : marge du haut/droite toujours à 0 selon le sens
+# d'alignement). Constaté via le test de bout en bout en navigateur réel
+# (round-trip enregistrement + rechargement), pas via les tests unitaires du
+# sanitizer (qui ne testaient qu'avec des chaînes construites à la main).
+_PROMO_HTML_IMG_MARGIN_VALUE_RE = r'(?:0|0px|[1-9][0-9]{0,2}px|auto)'
+_PROMO_HTML_IMG_MARGIN_SHORTHAND_RE = re.compile(
+    r'^' + _PROMO_HTML_IMG_MARGIN_VALUE_RE + r'(?:\s+' + _PROMO_HTML_IMG_MARGIN_VALUE_RE + r'){0,3}$'
+)
 _PROMO_HTML_IMG_STYLE_PROPS = {
     'width':         re.compile(r'^[1-9][0-9]{0,3}px$'),
     'height':        re.compile(r'^(auto|[1-9][0-9]{0,3}px)$'),
     'float':         re.compile(r'^(left|right)$'),
     'display':       re.compile(r'^(block|inline-block)$'),
-    'margin-top':    re.compile(r'^(0|auto|[1-9][0-9]{0,2}px)$'),
-    'margin-right':  re.compile(r'^(0|auto|[1-9][0-9]{0,2}px)$'),
-    'margin-bottom': re.compile(r'^(0|auto|[1-9][0-9]{0,2}px)$'),
-    'margin-left':   re.compile(r'^(0|auto|[1-9][0-9]{0,2}px)$'),
+    'margin':        _PROMO_HTML_IMG_MARGIN_SHORTHAND_RE,
+    'margin-top':    re.compile(r'^(0|0px|auto|[1-9][0-9]{0,2}px)$'),
+    'margin-right':  re.compile(r'^(0|0px|auto|[1-9][0-9]{0,2}px)$'),
+    'margin-bottom': re.compile(r'^(0|0px|auto|[1-9][0-9]{0,2}px)$'),
+    'margin-left':   re.compile(r'^(0|0px|auto|[1-9][0-9]{0,2}px)$'),
 }
 
 
@@ -181,7 +229,7 @@ class _PromoHtmlSanitizer(HTMLParser):
         allowed_attrs = _PROMO_HTML_ALLOWED_TAGS[tag]
         kept = []
         for name, value in attrs:
-            if (name == 'style' and tag in ('div', 'span') and 'style' in allowed_attrs and value
+            if (name == 'style' and tag in ('div', 'span', 'p', 'li') and 'style' in allowed_attrs and value
                     and _PROMO_HTML_STYLE_RE.match(value.strip())):
                 kept.append(f'style="{escape(value.strip(), quote=True)}"')
             elif name == 'style' and tag == 'img' and 'style' in allowed_attrs and value:
@@ -196,6 +244,18 @@ class _PromoHtmlSanitizer(HTMLParser):
             elif (name in ('colspan', 'rowspan') and name in allowed_attrs and value
                     and _PROMO_HTML_SPAN_RE.match(value.strip())):
                 kept.append(f'{name}="{value.strip()}"')
+            elif (name == 'data-row' and tag == 'td' and 'data-row' in allowed_attrs and value
+                    and _PROMO_HTML_DATA_ROW_RE.match(value.strip())):
+                kept.append(f'data-row="{escape(value.strip(), quote=True)}"')
+            elif (name == 'data-list' and tag == 'li' and 'data-list' in allowed_attrs and value
+                    and _PROMO_HTML_LI_DATA_LIST_RE.match(value.strip())):
+                kept.append(f'data-list="{value.strip()}"')
+            elif (name == 'class' and tag == 'li' and 'class' in allowed_attrs and value
+                    and _PROMO_HTML_LI_CLASS_RE.match(value.strip())):
+                kept.append(f'class="{value.strip()}"')
+            elif (name == 'class' and tag == 'span' and 'class' in allowed_attrs
+                    and value and value.strip() == 'ql-ui'):
+                kept.append('class="ql-ui"')
         attr_str = (' ' + ' '.join(kept)) if kept else ''
         self.out.append(f'<{tag}{attr_str}>')
 
