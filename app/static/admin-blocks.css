@@ -193,3 +193,49 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
 .tag-preview-chip {
   border-radius: 999px; padding: 5px 14px; font-weight: 700; display: inline-block;
 }
+
+/* Blocs « Paramètres » / « Page promo » / « Fond de la page promo »
+   (slideshow_settings, slideshow_promo_settings, slideshow_promo_bg) —
+   dupliqué depuis admin_slideshow.html, qui reste la source visuelle
+   "native". */
+.field-half { flex: 1; min-width: 180px; }
+.radio-group { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 4px; }
+.radio-group label { display: flex; align-items: center; gap: 8px; font-size: 14px;
+                     color: var(--text); font-weight: 400; cursor: pointer; }
+.field input[type=date] {
+  width: 100%; max-width: 320px; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px;
+}
+.field input[type=color] {
+  width: 56px; height: 38px; padding: 2px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+}
+.field textarea {
+  width: 100%; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px;
+  font-family: inherit; resize: vertical;
+}
+.btn-danger  { background: rgba(180,40,40,.7); color: #fff; font-weight: 600; border: none;
+               border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+.btn-danger:hover { background: rgba(220,50,50,.9); }
+.preview-link { display: inline-flex; align-items: center; gap: 6px; margin-left: 16px;
+                color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 600; }
+.preview-link:hover { text-decoration: underline; }
+.checkbox-field { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.checkbox-field label { font-size: 14px; color: var(--text); font-weight: 600; cursor: pointer; }
+.promo-bg-preview {
+  display: flex; align-items: center; gap: 16px; margin-bottom: 18px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px;
+}
+.promo-bg-preview img {
+  width: 140px; height: 79px; object-fit: cover; border-radius: 8px; flex-shrink: 0;
+}
+/* .upload-zone : utilisée aussi par « Images intermédiaires » (liste hors
+   blocs, reste native à admin_slideshow.html) — dupliquée ici car
+   slideshow_promo_bg, un bloc déplaçable, l'utilise aussi. */
+.upload-zone { background: var(--surface); border: 2px dashed var(--border); border-radius: 14px;
+               padding: 28px 24px; text-align: center; transition: border-color .15s; }
+.upload-zone:focus-within { border-color: var(--accent); }
+.upload-zone input[type=file] { display: none; }
+.upload-label { color: var(--accent); font-size: 14px; cursor: pointer; display: block; margin-bottom: 6px; }
+.upload-hint  { font-size: 12px; color: var(--muted); }

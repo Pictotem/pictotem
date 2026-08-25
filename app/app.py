@@ -2833,6 +2833,9 @@ _ADMIN_BLOCKS = {
     'tags_settings':       {'title': "Activation & règles du tag libre",        'default_page': 'tags',        'template': 'blocks/tags_settings.html',       'context_fn': '_block_ctx_tags_settings'},
     'tags_media_id':       {'title': "ID unique par média",                     'default_page': 'tags',        'template': 'blocks/tags_media_id.html',       'context_fn': '_block_ctx_tags_media_id'},
     'tags_display':        {'title': "Affichage sur /bestof",                   'default_page': 'tags',        'template': 'blocks/tags_display.html',        'context_fn': '_block_ctx_tags_display'},
+    'slideshow_settings':      {'title': "Paramètres",                          'default_page': 'slideshow',   'template': 'blocks/slideshow_settings.html',      'context_fn': '_block_ctx_slideshow_settings'},
+    'slideshow_promo_settings': {'title': "Page promo",                         'default_page': 'slideshow',   'template': 'blocks/slideshow_promo_settings.html', 'context_fn': '_block_ctx_slideshow_promo_settings'},
+    'slideshow_promo_bg':      {'title': "Fond de la page promo",               'default_page': 'slideshow',   'template': 'blocks/slideshow_promo_bg.html',      'context_fn': '_block_ctx_slideshow_promo_bg'},
 }
 # (slug, libellé affiché dans le menu « Déplacer vers », endpoint Flask) —
 # seulement les tuiles qui exécutent déjà la boucle de rendu de blocs
@@ -2849,6 +2852,7 @@ _ADMIN_PAGES = [
     ('votes',       'Votes',                'admin_votes'),
     ('buttons',     'Boutons',              'admin_buttons'),
     ('tags',        'Tags & ID média',      'admin_tags'),
+    ('slideshow',   'Slideshow Best Of',    'admin_slideshow'),
 ]
 _ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
 
@@ -3003,6 +3007,21 @@ def _block_ctx_tags_display() -> dict:
     # une même page) ; 'tags_fonts' plutôt que 'fonts' pour ne pas entrer en
     # collision avec la clé 'buttons_fonts' d'un bloc buttons_style déplacé ici.
     return {'tags_settings': _tags_settings(), 'tags_fonts': _all_fonts()}
+
+
+def _block_ctx_slideshow_settings() -> dict:
+    return {'slideshow_settings': _slideshow_settings()}
+
+
+def _block_ctx_slideshow_promo_settings() -> dict:
+    return {'slideshow_promo': _promo_settings(), 'slideshow_promo_fonts': _all_fonts()}
+
+
+def _block_ctx_slideshow_promo_bg() -> dict:
+    # Même source que _block_ctx_slideshow_promo_settings (clé
+    # 'slideshow_promo' partagée à l'identique) : les deux blocs lisent
+    # _promo_settings(), sans risque si cohabités sur une même page.
+    return {'slideshow_promo': _promo_settings()}
 
 
 @app.route('/admin/ui/block_collapse', methods=['POST'])
@@ -4717,67 +4736,14 @@ def api_bestof_promo_settings():
 @require_admin_auth
 @csrf_protect
 def admin_slideshow():
+    """Tuile « Slideshow Best Of ». « Paramètres », « Page promo » et
+    « Fond de la page promo » ont chacune leur propre route dédiée
+    ci-dessous et rejoignent le système de blocs. « Images intermédiaires »
+    (upload/suppression) reste ici, hors du système de blocs : ce n'est pas
+    un réglage mais la gestion du contenu lui-même (comme
+    admin_captures/admin_emails)."""
     if request.method == 'POST':
         action = request.form.get('action', 'settings')
-
-        if action == 'settings':
-            set_setting('slideshow.type',           request.form.get('type', 'both'))
-            set_setting('slideshow.delay',          str(max(1, int(request.form.get('delay', '5') or '5'))))
-            set_setting('slideshow.order',          request.form.get('order', 'chrono'))
-            set_setting('slideshow.date_from',      request.form.get('date_from', '').strip())
-            set_setting('slideshow.date_to',        request.form.get('date_to', '').strip())
-            set_setting('slideshow.vote_min', request.form.get('vote_min', '').strip())
-            set_setting('slideshow.vote_max', request.form.get('vote_max', '').strip())
-            set_setting('slideshow.refresh_interval',
-                        str(max(0, int(request.form.get('refresh_interval', '300') or '300'))))
-            return redirect(url_for('admin_slideshow', ok='Paramètres mis à jour.'))
-
-        if action == 'promo_settings':
-            set_setting('slideshow.promo_enabled', '1' if request.form.get('promo_enabled') else '0')
-            set_setting('slideshow.promo_overlay_enabled',
-                        '1' if request.form.get('promo_overlay_enabled') else '0')
-            raw_freq = (request.form.get('promo_frequency') or '').strip()
-            if raw_freq.isdigit() and int(raw_freq) > 0:
-                set_setting('slideshow.promo_frequency', raw_freq)
-            raw_qr = (request.form.get('promo_qr_size') or '').strip()
-            if raw_qr.isdigit() and int(raw_qr) >= 60:
-                set_setting('slideshow.promo_qr_size', raw_qr)
-            set_setting('slideshow.promo_text', request.form.get('promo_text', '').strip())
-            raw_tsize = (request.form.get('promo_text_size') or '').strip()
-            if raw_tsize.isdigit() and int(raw_tsize) >= 10:
-                set_setting('slideshow.promo_text_size', raw_tsize)
-            font_value = request.form.get('promo_text_font', '')
-            if font_value in dict(_all_fonts()):
-                set_setting('slideshow.promo_text_font', font_value)
-            color_value = request.form.get('promo_text_color', '').strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', color_value):
-                set_setting('slideshow.promo_text_color', color_value)
-            return redirect(url_for('admin_slideshow', ok='Réglages de la page promo mis à jour.'))
-
-        if action == 'promo_upload':
-            file = request.files.get('background')
-            if not file or not file.filename:
-                return redirect(url_for('admin_slideshow', err='Aucun fichier sélectionné.'))
-            ext = Path(file.filename).suffix.lower()
-            if ext not in _PROMO_ALLOWED_EXT:
-                return redirect(url_for('admin_slideshow', err='Format non supporté (PNG, JPG, WEBP).'))
-            PROMO_DIR.mkdir(parents=True, exist_ok=True)
-            # Un seul fond actif à la fois : on retire l'ancien fichier avant d'enregistrer le nouveau.
-            old = get_setting('slideshow.promo_background_filename', '')
-            if old:
-                (PROMO_DIR / old).unlink(missing_ok=True)
-            safe = f'promo-bg-{int(datetime.now().timestamp())}{ext}'
-            file.save(str(PROMO_DIR / safe))
-            set_setting('slideshow.promo_background_filename', safe)
-            return redirect(url_for('admin_slideshow', ok='Fond mis à jour.'))
-
-        if action == 'promo_bg_delete':
-            old = get_setting('slideshow.promo_background_filename', '')
-            if old:
-                (PROMO_DIR / old).unlink(missing_ok=True)
-                set_setting('slideshow.promo_background_filename', '')
-                return redirect(url_for('admin_slideshow', ok='Fond supprimé.'))
-            return redirect(url_for('admin_slideshow', err='Aucun fond à supprimer.'))
 
         if action == 'upload':
             file = request.files.get('image')
@@ -4805,15 +4771,93 @@ def admin_slideshow():
                 return redirect(url_for('admin_slideshow', ok=f'Image supprimée.'))
             return redirect(url_for('admin_slideshow', err='Image introuvable.'))
 
-    s = _slideshow_settings()
+        abort(404)
+
+    blocks, block_context = _admin_render_blocks('slideshow')
     images = list_slideshow_images()
     return render_template(
         'admin_slideshow.html', config=CONFIG,
-        settings=s, images=images,
-        promo=_promo_settings(), promo_fonts=_all_fonts(),
+        blocks=blocks, current_page='slideshow', admin_pages=_ADMIN_PAGES,
+        images=images,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
+
+
+@app.route('/admin/slideshow/settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_slideshow_set_settings():
+    set_setting('slideshow.type',           request.form.get('type', 'both'))
+    set_setting('slideshow.delay',          str(max(1, int(request.form.get('delay', '5') or '5'))))
+    set_setting('slideshow.order',          request.form.get('order', 'chrono'))
+    set_setting('slideshow.date_from',      request.form.get('date_from', '').strip())
+    set_setting('slideshow.date_to',        request.form.get('date_to', '').strip())
+    set_setting('slideshow.vote_min', request.form.get('vote_min', '').strip())
+    set_setting('slideshow.vote_max', request.form.get('vote_max', '').strip())
+    set_setting('slideshow.refresh_interval',
+                str(max(0, int(request.form.get('refresh_interval', '300') or '300'))))
+    return _admin_block_redirect('slideshow_settings', ok='Paramètres mis à jour.')
+
+
+@app.route('/admin/slideshow/promo_settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_slideshow_set_promo_settings():
+    set_setting('slideshow.promo_enabled', '1' if request.form.get('promo_enabled') else '0')
+    set_setting('slideshow.promo_overlay_enabled',
+                '1' if request.form.get('promo_overlay_enabled') else '0')
+    raw_freq = (request.form.get('promo_frequency') or '').strip()
+    if raw_freq.isdigit() and int(raw_freq) > 0:
+        set_setting('slideshow.promo_frequency', raw_freq)
+    raw_qr = (request.form.get('promo_qr_size') or '').strip()
+    if raw_qr.isdigit() and int(raw_qr) >= 60:
+        set_setting('slideshow.promo_qr_size', raw_qr)
+    set_setting('slideshow.promo_text', request.form.get('promo_text', '').strip())
+    raw_tsize = (request.form.get('promo_text_size') or '').strip()
+    if raw_tsize.isdigit() and int(raw_tsize) >= 10:
+        set_setting('slideshow.promo_text_size', raw_tsize)
+    font_value = request.form.get('promo_text_font', '')
+    if font_value in dict(_all_fonts()):
+        set_setting('slideshow.promo_text_font', font_value)
+    color_value = request.form.get('promo_text_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', color_value):
+        set_setting('slideshow.promo_text_color', color_value)
+    return _admin_block_redirect('slideshow_promo_settings', ok='Réglages de la page promo mis à jour.')
+
+
+@app.route('/admin/slideshow/promo_bg_upload', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_slideshow_promo_bg_upload():
+    file = request.files.get('background')
+    if not file or not file.filename:
+        return _admin_block_redirect('slideshow_promo_bg', err='Aucun fichier sélectionné.')
+    ext = Path(file.filename).suffix.lower()
+    if ext not in _PROMO_ALLOWED_EXT:
+        return _admin_block_redirect('slideshow_promo_bg', err='Format non supporté (PNG, JPG, WEBP).')
+    PROMO_DIR.mkdir(parents=True, exist_ok=True)
+    # Un seul fond actif à la fois : on retire l'ancien fichier avant d'enregistrer le nouveau.
+    old = get_setting('slideshow.promo_background_filename', '')
+    if old:
+        (PROMO_DIR / old).unlink(missing_ok=True)
+    safe = f'promo-bg-{int(datetime.now().timestamp())}{ext}'
+    file.save(str(PROMO_DIR / safe))
+    set_setting('slideshow.promo_background_filename', safe)
+    return _admin_block_redirect('slideshow_promo_bg', ok='Fond mis à jour.')
+
+
+@app.route('/admin/slideshow/promo_bg_delete', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_slideshow_promo_bg_delete():
+    old = get_setting('slideshow.promo_background_filename', '')
+    if old:
+        (PROMO_DIR / old).unlink(missing_ok=True)
+        set_setting('slideshow.promo_background_filename', '')
+        return _admin_block_redirect('slideshow_promo_bg', ok='Fond supprimé.')
+    return _admin_block_redirect('slideshow_promo_bg', err='Aucun fond à supprimer.')
 
 
 # ── Écran de veille (interface principale) ──────────────────────────────────

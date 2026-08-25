@@ -1,0 +1,78 @@
+<div class="form-card">
+  <form method="post" action="{{ url_for('admin_slideshow_set_settings') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field">
+      <label>Type de média</label>
+      <div class="radio-group">
+        <label><input type="radio" name="type" value="both"
+          {% if slideshow_settings.type == 'both' %}checked{% endif %}> Photos &amp; vidéos</label>
+        <label><input type="radio" name="type" value="photo"
+          {% if slideshow_settings.type == 'photo' %}checked{% endif %}> Photos uniquement</label>
+        <label><input type="radio" name="type" value="video"
+          {% if slideshow_settings.type == 'video' %}checked{% endif %}> Vidéos uniquement</label>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Délai entre chaque slide (secondes, pour les photos)</label>
+        <input type="number" name="delay" min="1" max="300"
+               value="{{ slideshow_settings.delay }}" style="max-width:140px">
+      </div>
+      <div class="field field-half">
+        <label>Ordre de diffusion</label>
+        <div class="radio-group">
+          <label><input type="radio" name="order" value="chrono"
+            {% if slideshow_settings.order == 'chrono' %}checked{% endif %}> Chronologique</label>
+          <label><input type="radio" name="order" value="random"
+            {% if slideshow_settings.order == 'random' %}checked{% endif %}> Aléatoire</label>
+          <label><input type="radio" name="order" value="votes_desc"
+            {% if slideshow_settings.order == 'votes_desc' %}checked{% endif %}> Votes ↓ (plus positif d'abord)</label>
+          <label><input type="radio" name="order" value="votes_asc"
+            {% if slideshow_settings.order == 'votes_asc' %}checked{% endif %}> Votes ↑ (plus négatif d'abord)</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Depuis le (date la plus ancienne — vide = pas de limite)</label>
+        <input type="date" name="date_from" value="{{ slideshow_settings.date_from[:10] if slideshow_settings.date_from else '' }}">
+      </div>
+      <div class="field field-half">
+        <label>Jusqu'au (date la plus récente — vide = pas de limite)</label>
+        <input type="date" name="date_to" value="{{ slideshow_settings.date_to[:10] if slideshow_settings.date_to else '' }}">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Vote minimum (≥ N — vide = pas de limite)</label>
+        <input type="number" name="vote_min" min="-9999" max="9999"
+               value="{{ slideshow_settings.vote_min }}" style="max-width:120px"
+               placeholder="ex : 1">
+      </div>
+      <div class="field field-half">
+        <label>Vote maximum (≤ N — vide = pas de limite)</label>
+        <input type="number" name="vote_max" min="-9999" max="9999"
+               value="{{ slideshow_settings.vote_max }}" style="max-width:120px"
+               placeholder="ex : 10">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Rafraîchissement automatique (secondes — 0 = désactivé)
+        <span style="color:var(--muted);font-weight:400">
+          Le slideshow recharge la liste des slides en arrière-plan à cet intervalle
+          (nouvelles photos, votes mis à jour, seuils franchis…).
+        </span>
+      </label>
+      <input type="number" name="refresh_interval" min="0" max="86400"
+             value="{{ slideshow_settings.refresh_interval }}" style="max-width:140px">
+    </div>
+
+    <button class="btn-primary" type="submit">Enregistrer</button>
+    <a class="preview-link" href="{{ url_for('bestof') }}" target="_blank">↗ Voir le slideshow</a>
+  </form>
+</div>
