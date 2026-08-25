@@ -87,7 +87,6 @@
     }
     /* QR en position "coin" (voir .promo-qr-pos-* plus bas) : le QR sort du
        flux de .promo-content, qui n'a alors plus que le texte à centrer. */
-    .promo-content-textonly { gap: 0; }
     .promo-text { max-width: 900px; }
     .promo-text p { margin: 0 0 16px; line-height: 1.4; }
     .promo-text p:last-child { margin-bottom: 0; }
@@ -96,27 +95,11 @@
        static/promo-editor.js) : max-width en filet de sécurité si jamais la
        largeur enregistrée dépassait le conteneur ; clearfix pour que
        .promo-text ne s'effondre pas quand tout son contenu est flottant. */
-    .promo-text img { max-width: 100%; height: auto; }
-    .promo-text::after { content: ''; display: table; clear: both; }
-    .promo-qr-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-    .promo-qr-card {
-      background: #fff; padding: 16px; border-radius: 20px;
-      box-shadow: 0 14px 44px rgba(0,0,0,.45); line-height: 0;
-    }
-    .promo-qr-card img { display: block; }
-    /* QR en position "coin" : hors du flux de .promo-content, ancré à un
-       angle de l'écran, indépendant du texte (voir qrPosition dans
-       buildPromoContent()). */
-    .promo-qr-wrap.promo-qr-pos-top-left,
-    .promo-qr-wrap.promo-qr-pos-top-right,
-    .promo-qr-wrap.promo-qr-pos-bottom-left,
-    .promo-qr-wrap.promo-qr-pos-bottom-right {
-      position: absolute; z-index: 4; margin: 0;
-    }
-    .promo-qr-pos-top-left     { top: 48px; left: 48px; }
-    .promo-qr-pos-top-right    { top: 48px; right: 48px; }
-    .promo-qr-pos-bottom-left  { bottom: 48px; left: 48px; }
-    .promo-qr-pos-bottom-right { bottom: 48px; right: 48px; }
+    /* QR code(s) inline : simples <img class="promo-inline-qr"> insérés dans
+       le texte via la balise {qrcode=...} (voir _resolve_inline_qrcodes,
+       app.py), rendu directement dans le flux de .promo-text comme n'importe
+       quelle autre image -- plus de conteneur/positionnement dédié. */
+    .promo-inline-qr { background: #fff; padding: 8px; border-radius: 12px; box-shadow: 0 8px 26px rgba(0,0,0,.4); }
 
     /* Effets visuels (voir /admin/slideshow → Pages promo → « Effet visuel
        à l'apparition »), appliqués à .slide-promo via une classe effect-*
@@ -129,19 +112,12 @@
     @keyframes promoZoomIn  { from { transform: scale(.86); opacity: 0; } to { transform: scale(1); opacity: 1; } }
     @keyframes promoBounce  { 0% { transform: translateY(-34px); opacity: 0; } 60% { transform: translateY(10px); opacity: 1; } 100% { transform: translateY(0); } }
     @keyframes promoKenburns { from { transform: scale(1); } to { transform: scale(1.09); } }
-    @keyframes promoPulseQr  { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 
-    .slide-promo.effect-slide-up .promo-content,
-    .slide-promo.effect-slide-up .promo-content-textonly { animation: promoSlideUp .7s ease both; }
-    .slide-promo.effect-zoom-in .promo-content,
-    .slide-promo.effect-zoom-in .promo-content-textonly { animation: promoZoomIn .7s ease both; }
-    .slide-promo.effect-bounce .promo-content,
-    .slide-promo.effect-bounce .promo-content-textonly { animation: promoBounce .9s ease both; }
+    .slide-promo.effect-slide-up .promo-content { animation: promoSlideUp .7s ease both; }
+    .slide-promo.effect-zoom-in .promo-content { animation: promoZoomIn .7s ease both; }
+    .slide-promo.effect-bounce .promo-content { animation: promoBounce .9s ease both; }
     .slide-promo.effect-kenburns .promo-bg {
       animation: promoKenburns var(--promo-duration, 8s) ease-in-out both;
-    }
-    .slide-promo.effect-pulse-qr .promo-qr-card {
-      animation: promoPulseQr 1.8s ease-in-out infinite;
     }
 
   </style>
@@ -253,32 +229,18 @@
     const textStyle = `font-family:${page.text_font || 'system-ui, sans-serif'};`
       + `font-size:${page.text_size || 28}px;color:${page.text_color || '#ffffff'};`;
     const overlay = page.overlay_enabled !== false ? `<div class="promo-overlay"></div>` : '';
-    const qrPosition = page.qr_position || 'center';
-    const qrCard = page.qr_enabled
-      ? `<div class="promo-qr-card">
-           <img src="${escapeHtml(page.qr_url)}" width="${page.qr_size || 220}" height="${page.qr_size || 220}" alt="QR code">
-         </div>`
-      : '';
 
-    if (page.qr_enabled && qrPosition !== 'center') {
-      el.innerHTML = `
-        ${bg}
-        ${overlay}
-        <div class="promo-content promo-content-textonly">
-          <div class="promo-text" style='${textStyle}'>${page.html_content || ''}</div>
-        </div>
-        <div class="promo-qr-wrap promo-qr-pos-${qrPosition}">${qrCard}</div>
-      `;
-    } else {
-      el.innerHTML = `
-        ${bg}
-        ${overlay}
-        <div class="promo-content">
-          <div class="promo-text" style='${textStyle}'>${page.html_content || ''}</div>
-          ${page.qr_enabled ? `<div class="promo-qr-wrap">${qrCard}</div>` : ''}
-        </div>
-      `;
-    }
+    // Le(s) QR code(s) éventuel(s) sont déjà résolus en <img class="promo-inline-qr">
+    // à l'intérieur de page.html_content côté serveur (voir _resolve_inline_qrcodes,
+    // app.py) -- plus de conteneur/positionnement dédié ici, ils suivent le
+    // flux du texte comme n'importe quelle autre image insérée depuis le WYSIWYG.
+    el.innerHTML = `
+      ${bg}
+      ${overlay}
+      <div class="promo-content">
+        <div class="promo-text" style='${textStyle}'>${page.html_content || ''}</div>
+      </div>
+    `;
 
     // CSS libre par page (voir /admin/slideshow → Pages promo → « CSS libre
     // pour cette page ») : injecté via .textContent (jamais concaténé dans

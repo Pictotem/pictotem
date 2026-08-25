@@ -190,7 +190,6 @@
                      background: #14161a;
                      color: #fff; font-size: 12px; text-align: center; padding: 8px; }
     .bg-gradient-swatch { aspect-ratio: 16/9; width: 100%; display: block; }
-    .qr-subcard h2 { font-size: 15px; margin-bottom: 4px; }
   </style>
 </head>
 <body class="gallery-body" data-admin-page="slideshow">
@@ -376,7 +375,7 @@
 
           <div class="checkbox-field">
             <input type="checkbox" id="overlay-{{ page.id }}" name="overlay_enabled" {% if page.overlay_enabled %}checked{% endif %}>
-            <label for="overlay-{{ page.id }}">Assombrir le fond (lisibilité du texte et du QR code)</label>
+            <label for="overlay-{{ page.id }}">Assombrir le fond (lisibilité du texte)</label>
           </div>
 
           <div class="field">
@@ -427,6 +426,7 @@
               <span class="wysiwyg-sep"></span>
               <button type="button" class="wysiwyg-media-btn" data-target="wysiwyg-{{ page.id }}" title="Insérer une image (médiathèque ou capture)">🖼</button>
               <button type="button" data-cmd="insertHTML" data-html="<table><tbody><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></tbody></table>" title="Insérer un tableau 3×3">▦</button>
+              <button type="button" data-cmd="insertText" data-html='{qrcode="", taille="150", color="#000000", bgcolor="#ffffff"}' title="Insérer un QR code">▤QR</button>
               <span class="wysiwyg-sep"></span>
               <button type="button" data-cmd="removeFormat" title="Effacer la mise en forme">⌫</button>
             </div>
@@ -435,6 +435,10 @@
             <input type="hidden" name="html_content">
             <p class="upload-hint">
               Emplacements dynamiques disponibles, résolus à l'affichage : <code>{ip}</code>, <code>{port}</code>.
+              QR code : placez <code>{qrcode="texte ou URL", taille="150", color="#000000", bgcolor="#ffffff"}</code>
+              où vous voulez dans le texte (texte vide = lien vers la galerie ;
+              taille en px, couleurs en hexa) — utilisez le bouton ▤QR ci-dessus
+              pour l'insérer.
             </p>
           </div>
 
@@ -467,42 +471,6 @@
               autres pages ni le reste du site) — <strong>non filtré</strong> côté serveur : une erreur ici peut
               casser l'affichage de cette page (jamais celui des autres).
             </p>
-          </div>
-
-          <div class="form-card qr-subcard" style="background:var(--surface-2);margin:20px 0 18px">
-            <h2>QR code</h2>
-            <div class="checkbox-field" style="margin-top:14px">
-              <input type="checkbox" id="qr-enabled-{{ page.id }}" name="qr_enabled" {% if page.qr_enabled %}checked{% endif %}>
-              <label for="qr-enabled-{{ page.id }}">Afficher un QR code sur cette page</label>
-            </div>
-            <div class="field">
-              <label>Contenu (texte ou URL — laisser vide pour pointer vers la galerie)</label>
-              <input type="text" name="qr_text" value="{{ page.qr_text }}"
-                     placeholder="Laisser vide = lien vers la galerie" style="max-width:100%">
-              <p class="upload-hint">
-                Emplacements dynamiques disponibles, résolus à chaque génération du QR code :
-                <code>{ip}</code> (adresse IP actuelle) et <code>{port}</code> (port de l'application).
-                Ex. <code>http://{ip}:{port}/mon-lien</code>.
-              </p>
-            </div>
-            <div class="field-row">
-              <div class="field field-third">
-                <label>Taille (px)</label>
-                <input type="number" name="qr_size" min="60" max="800" value="{{ page.qr_size }}" style="max-width:120px">
-              </div>
-              <div class="field field-third">
-                <label>Couleur</label>
-                <input type="color" name="qr_color" value="{{ page.qr_color }}">
-              </div>
-              <div class="field field-third">
-                <label>Position</label>
-                <select name="qr_position">
-                  {% for value, label in promo_qr_positions %}
-                  <option value="{{ value }}" {% if page.qr_position == value %}selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-            </div>
           </div>
 
           <button class="btn-primary" type="submit">Enregistrer la page</button>

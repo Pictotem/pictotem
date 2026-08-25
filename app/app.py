@@ -23,6 +23,7 @@ import unicodedata
 import zipfile
 from contextlib import closing
 from datetime import datetime, timedelta
+from html import unescape as html_unescape
 
 import cv2
 import numpy as np
@@ -5061,7 +5062,8 @@ _SLIDESHOW_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp', '.gif'}
 # fréquence d'apparition, son temps de pause, son effet visuel. Rendues côté
 # client (bestof.html) à partir de _promo_page_public() ci-dessous — pas
 # d'image à régénérer côté serveur pour le fond/texte, seul le QR est un PNG
-# généré à la volée (voir promo_qr_png). CRUD complet : db.py
+# généré à la volée (voir promo_qr_inline_png / _resolve_inline_qrcodes,
+# balise {qrcode=...} dans le texte WYSIWYG). CRUD complet : db.py
 # (list_promo_pages, create_promo_page, update_promo_page,
 # delete_promo_page_db, move_promo_page, list_promo_backgrounds,
 # add_promo_background, delete_promo_background_db).
@@ -5085,14 +5087,6 @@ _PROMO_EFFECTS = [
     ('zoom-in',  'Zoom avant'),
     ('kenburns', 'Ken Burns (fond en lent zoom continu)'),
     ('bounce',   'Rebond'),
-    ('pulse-qr', 'Pulsation du QR code'),
-]
-_PROMO_QR_POSITIONS = [
-    ('center',       'Centré, sous le texte'),
-    ('top-left',     'Coin haut-gauche'),
-    ('top-right',    'Coin haut-droit'),
-    ('bottom-left',  'Coin bas-gauche'),
-    ('bottom-right', 'Coin bas-droit'),
 ]
 
 
@@ -5160,34 +5154,90 @@ def _promo_page_public(page: dict) -> dict:
         'background_color2': page.get('background_color2') or '',
         'background_angle':  page.get('background_angle') or 135,
         'overlay_enabled': bool(page['overlay_enabled']),
-        'html_content':    resolve_dynamic_placeholders(page['html_content'] or ''),
+        'html_content':    _resolve_inline_qrcodes(resolve_dynamic_placeholders(page['html_content'] or '')),
         'text_font':       page['text_font'],
         'text_size':       page['text_size'],
         'text_color':      page['text_color'],
         'effect':          page['effect'],
-        'qr_enabled':      bool(page['qr_enabled']),
-        'qr_url':          url_for('promo_qr_png', page_id=page['id']),
-        'qr_size':         max(60, page['qr_size']),
-        'qr_position':     page['qr_position'],
         'custom_css':      page.get('custom_css') or '',
     }
 
 
-@app.route('/promo/qr/<int:page_id>.png')
-def promo_qr_png(page_id):
-    """QR code d'une page promo — contenu et couleur propres à la page (repli
-    sur l'URL de la galerie si aucun texte/URL personnalisé n'est défini),
-    voir _promo_page_public. {ip}/{port} y sont résolus à la volée (voir
-    resolve_dynamic_placeholders, utils.py). Public (comme /qr.png) : affiché sur
-    /bestof, sans authentification."""
-    page = get_promo_page(page_id)
-    if not page:
-        abort(404)
-    raw_text = (page['qr_text'] or '').strip()
-    data = resolve_dynamic_placeholders(raw_text) if raw_text else build_gallery_url()
-    color = page['qr_color'] if re.fullmatch(r'#[0-9a-fA-F]{6}', page['qr_color'] or '') else '#000000'
-    return send_file(generate_qr_png_custom(data, fill_color=color),
-                      mimetype='image/png', download_name=f'promo-{page_id}-qr.png')
+_INLINE_QR_HEX_RE = re.compile(r'#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})')
+
+
+@app.route('/promo/qr-inline.png')
+def promo_qr_inline_png():
+    """QR code inline pour la balise {qrcode="...", taille="...", color="...",
+    bgcolor="..."} saisie directement dans le texte WYSIWYG d'une page promo
+    (voir _resolve_inline_qrcodes ci-dessous, qui construit cette URL avec des
+    paramètres déjà validés). Remplace l'ancienne route dédiée par page
+    /promo/qr/<id>.png. Public (comme /qr.png) : affiché sur /bestof, sans
+    authentification -- accepte du texte/couleurs arbitraires en paramètres
+    (simple génération d'image, aucune donnée admin en jeu), plafonné pour
+    éviter tout abus."""
+    data = (request.args.get('text', '') or '').strip()[:1000] or build_gallery_url()
+    color = request.args.get('color', '#000000') or '#000000'
+    if not _INLINE_QR_HEX_RE.fullmatch(color):
+        color = '#000000'
+    bgcolor = request.args.get('bgcolor', '#ffffff') or '#ffffff'
+    if not _INLINE_QR_HEX_RE.fullmatch(bgcolor):
+        bgcolor = '#ffffff'
+    return send_file(generate_qr_png_custom(data, fill_color=color, back_color=bgcolor),
+                      mimetype='image/png', download_name='promo-qr.png')
+
+
+# Le guillemet délimiteur peut être un " brut (texte tapé hors du WYSIWYG,
+# tests) ou &quot; (texte tel que stocké réellement : sanitize_promo_html,
+# utils.py, échappe tout texte via html.escape() avant stockage -- voir
+# _PromoHtmlSanitizer.handle_data). D'où l'alternative dans les deux regex
+# ci-dessous, et le html_unescape() sur chaque valeur extraite.
+_INLINE_QR_QUOTE = r'(?:"|&quot;)'
+_INLINE_QR_RE = re.compile(
+    r'\{qrcode\s*=\s*' + _INLINE_QR_QUOTE + r'(.*?)' + _INLINE_QR_QUOTE + r'([^}]*)\}',
+    re.S,
+)
+_INLINE_QR_ATTR_RE = re.compile(
+    r'(\w+)\s*=\s*' + _INLINE_QR_QUOTE + r'(.*?)' + _INLINE_QR_QUOTE,
+    re.S,
+)
+
+
+def _resolve_inline_qrcodes(html: str) -> str:
+    """Résout, dans le texte WYSIWYG déjà passé par resolve_dynamic_placeholders,
+    toute balise {qrcode="texte", taille="150", color="#000000",
+    bgcolor="#ffffff"} en une image <img> pointant vers /promo/qr-inline.png
+    -- remplace l'ancien système de QR dédié par page (un seul QR, position
+    fixe, réglages séparés dans l'admin, route promo_qr_png aujourd'hui
+    supprimée). L'admin peut désormais placer, dans le
+    texte lui-même, autant de QR codes qu'elle veut, où elle veut (comme une
+    image insérée). Résolu uniquement à l'affichage public, jamais stocké
+    résolu ni appliqué en relecture du formulaire admin -- voir l'appelant
+    (_promo_page_public), jamais admin_promo_page_update."""
+    if not html or '{qrcode' not in html:
+        return html or ''
+
+    def _replace(m):
+        raw_text = html_unescape(m.group(1) or '')
+        attrs = {k: html_unescape(v) for k, v in _INLINE_QR_ATTR_RE.findall(m.group(2) or '')}
+        text = resolve_dynamic_placeholders(raw_text) if raw_text.strip() else ''
+
+        raw_size = (attrs.get('taille') or attrs.get('size') or '150').strip()
+        size = int(raw_size) if raw_size.isdigit() else 150
+        size = max(30, min(1000, size))
+
+        color = (attrs.get('color') or '#000000').strip()
+        if not _INLINE_QR_HEX_RE.fullmatch(color):
+            color = '#000000'
+        bgcolor = (attrs.get('bgcolor') or '#ffffff').strip()
+        if not _INLINE_QR_HEX_RE.fullmatch(bgcolor):
+            bgcolor = '#ffffff'
+
+        url = url_for('promo_qr_inline_png', text=text, color=color, bgcolor=bgcolor)
+        return (f'<img class="promo-inline-qr" src="{url}" width="{size}" height="{size}" '
+                f'alt="QR code" style="vertical-align:middle">')
+
+    return _INLINE_QR_RE.sub(_replace, html)
 
 
 def _slideshow_settings():
@@ -5325,7 +5375,6 @@ def admin_slideshow():
         promo_backgrounds=list_promo_backgrounds(),
         promo_fonts=_all_fonts(),
         promo_effects=_PROMO_EFFECTS,
-        promo_qr_positions=_PROMO_QR_POSITIONS,
         media_library=_promo_media_library(),
         capture_library=_promo_capture_library(),
         alert_success=request.args.get('ok'),
@@ -5370,7 +5419,6 @@ def admin_promo_page_update(page_id):
     fields = {
         'active':          1 if request.form.get('active') else 0,
         'overlay_enabled': 1 if request.form.get('overlay_enabled') else 0,
-        'qr_enabled':      1 if request.form.get('qr_enabled') else 0,
     }
 
     raw_order = (request.form.get('sort_order') or '').strip()
@@ -5389,10 +5437,6 @@ def admin_promo_page_update(page_id):
     if raw_tsize.isdigit() and int(raw_tsize) >= 10:
         fields['text_size'] = int(raw_tsize)
 
-    raw_qsize = (request.form.get('qr_size') or '').strip()
-    if raw_qsize.isdigit() and int(raw_qsize) >= 60:
-        fields['qr_size'] = int(raw_qsize)
-
     font_value = request.form.get('text_font', '')
     if font_value in dict(_all_fonts()):
         fields['text_font'] = font_value
@@ -5401,19 +5445,9 @@ def admin_promo_page_update(page_id):
     if re.fullmatch(r'#[0-9a-fA-F]{6}', color_value):
         fields['text_color'] = color_value
 
-    qr_color_value = request.form.get('qr_color', '').strip()
-    if re.fullmatch(r'#[0-9a-fA-F]{6}', qr_color_value):
-        fields['qr_color'] = qr_color_value
-
     effect_value = request.form.get('effect', '')
     if effect_value in dict(_PROMO_EFFECTS):
         fields['effect'] = effect_value
-
-    position_value = request.form.get('qr_position', '')
-    if position_value in dict(_PROMO_QR_POSITIONS):
-        fields['qr_position'] = position_value
-
-    fields['qr_text'] = (request.form.get('qr_text', '') or '').strip()[:500]
 
     raw_bg = (request.form.get('background_id') or '').strip()
     if raw_bg == '':

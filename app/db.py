@@ -750,11 +750,17 @@ def delete_promo_background_db(bg_id):
     return bg
 
 
+# v2.0.2 : QR code par page remplacé par une balise {qrcode=...} inline
+# dans le texte WYSIWYG (voir _resolve_inline_qrcodes, app.py) -- les
+# colonnes qr_enabled/qr_text/qr_size/qr_position/qr_color restent dans le
+# schéma (create_promo_page() et la migration v1->v2 les alimentent encore
+# avec leurs valeurs par défaut, pas de DROP COLUMN risqué sur une base
+# SQLite en production) mais ne sont plus jamais écrites via
+# update_promo_page ni lues côté app -- volontairement absentes d'ici.
 _PROMO_PAGE_COLUMNS = (
     'active', 'sort_order', 'frequency', 'pause_seconds', 'html_content',
     'background_id', 'overlay_enabled', 'text_font', 'text_size', 'text_color',
-    'effect', 'qr_enabled', 'qr_text', 'qr_size', 'qr_position', 'qr_color',
-    'custom_css',
+    'effect', 'custom_css',
 )
 
 
