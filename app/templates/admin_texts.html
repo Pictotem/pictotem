@@ -43,6 +43,13 @@
     <div>
       <h1>{{ page_label }}</h1>
       <p>Laissez un champ vide pour utiliser la valeur par défaut.</p>
+      <p style="font-size:12px;color:var(--muted);margin-top:6px">
+        Emplacements dynamiques disponibles dans ces textes, résolus au moment où ils sont affichés :
+        <code style="background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--text)">{ip}</code>
+        et
+        <code style="background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--text)">{port}</code>
+        (adresse et port réseau courants).
+      </p>
     </div>
     <nav class="admin-nav">
       <a class="action-btn" href="{{ url_for('admin_home') }}">← Admin</a>

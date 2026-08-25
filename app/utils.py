@@ -181,6 +181,30 @@ def sanitize_promo_html(raw_html: str) -> str:
     return ''.join(parser.out)
 
 
+# ── Emplacements dynamiques ({ip}/{port}) dans les textes admin ─────────────
+# Convention déjà utilisée par idle_timer_badge_text ("Retour dans {n}s",
+# substitué côté client) : ici {ip}/{port} sont substitués côté SERVEUR, au
+# moment où le texte est servi au public (kiosque, galerie, /bestof, QR
+# codes, texte associé à un code invité...) — jamais quand la même valeur
+# est relue pour repeupler un formulaire d'édition admin, qui doit continuer
+# à afficher {ip}/{port} tels quels pour rester éditable. C'est donc à
+# l'appelant (app.py, sur chaque route PUBLIQUE concernée) d'appeler cette
+# fonction — jamais dans get_setting()/les fonctions de lecture partagées
+# par l'admin et le public, sous peine de casser l'édition.
+def resolve_dynamic_placeholders(raw: str) -> str:
+    """Remplace {ip} et {port} par l'adresse réseau et le port courants de
+    l'application, résolus à CHAQUE appel (jamais stockés résolus en base) :
+    restent donc corrects même si l'IP change (DHCP, changement de réseau,
+    redémarrage du PC...), sans repasser par l'admin. No-op si `raw` ne
+    contient aucun des deux emplacements (évite la détection réseau — un
+    socket UDP, voir get_network_info — pour la quasi-totalité des textes,
+    qui n'en ont pas besoin)."""
+    if not raw or ('{ip}' not in raw and '{port}' not in raw):
+        return raw or ''
+    info = get_network_info()
+    return raw.replace('{ip}', info['ip']).replace('{port}', str(info['port']))
+
+
 def make_thumb(src_path, dst_path, size=(480, 800)):
     with Image.open(src_path) as im:
         im = im.convert('RGB')

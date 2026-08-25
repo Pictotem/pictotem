@@ -383,6 +383,9 @@
             <div class="wysiwyg-editable" id="wysiwyg-{{ page.id }}" contenteditable="true"
                  data-placeholder="Un photobox est à votre disposition !">{{ page.html_content | safe }}</div>
             <input type="hidden" name="html_content">
+            <p class="upload-hint">
+              Emplacements dynamiques disponibles, résolus à l'affichage : <code>{ip}</code>, <code>{port}</code>.
+            </p>
           </div>
 
           <div class="field-row">

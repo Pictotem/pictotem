@@ -79,8 +79,8 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, generate_qr_png_custom,
                    get_network_info, is_autostart_enabled, make_thumb, message_text,
-                   print_photo, sanitize_promo_html, set_windows_wallpaper,
-                   validate_printer)
+                   print_photo, resolve_dynamic_placeholders, sanitize_promo_html,
+                   set_windows_wallpaper, validate_printer)
 
 # ── Application Flask ─────────────────────────────────────────────────────────
 
@@ -378,13 +378,21 @@ def logout():
 def index():
     welcome_fn = get_setting('welcome_frame_filename', '')
     welcome_frame_url = f'/static/frames/{welcome_fn}' if welcome_fn else ''
+    # {ip}/{port} (voir resolve_dynamic_placeholders, utils.py) résolus ici,
+    # sur la route PUBLIQUE du kiosque uniquement — get_ui_texts()/
+    # _about_settings() sont aussi utilisées telles quelles (non résolues)
+    # pour repeupler le formulaire /admin/texts, qui doit continuer à
+    # afficher {ip}/{port} en clair pour rester éditable.
+    texts = {k: resolve_dynamic_placeholders(v) for k, v in get_ui_texts().items()}
+    about = {k: resolve_dynamic_placeholders(v) for k, v in _about_settings().items()}
     return render_template(
         'index.html', config=CONFIG, frames=list_frames(),
-        default_frame=get_default_frame(), message=message_text(),
-        welcome_frame_url=welcome_frame_url, texts=get_ui_texts(),
+        default_frame=get_default_frame(), message=resolve_dynamic_placeholders(message_text()),
+        welcome_frame_url=welcome_frame_url, texts=texts,
         idle_timer_enabled=get_setting('idle_timer_enabled', '0') == '1',
         idle_timer_seconds=int(get_setting('idle_timer_seconds', '30')),
-        idle_timer_badge_text=get_setting('idle_timer_badge_text', 'Retour dans {n}s'),
+        idle_timer_badge_text=resolve_dynamic_placeholders(
+            get_setting('idle_timer_badge_text', 'Retour dans {n}s')),
         idle_timer_font_size=int(get_setting('idle_timer_font_size', '13')),
         idle_timer_padding_y=int(get_setting('idle_timer_padding_y', '5')),
         idle_timer_padding_x=int(get_setting('idle_timer_padding_x', '13')),
@@ -398,7 +406,7 @@ def index():
         photo_strip=CONFIG.get('capture', {}).get('photo_strip', {}),
         tags_enabled=get_setting('tags.enabled', '0') == '1',
         buttons=_buttons_settings(),
-        about=_about_settings(),
+        about=about,
         kiosk_unlock_taps=_kiosk_unlock_settings()['taps'],
         photostrip_step=_photostrip_step_settings(),
         qrcode=_qrcode_settings(),
@@ -476,7 +484,7 @@ def capture_photo():
     qr_tags = _qr_tag_detections(capture_id, detections)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
                     'filename': filename, 'qr_tags': qr_tags,
-                    'url': f'/media/photo/{filename}', 'message': message_text()})
+                    'url': f'/media/photo/{filename}', 'message': resolve_dynamic_placeholders(message_text())})
 
 
 def _ffmpeg_overlay_pass(input_path: Path, overlay_png_path: Path, output_path: Path, w: int, h: int):
@@ -688,7 +696,7 @@ def capture_video():
         qr_tags = _qr_tag_detections(capture_id, [{'text': t} for t in seen_texts])
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'video',
                     'filename': final_filename, 'qr_tags': qr_tags,
-                    'url': f'/media/video/{final_filename}', 'message': message_text()})
+                    'url': f'/media/video/{final_filename}', 'message': resolve_dynamic_placeholders(message_text())})
 
 
 @app.route('/api/capture/<int:capture_id>/retake', methods=['POST'])
@@ -1677,7 +1685,7 @@ def _qr_detect_boxes_robust(image) -> list:
                 # incrusté/tagué, jamais le code numérique lui-même.
                 mapped = get_guest_code_text(text)
                 if mapped is not None:
-                    text = mapped
+                    text = resolve_dynamic_placeholders(mapped)
             results.append({'text': text, 'points': pts})
     return results
 
@@ -1972,7 +1980,7 @@ def capture_photostrip_finish():
     qr_tags = _qr_tag_detections(capture_id, detections)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
                     'filename': filename, 'qr_tags': qr_tags,
-                    'url': f'/media/photo/{filename}', 'message': message_text()})
+                    'url': f'/media/photo/{filename}', 'message': resolve_dynamic_placeholders(message_text())})
 
 
 @app.route('/api/capture/photostrip/cancel', methods=['POST'])
@@ -2063,7 +2071,7 @@ def gallery():
 
     resp = make_response(render_template(
         'gallery.html', captures=captures, sort=sort, kind=kind, config=CONFIG,
-        email_cookie=email_cookie, gallery_text=get_setting('gallery_text', ''),
+        email_cookie=email_cookie, gallery_text=resolve_dynamic_placeholders(get_setting('gallery_text', '')),
         page=page, total_pages=total_pages, total=total,
         vote_enabled=vote_enabled, voter_votes=voter_votes, vote_cfg=vote_cfg,
         guest_upload_url=guest_upload_url,
@@ -5018,7 +5026,7 @@ def _promo_page_public(page: dict) -> dict:
         'background_url':  (url_for('static', filename=f'promo/{page["background_filename"]}')
                              if page['background_filename'] else ''),
         'overlay_enabled': bool(page['overlay_enabled']),
-        'html_content':    page['html_content'] or '',
+        'html_content':    resolve_dynamic_placeholders(page['html_content'] or ''),
         'text_font':       page['text_font'],
         'text_size':       page['text_size'],
         'text_color':      page['text_color'],
@@ -5030,32 +5038,18 @@ def _promo_page_public(page: dict) -> dict:
     }
 
 
-def _resolve_promo_qr_placeholders(raw: str) -> str:
-    """Remplace les emplacements dynamiques du texte du QR code d'une page
-    promo par leur valeur courante — voir /admin/slideshow → Pages promo →
-    QR code. Résolu à CHAQUE génération d'image (jamais stocké résolu en
-    base) : {ip} et {port} restent donc corrects même si l'IP change (DHCP,
-    changement de réseau, redémarrage du PC...), sans repasser par l'admin.
-    Pratique pour QRcoder une adresse d'accès direct plutôt que le lien de
-    galerie par défaut, ex. « http://{ip}:{port}/mon-lien »."""
-    if '{ip}' not in raw and '{port}' not in raw:
-        return raw
-    info = get_network_info()
-    return raw.replace('{ip}', info['ip']).replace('{port}', str(info['port']))
-
-
 @app.route('/promo/qr/<int:page_id>.png')
 def promo_qr_png(page_id):
     """QR code d'une page promo — contenu et couleur propres à la page (repli
     sur l'URL de la galerie si aucun texte/URL personnalisé n'est défini),
     voir _promo_page_public. {ip}/{port} y sont résolus à la volée (voir
-    _resolve_promo_qr_placeholders). Public (comme /qr.png) : affiché sur
+    resolve_dynamic_placeholders, utils.py). Public (comme /qr.png) : affiché sur
     /bestof, sans authentification."""
     page = get_promo_page(page_id)
     if not page:
         abort(404)
     raw_text = (page['qr_text'] or '').strip()
-    data = _resolve_promo_qr_placeholders(raw_text) if raw_text else build_gallery_url()
+    data = resolve_dynamic_placeholders(raw_text) if raw_text else build_gallery_url()
     color = page['qr_color'] if re.fullmatch(r'#[0-9a-fA-F]{6}', page['qr_color'] or '') else '#000000'
     return send_file(generate_qr_png_custom(data, fill_color=color),
                       mimetype='image/png', download_name=f'promo-{page_id}-qr.png')
