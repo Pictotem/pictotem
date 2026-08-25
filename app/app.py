@@ -5119,16 +5119,24 @@ def _promo_media_library() -> list:
 def _promo_capture_library(limit: int = 60) -> list:
     """Dernières captures visiteurs (photos), 2e source du sélecteur d'image
     du WYSIWYG — vignette via /media/thumb (légère), insertion de l'URL
-    /media/photo (pleine résolution) dans le contenu."""
+    /media/photo (pleine résolution) dans le contenu. BUG corrigé : la
+    vignette d'une capture est stockée sous un nom DIFFÉRENT de la photo
+    elle-même (colonne dédiée thumb_filename, voir record_capture/db.py) --
+    interroger /media/thumb avec `filename` (comme avant ce correctif)
+    pointait vers un fichier inexistant dans THUMBS_DIR et cassait
+    systématiquement l'affichage. Repli sur la photo elle-même si aucune
+    vignette n'a été générée (thumb_filename NULL)."""
     with closing(db_conn()) as conn:
         rows = conn.execute(
-            "SELECT filename FROM captures WHERE kind = 'photo' ORDER BY created_at DESC LIMIT ?",
+            "SELECT filename, thumb_filename FROM captures WHERE kind = 'photo' "
+            "ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
     return [
         {
             'url':       url_for('media_photo', filename=r['filename']),
-            'thumb_url': url_for('media_thumb', filename=r['filename']),
+            'thumb_url': (url_for('media_thumb', filename=r['thumb_filename'])
+                          if r['thumb_filename'] else url_for('media_photo', filename=r['filename'])),
             'label':     r['filename'],
         }
         for r in rows

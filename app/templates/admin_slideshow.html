@@ -124,16 +124,15 @@
     .wysiwyg-editable:focus { outline: none; border-color: var(--accent); }
     .wysiwyg-editable:empty:before { content: attr(data-placeholder); color: var(--muted); }
     .wysiwyg-editable img { max-width: 100%; cursor: pointer; }
-    /* Image sélectionnée (voir promo-editor.js) : poignée de redimensionnement
-       native (resize: horizontal — largeur seule, la hauteur est recalculée en
-       "auto" à la désélection pour ne jamais déformer l'image). display et
-       overflow ne sont appliqués QUE via cette classe, jamais en style inline
-       de l'image, donc jamais enregistrés avec la page. */
+    /* Image sélectionnée (voir promo-editor.js) : le support du CSS `resize`
+       sur <img> s'est révélé trop peu fiable selon les navigateurs (poignée
+       parfois invisible) -- remplacé par une poignée maison, positionnée en
+       JS sur le coin bas-droit de l'image (voir #wysiwyg-img-resize-handle
+       ci-dessous). Simple surlignage ici, aucun style de mise en page. */
     .wysiwyg-editable img.wysiwyg-img-selected {
-      display: inline-block; overflow: hidden; resize: horizontal;
-      outline: 2px solid var(--accent); outline-offset: 2px; cursor: nwse-resize;
+      outline: 2px solid var(--accent); outline-offset: 2px;
     }
-    .wysiwyg-img-toolbar { position: fixed; z-index: 999; display: flex; gap: 2px;
+    .wysiwyg-img-toolbar { position: fixed; z-index: 999; display: flex; align-items: center; gap: 2px;
                             background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
                             padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
     .wysiwyg-img-toolbar.hidden { display: none; }
@@ -141,6 +140,15 @@
                                    border-radius: 6px; min-width: 30px; height: 28px; cursor: pointer; font-size: 13px; }
     .wysiwyg-img-toolbar button:hover { border-color: var(--accent); }
     .wysiwyg-img-toolbar button[data-action="delete"] { color: #e57373; }
+    .wysiwyg-img-dim { width: 56px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+                        border-radius: 6px; padding: 0 6px; font-size: 12px; height: 28px; box-sizing: border-box; }
+    .wysiwyg-img-dim:focus { outline: none; border-color: var(--accent); }
+    /* Poignée de redimensionnement maison (voir promo-editor.js), repositionnée
+       en JS sur le coin bas-droit de l'image sélectionnée à chaque changement. */
+    .wysiwyg-img-resize-handle { position: fixed; z-index: 999; width: 14px; height: 14px;
+                                  background: var(--accent); border: 2px solid var(--surface);
+                                  border-radius: 3px; cursor: nwse-resize; }
+    .wysiwyg-img-resize-handle.hidden { display: none; }
 
     .promo-custom-css { width: 100%; box-sizing: border-box; background: var(--surface-2);
                          border: 1px solid var(--border); color: var(--text); border-radius: 10px;
@@ -534,8 +542,16 @@
     <button type="button" data-align="center" title="Centrer (seule sur sa ligne)">↔</button>
     <button type="button" data-align="right" title="Aligner à droite (texte autour, à gauche)">➡</button>
     <button type="button" data-align="inline" title="Normal (dans le texte)">⟲</button>
+    <span class="wysiwyg-sep"></span>
+    <input type="number" id="wysiwyg-img-width" class="wysiwyg-img-dim" min="20" max="2000"
+           title="Largeur (px)" placeholder="L px">
+    <input type="number" id="wysiwyg-img-height" class="wysiwyg-img-dim" min="20" max="2000"
+           title="Hauteur (px) — vide = proportionnelle à la largeur" placeholder="H px">
+    <span class="wysiwyg-sep"></span>
     <button type="button" data-action="delete" title="Supprimer l'image">🗑</button>
   </div>
+  <div id="wysiwyg-img-resize-handle" class="wysiwyg-img-resize-handle hidden"
+       title="Glisser pour redimensionner"></div>
 
   <div id="media-picker-modal" class="media-picker-modal hidden" aria-hidden="true">
     <div class="media-picker-dialog">

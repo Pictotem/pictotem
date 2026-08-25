@@ -97,45 +97,116 @@
   }
 
   // ── Redimensionnement + alignement d'une image du WYSIWYG ───────────────
-  // Cliquer une image la sélectionne (poignée de redimensionnement native
-  // CSS — voir .wysiwyg-img-selected — et barre flottante d'alignement).
-  // La largeur obtenue par glisser est figée en style inline (width + height:
-  // auto, jamais de déformation) à la désélection, pas pendant le glisser :
-  // c'est ce qui finit dans le HTML enregistré.
+  // Cliquer une image la sélectionne : poignée de redimensionnement MAISON
+  // (le CSS `resize` natif sur <img> s'est révélé trop peu fiable selon les
+  // navigateurs — poignée invisible), barre flottante d'alignement, et deux
+  // champs Largeur/Hauteur (px) appliqués immédiatement à la frappe. La
+  // largeur/hauteur choisie est TOUJOURS écrite en style inline dès
+  // l'action (glisser ou frappe), jamais différée à la désélection.
   let _selectedImg = null;
 
   function _positionImgToolbar(img) {
     const bar = document.getElementById('wysiwyg-img-toolbar');
-    if (!bar) return;
+    if (bar) {
+      const r = img.getBoundingClientRect();
+      bar.style.top = Math.max(8, r.top - 40) + 'px';
+      bar.style.left = Math.max(8, r.left) + 'px';
+      bar.classList.remove('hidden');
+    }
+    _positionResizeHandle(img);
+  }
+
+  function _positionResizeHandle(img) {
+    const handle = document.getElementById('wysiwyg-img-resize-handle');
+    if (!handle) return;
     const r = img.getBoundingClientRect();
-    bar.style.top = Math.max(8, r.top - 40) + 'px';
-    bar.style.left = Math.max(8, r.left) + 'px';
-    bar.classList.remove('hidden');
+    handle.style.top = Math.round(r.bottom - 7) + 'px';
+    handle.style.left = Math.round(r.right - 7) + 'px';
+    handle.classList.remove('hidden');
+  }
+
+  // Recopie la taille actuelle de l'image dans les champs Largeur/Hauteur —
+  // appelé à la sélection et après un glisser, JAMAIS pendant que l'admin
+  // tape dans ces champs (on écraserait sa frappe en cours).
+  function _syncImgDimFields(img) {
+    const r = img.getBoundingClientRect();
+    const wInput = document.getElementById('wysiwyg-img-width');
+    const hInput = document.getElementById('wysiwyg-img-height');
+    if (wInput) wInput.value = Math.round(r.width);
+    if (hInput) hInput.value = (img.style.height && img.style.height !== 'auto')
+      ? Math.round(r.height) : '';
   }
 
   function _deselectImg() {
-    if (_selectedImg) {
-      const rect = _selectedImg.getBoundingClientRect();
-      const w = Math.min(2000, Math.max(20, Math.round(rect.width)));
-      _selectedImg.style.width = w + 'px';
-      _selectedImg.style.height = 'auto';
-      _selectedImg.classList.remove('wysiwyg-img-selected');
-    }
+    if (_selectedImg) _selectedImg.classList.remove('wysiwyg-img-selected');
     const bar = document.getElementById('wysiwyg-img-toolbar');
     if (bar) bar.classList.add('hidden');
+    const handle = document.getElementById('wysiwyg-img-resize-handle');
+    if (handle) handle.classList.add('hidden');
     _selectedImg = null;
   }
 
   document.addEventListener('mousedown', function (e) {
     const img = e.target.closest('.wysiwyg-editable img');
-    const onToolbar = e.target.closest('#wysiwyg-img-toolbar');
+    const onControls = e.target.closest('#wysiwyg-img-toolbar, #wysiwyg-img-resize-handle');
     if (img) {
       if (_selectedImg && _selectedImg !== img) _deselectImg();
       _selectedImg = img;
       img.classList.add('wysiwyg-img-selected');
       _positionImgToolbar(img);
-    } else if (!onToolbar && _selectedImg) {
+      _syncImgDimFields(img);
+    } else if (!onControls && _selectedImg) {
       _deselectImg();
+    }
+  });
+
+  // Glisser la poignée : ajuste la largeur en direct (hauteur recalculée en
+  // "auto" pour ne jamais déformer l'image) — écouteurs mousemove/mouseup
+  // posés seulement pendant le glisser, retirés ensuite.
+  document.addEventListener('mousedown', function (e) {
+    if (!e.target.closest('#wysiwyg-img-resize-handle') || !_selectedImg) return;
+    e.preventDefault();
+    const img = _selectedImg;
+    const startX = e.clientX;
+    const startWidth = img.getBoundingClientRect().width;
+
+    function onMove(ev) {
+      const w = Math.min(2000, Math.max(20, Math.round(startWidth + (ev.clientX - startX))));
+      img.style.width = w + 'px';
+      img.style.height = 'auto';
+      _positionImgToolbar(img);
+      _syncImgDimFields(img);
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // Champs Largeur/Hauteur : prise en compte immédiate à chaque frappe.
+  // Largeur seule saisie => hauteur recalculée "auto" (proportionnelle) ;
+  // dès que Hauteur est renseignée, elle devient une valeur fixe indépendante.
+  document.addEventListener('input', function (e) {
+    if (!_selectedImg) return;
+    if (e.target.id === 'wysiwyg-img-width') {
+      const v = parseInt(e.target.value, 10);
+      if (v > 0) {
+        _selectedImg.style.width = Math.min(2000, Math.max(20, v)) + 'px';
+        const hInput = document.getElementById('wysiwyg-img-height');
+        if (!hInput || !hInput.value) _selectedImg.style.height = 'auto';
+        _positionImgToolbar(_selectedImg);
+      }
+    } else if (e.target.id === 'wysiwyg-img-height') {
+      const v = parseInt(e.target.value, 10);
+      if (v > 0) {
+        _selectedImg.style.height = Math.min(2000, Math.max(20, v)) + 'px';
+        _positionImgToolbar(_selectedImg);
+      } else if (e.target.value === '') {
+        _selectedImg.style.height = 'auto';
+        _positionImgToolbar(_selectedImg);
+      }
     }
   });
 
@@ -150,6 +221,8 @@
       img.remove();
       const bar = document.getElementById('wysiwyg-img-toolbar');
       if (bar) bar.classList.add('hidden');
+      const handle = document.getElementById('wysiwyg-img-resize-handle');
+      if (handle) handle.classList.add('hidden');
       return;
     }
 
@@ -201,9 +274,10 @@
   document.addEventListener('submit', function (e) {
     const form = e.target;
     if (!form.classList || !form.classList.contains('promo-page-form')) return;
-    // Fige la taille/désélectionne une image en cours de redimensionnement
-    // avant de lire le HTML — sinon la classe wysiwyg-img-selected (purement
-    // visuelle, jamais censée être enregistrée) partirait dans le contenu.
+    // Désélectionne une image avant de lire le HTML — sinon la classe
+    // wysiwyg-img-selected (purement visuelle, jamais censée être
+    // enregistrée) partirait dans le contenu (elle serait de toute façon
+    // retirée par le nettoyeur serveur, mais autant rester propre).
     if (_selectedImg && form.contains(_selectedImg)) _deselectImg();
     const editable = form.querySelector('.wysiwyg-editable');
     const hidden = form.querySelector('input[type=hidden][name=html_content]');
