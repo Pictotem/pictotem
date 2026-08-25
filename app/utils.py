@@ -118,11 +118,44 @@ _PROMO_HTML_ALLOWED_TAGS = {
     'u': set(), 'ul': set(), 'ol': set(), 'li': set(), 'div': {'style'}, 'span': {'style'},
     # v2.0.1 : image (sélecteur médiathèque/captures du WYSIWYG -- voir
     # static/promo-editor.js) et tableaux basiques.
-    'img': {'src', 'alt'},
+    'img': {'src', 'alt', 'style'},
     'table': set(), 'thead': set(), 'tbody': set(), 'tr': set(),
     'td': {'colspan', 'rowspan'}, 'th': {'colspan', 'rowspan'},
 }
 _PROMO_HTML_STYLE_RE = re.compile(r'^text-align\s*:\s*(left|center|right|justify)\s*;?$')
+# v2.0.2 : redimensionnement/alignement d'image (voir static/promo-editor.js
+# -- poignée de redimensionnement + boutons gauche/centre/droite/normal).
+# Contrairement à _PROMO_HTML_STYLE_RE ci-dessus (une seule déclaration,
+# correspondance exacte de toute la valeur), le style d'une image peut
+# combiner plusieurs déclarations : chacune est validée indépendamment.
+# Le style qui arrive ici est TOUJOURS généré par promo-editor.js (jamais
+# tapé à la main par l'admin), mais on valide quand même strictement, au
+# cas où le HTML aurait été modifié hors de l'éditeur (collé depuis
+# ailleurs, etc.).
+_PROMO_HTML_IMG_STYLE_PROPS = {
+    'width':         re.compile(r'^[1-9][0-9]{0,3}px$'),
+    'height':        re.compile(r'^(auto|[1-9][0-9]{0,3}px)$'),
+    'float':         re.compile(r'^(left|right)$'),
+    'display':       re.compile(r'^(block|inline-block)$'),
+    'margin-top':    re.compile(r'^(0|auto|[1-9][0-9]{0,2}px)$'),
+    'margin-right':  re.compile(r'^(0|auto|[1-9][0-9]{0,2}px)$'),
+    'margin-bottom': re.compile(r'^(0|auto|[1-9][0-9]{0,2}px)$'),
+    'margin-left':   re.compile(r'^(0|auto|[1-9][0-9]{0,2}px)$'),
+}
+
+
+def _sanitize_img_style(raw_style: str) -> str:
+    kept = []
+    for decl in raw_style.split(';'):
+        if ':' not in decl:
+            continue
+        prop, _, val = decl.partition(':')
+        prop = prop.strip().lower()
+        val = val.strip()
+        rx = _PROMO_HTML_IMG_STYLE_PROPS.get(prop)
+        if rx and rx.match(val):
+            kept.append(f'{prop}:{val}')
+    return ';'.join(kept)
 # src d'image : uniquement un chemin relatif au même site -- jamais de
 # protocole (javascript:, data:...), jamais "//hôte-externe/..." qui serait
 # interprété comme une URL protocole-relative vers un autre domaine.
@@ -148,9 +181,13 @@ class _PromoHtmlSanitizer(HTMLParser):
         allowed_attrs = _PROMO_HTML_ALLOWED_TAGS[tag]
         kept = []
         for name, value in attrs:
-            if (name == 'style' and 'style' in allowed_attrs and value
+            if (name == 'style' and tag in ('div', 'span') and 'style' in allowed_attrs and value
                     and _PROMO_HTML_STYLE_RE.match(value.strip())):
                 kept.append(f'style="{escape(value.strip(), quote=True)}"')
+            elif name == 'style' and tag == 'img' and 'style' in allowed_attrs and value:
+                cleaned = _sanitize_img_style(value)
+                if cleaned:
+                    kept.append(f'style="{escape(cleaned, quote=True)}"')
             elif (name == 'src' and 'src' in allowed_attrs and value
                     and _PROMO_HTML_IMG_SRC_RE.match(value.strip())):
                 kept.append(f'src="{escape(value.strip(), quote=True)}"')

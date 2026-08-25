@@ -92,6 +92,12 @@
     .promo-text p { margin: 0 0 16px; line-height: 1.4; }
     .promo-text p:last-child { margin-bottom: 0; }
     .promo-text ul, .promo-text ol { text-align: left; display: inline-block; margin: 0 0 16px; }
+    /* Image alignée/redimensionnée depuis le WYSIWYG (voir
+       static/promo-editor.js) : max-width en filet de sécurité si jamais la
+       largeur enregistrée dépassait le conteneur ; clearfix pour que
+       .promo-text ne s'effondre pas quand tout son contenu est flottant. */
+    .promo-text img { max-width: 100%; height: auto; }
+    .promo-text::after { content: ''; display: table; clear: both; }
     .promo-qr-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
     .promo-qr-card {
       background: #fff; padding: 16px; border-radius: 20px;
