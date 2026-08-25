@@ -291,6 +291,36 @@ def init_db():
         """)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_promo_pages_sort_order ON promo_pages(sort_order)')
 
+        # Fonds dégradés (v2.0.1) : promo_backgrounds accueille désormais deux
+        # types de fond partagés par les pages promo — 'image' (fichier
+        # uploadé, comportement d'origine) et 'gradient' (deux couleurs +
+        # angle, généré à la volée côté client, aucun fichier). `kind` par
+        # défaut 'image' sur les colonnes ajoutées : les fonds déjà en base
+        # (toujours des images avant cette version) restent corrects sans
+        # migration de données à écrire.
+        for ddl in (
+            "ALTER TABLE promo_backgrounds ADD COLUMN kind TEXT NOT NULL DEFAULT 'image'",
+            "ALTER TABLE promo_backgrounds ADD COLUMN color1 TEXT",
+            "ALTER TABLE promo_backgrounds ADD COLUMN color2 TEXT",
+            "ALTER TABLE promo_backgrounds ADD COLUMN angle INTEGER NOT NULL DEFAULT 135",
+        ):
+            try:
+                conn.execute(ddl)
+                conn.commit()
+            except Exception:
+                pass  # colonne déjà présente
+
+        # CSS libre par page promo (v2.0.1) : texte brut, appliqué uniquement
+        # à sa propre page via @scope (voir bestof.html -> buildPromoContent),
+        # AUCUN filtrage serveur (choix assumé -- contrairement à
+        # html_content, qui reste nettoyé par sanitize_promo_html). Défaut
+        # '' : les pages existantes n'ont simplement aucun CSS additionnel.
+        try:
+            conn.execute("ALTER TABLE promo_pages ADD COLUMN custom_css TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        except Exception:
+            pass  # colonne déjà présente
+
         # Migration v2.0 : reprise ponctuelle de l'ancienne page promo unique
         # vers le nouveau CRUD multi-pages — seulement si promo_pages est
         # encore vide ET qu'un réglage v1 existe (install déjà en prod avant
@@ -683,8 +713,22 @@ def add_promo_background(filename, label=''):
     created_at = datetime.now().isoformat(timespec='seconds')
     with closing(db_conn()) as conn:
         cur = conn.execute(
-            'INSERT INTO promo_backgrounds(filename, label, created_at) VALUES(?,?,?)',
+            "INSERT INTO promo_backgrounds(filename, label, created_at, kind) VALUES(?,?,?,'image')",
             (filename, label, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def add_promo_gradient_background(color1, color2, angle=135, label=''):
+    """Fond dégradé (deux couleurs + angle), sans fichier — voir kind='gradient'
+    sur promo_backgrounds. `angle` en degrés, sens CSS (linear-gradient)."""
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            "INSERT INTO promo_backgrounds(filename, label, created_at, kind, color1, color2, angle) "
+            "VALUES('', ?, ?, 'gradient', ?, ?, ?)",
+            (label, created_at, color1, color2, angle)
         )
         conn.commit()
         return cur.lastrowid
@@ -710,6 +754,7 @@ _PROMO_PAGE_COLUMNS = (
     'active', 'sort_order', 'frequency', 'pause_seconds', 'html_content',
     'background_id', 'overlay_enabled', 'text_font', 'text_size', 'text_color',
     'effect', 'qr_enabled', 'qr_text', 'qr_size', 'qr_position', 'qr_color',
+    'custom_css',
 )
 
 
@@ -717,6 +762,10 @@ def _promo_page_row_to_dict(row, bg_by_id):
     d = dict(row)
     bg = bg_by_id.get(d['background_id'])
     d['background_filename'] = bg['filename'] if bg else ''
+    d['background_kind']     = bg['kind'] if bg else ''
+    d['background_color1']   = bg['color1'] if bg else ''
+    d['background_color2']   = bg['color2'] if bg else ''
+    d['background_angle']    = bg['angle'] if bg else 135
     return d
 
 

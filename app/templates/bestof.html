@@ -70,8 +70,12 @@
       object-fit: cover; z-index: 0;
     }
     .promo-bg-fallback {
+      /* Fond neutre (aucun fond choisi sur la page — voir /admin/slideshow →
+         Pages promo → Fond) — les dégradés eux-mêmes sont désormais des
+         entrées de la bibliothèque de fonds, créées par l'admin (2 couleurs
+         + angle), rendues en style inline ci-dessous plutôt qu'ici. */
       position: absolute; inset: 0; z-index: 0;
-      background: linear-gradient(135deg, #0d8b8f 0%, #145b5e 55%, #111315 100%);
+      background: #14161a;
     }
     .promo-overlay { position: absolute; inset: 0; z-index: 1; background: rgba(0,0,0,.42); }
     /* Doit rester au-dessus de .promo-overlay (texte + QR toujours visibles,
@@ -229,9 +233,17 @@
     el.innerHTML = '';
     el.style.setProperty('--promo-duration', (page.pause_seconds || 8) + 's');
 
-    const bg = page.background_url
-      ? `<img class="promo-bg" src="${escapeHtml(page.background_url)}" alt="">`
-      : `<div class="promo-bg-fallback"></div>`;
+    let bg;
+    if (page.background_kind === 'gradient' && page.background_color1) {
+      const angle = page.background_angle || 135;
+      const c1 = escapeHtml(page.background_color1);
+      const c2 = escapeHtml(page.background_color2 || page.background_color1);
+      bg = `<div class="promo-bg" style="background:linear-gradient(${angle}deg, ${c1}, ${c2})"></div>`;
+    } else if (page.background_url) {
+      bg = `<img class="promo-bg" src="${escapeHtml(page.background_url)}" alt="">`;
+    } else {
+      bg = `<div class="promo-bg-fallback"></div>`;
+    }
     const textStyle = `font-family:${page.text_font || 'system-ui, sans-serif'};`
       + `font-size:${page.text_size || 28}px;color:${page.text_color || '#ffffff'};`;
     const overlay = page.overlay_enabled !== false ? `<div class="promo-overlay"></div>` : '';
@@ -260,6 +272,21 @@
           ${page.qr_enabled ? `<div class="promo-qr-wrap">${qrCard}</div>` : ''}
         </div>
       `;
+    }
+
+    // CSS libre par page (voir /admin/slideshow → Pages promo → « CSS libre
+    // pour cette page ») : injecté via .textContent (jamais concaténé dans
+    // le innerHTML ci-dessus) pour qu'aucune séquence "</style" dans le CSS
+    // saisi par l'admin ne puisse casser hors de la balise <style> et
+    // injecter du HTML/JS arbitraire sur /bestof. @scope sans sélecteur de
+    // racine explicite prend pour racine implicite le parent de <style> —
+    // ici `el` — donc les règles de l'admin ne s'appliquent jamais en
+    // dehors de cette slide (silencieusement ignorées, pas de fuite
+    // globale, sur un navigateur trop ancien pour @scope).
+    if (page.custom_css) {
+      const styleEl = document.createElement('style');
+      styleEl.textContent = '@scope {\n' + page.custom_css + '\n}';
+      el.appendChild(styleEl);
     }
   }
 

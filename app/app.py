@@ -73,9 +73,9 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 delete_guest_code_db, upsert_guest_code, purge_guest_codes_by_date,
                 purge_guest_codes_first_n, generate_guest_code,
                 list_custom_fonts, create_custom_font, delete_custom_font_db,
-                list_promo_backgrounds, add_promo_background, delete_promo_background_db,
-                list_promo_pages, get_promo_page, create_promo_page, update_promo_page,
-                delete_promo_page_db, move_promo_page)
+                list_promo_backgrounds, add_promo_background, add_promo_gradient_background,
+                delete_promo_background_db, list_promo_pages, get_promo_page, create_promo_page,
+                update_promo_page, delete_promo_page_db, move_promo_page)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, generate_qr_png_custom,
                    get_network_info, is_autostart_enabled, make_thumb, message_text,
@@ -2829,7 +2829,7 @@ _ADMIN_BLOCKS = {
     'app_restart':         {'title': "Redémarrage de l'application",           'default_page': 'application', 'template': 'blocks/app_restart.html',         'context_fn': None},
     'app_restart_update':  {'title': "Redémarrage avec mise à jour (Git)",      'default_page': 'application', 'template': 'blocks/app_restart_update.html',  'context_fn': None},
     'app_autostart':       {'title': "Démarrage automatique Windows",           'default_page': 'application', 'template': 'blocks/app_autostart.html',       'context_fn': '_block_ctx_app_autostart'},
-    'app_wallpaper':       {'title': "Fond d'écran Windows",                    'default_page': 'application', 'template': 'blocks/app_wallpaper.html',       'context_fn': '_block_ctx_app_wallpaper'},
+    'app_wallpaper':       {'title': "Fond d'écran Windows",                    'default_page': 'media',       'template': 'blocks/app_wallpaper.html',       'context_fn': '_block_ctx_app_wallpaper'},
     'app_idle_timer':      {'title': "Mise en veille automatique",              'default_page': 'application', 'template': 'blocks/app_idle_timer.html',      'context_fn': '_block_ctx_app_idle_timer'},
     'app_network_info':    {'title': "Informations réseau (interface principale)", 'default_page': 'application', 'template': 'blocks/app_network_info.html', 'context_fn': '_block_ctx_app_network_info'},
     'access_password':     {'title': "Mot de passe du back office",             'default_page': 'access',      'template': 'blocks/access_password.html',     'context_fn': '_block_ctx_access_password'},
@@ -2876,6 +2876,7 @@ _ADMIN_PAGES = [
     ('votes',       'Votes',                'admin_votes'),
     ('buttons',     'Boutons',              'admin_buttons'),
     ('tags',        'Tags & ID média',      'admin_tags'),
+    ('media',       'Médiathèque',          'admin_media'),
     ('slideshow',   'Slideshow Best Of',    'admin_slideshow'),
     ('screensaver', 'Écran de veille',      'admin_screensaver'),
     ('guest_uploads', 'Upload invités',     'admin_guest_uploads'),
@@ -2898,8 +2899,9 @@ _ADMIN_PAGE_DESCRIPTIONS = {
     'votes':          "Activer les votes sur la galerie, couleurs et seuils du gradient",
     'buttons':        "Forme, police et taille communes ; couleur et graisse propres à chaque bouton",
     'tags':           "Tags prédéfinis/libre sur les captures, ID unique recherchable et affichable",
-    'slideshow':      "Diaporama public /bestof — type, délai, ordre, dates, images intermédiaires",
-    'screensaver':    "Diaporama plein écran après inactivité sur l'accueil — délai, images dédiées",
+    'media':          "Fond d'écran Windows, images intermédiaires du diaporama, images de l'écran de veille",
+    'slideshow':      "Diaporama public /bestof — type, délai, ordre, dates, pages promo",
+    'screensaver':    "Diaporama plein écran après inactivité sur l'accueil — délai",
     'guest_uploads':  "Lien de partage /share, modération, quota — alimente le best-of et/ou la galerie",
     'guest_codes':    "Codes numériques associés à un texte ; détection, apparence et incrustation QR-code",
 }
@@ -2913,7 +2915,7 @@ _ADMIN_PAGE_DESCRIPTIONS = {
 # pages de contenu pur, hors système de blocs et hors CRUD de tuiles,
 # comme pour le reste de la migration blocs.
 _ADMIN_NATIVE_ALWAYS_NONEMPTY = {
-    'texts', 'frames', 'tags', 'slideshow', 'screensaver',
+    'texts', 'frames', 'tags', 'slideshow', 'media',
     'guest_uploads', 'guest_codes',
 }
 
@@ -3463,6 +3465,87 @@ def _wallpaper_images_view() -> list:
         img['url'] = f"/static/wallpapers/{img['filename']}"
         img['is_current'] = img['filename'] == current
     return images
+
+
+# ── Médiathèque (v2.0.1) ──────────────────────────────────────────────────────
+# Tuile dédiée centralisant tous les médias autres que les captures visiteurs :
+# fond d'écran Windows (bloc app_wallpaper, déplacé ici via son default_page —
+# voir _ADMIN_BLOCKS), images intermédiaires du diaporama /bestof et images
+# dédiées à l'écran de veille (CRUD natif, ex-hébergé respectivement dans
+# « Slideshow Best Of » et « Écran de veille » avant cette version). Les
+# fonctions de base (list_slideshow_images, add_slideshow_image, ... et leurs
+# équivalents screensaver) sont réutilisées telles quelles.
+@app.route('/admin/media', methods=['GET', 'POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media():
+    """Tuile « Médiathèque »."""
+    if request.method == 'POST':
+        action = request.form.get('action', '')
+
+        if action == 'upload_slideshow':
+            file = request.files.get('image')
+            if not file or not file.filename:
+                return redirect(url_for('admin_media', err='Aucun fichier sélectionné.'))
+            ext = Path(file.filename).suffix.lower()
+            if ext not in _SLIDESHOW_ALLOWED_EXT:
+                return redirect(url_for('admin_media', err='Format non supporté (PNG, JPG, WEBP, GIF).'))
+            safe = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem) + ext
+            SLIDESHOW_DIR.mkdir(parents=True, exist_ok=True)
+            dest = SLIDESHOW_DIR / safe
+            if dest.exists():
+                safe = f'{Path(safe).stem}_{int(datetime.now().timestamp())}{ext}'
+                dest = SLIDESHOW_DIR / safe
+            file.save(str(dest))
+            add_slideshow_image(safe)
+            return redirect(url_for('admin_media', ok=f'Image « {safe} » ajoutée.'))
+
+        if action == 'delete_slideshow':
+            image_id = int(request.form.get('image_id', 0))
+            img = delete_slideshow_image_db(image_id)
+            if img:
+                (SLIDESHOW_DIR / img['filename']).unlink(missing_ok=True)
+                return redirect(url_for('admin_media', ok='Image supprimée.'))
+            return redirect(url_for('admin_media', err='Image introuvable.'))
+
+        if action == 'upload_screensaver':
+            file = request.files.get('image')
+            if not file or not file.filename:
+                return redirect(url_for('admin_media', err='Aucun fichier sélectionné.'))
+            ext = Path(file.filename).suffix.lower()
+            if ext not in _SCREENSAVER_ALLOWED_EXT:
+                return redirect(url_for('admin_media', err='Format non supporté (PNG, JPG, WEBP, GIF).'))
+            safe = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem) + ext
+            SCREENSAVER_DIR.mkdir(parents=True, exist_ok=True)
+            dest = SCREENSAVER_DIR / safe
+            if dest.exists():
+                safe = f'{Path(safe).stem}_{int(datetime.now().timestamp())}{ext}'
+                dest = SCREENSAVER_DIR / safe
+            file.save(str(dest))
+            add_screensaver_image(safe)
+            return redirect(url_for('admin_media', ok=f'Image « {safe} » ajoutée.'))
+
+        if action == 'delete_screensaver':
+            image_id = int(request.form.get('image_id', 0))
+            img = delete_screensaver_image_db(image_id)
+            if img:
+                (SCREENSAVER_DIR / img['filename']).unlink(missing_ok=True)
+                return redirect(url_for('admin_media', ok='Image supprimée.'))
+            return redirect(url_for('admin_media', err='Image introuvable.'))
+
+        abort(404)
+
+    blocks, block_context = _admin_render_blocks('media')
+    return render_template(
+        'admin_media.html', config=CONFIG,
+        blocks=blocks, current_page='media', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('media', 'Médiathèque'),
+        slideshow_images=list_slideshow_images(),
+        screensaver_images=list_screensaver_images(),
+        alert_success=request.args.get('ok'),
+        alert_error=request.args.get('err'),
+        **block_context,
+    )
 
 
 @app.route('/admin/application')
@@ -5013,6 +5096,45 @@ _PROMO_QR_POSITIONS = [
 ]
 
 
+def _promo_media_library() -> list:
+    """Médias « site » proposés par le sélecteur d'image du WYSIWYG des
+    pages promo (voir static/promo-editor.js) : le contenu de la tuile «
+    Médiathèque » (fond d'écran Windows, images intermédiaires, images de
+    l'écran de veille) et la bibliothèque de fonds des pages promo elle-même
+    — pas de nouvelle source de données, une vue agrégée de CRUD déjà
+    existants."""
+    items = []
+    for img in list_wallpaper_images():
+        items.append({'url': f"/static/wallpapers/{img['filename']}", 'label': img['filename']})
+    for img in list_slideshow_images():
+        items.append({'url': f"/static/slideshow/{img['filename']}", 'label': img['filename']})
+    for img in list_screensaver_images():
+        items.append({'url': f"/static/screensaver/{img['filename']}", 'label': img['filename']})
+    for bg in list_promo_backgrounds():
+        if (bg.get('kind') or 'image') == 'image' and bg.get('filename'):
+            items.append({'url': f"/static/promo/{bg['filename']}", 'label': bg.get('label') or bg['filename']})
+    return items
+
+
+def _promo_capture_library(limit: int = 60) -> list:
+    """Dernières captures visiteurs (photos), 2e source du sélecteur d'image
+    du WYSIWYG — vignette via /media/thumb (légère), insertion de l'URL
+    /media/photo (pleine résolution) dans le contenu."""
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            "SELECT filename FROM captures WHERE kind = 'photo' ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            'url':       url_for('media_photo', filename=r['filename']),
+            'thumb_url': url_for('media_thumb', filename=r['filename']),
+            'label':     r['filename'],
+        }
+        for r in rows
+    ]
+
+
 def _promo_page_public(page: dict) -> dict:
     """Représentation JSON d'une page promo, partagée par /api/bestof/slides
     (rafraîchissement complet, cadencé par slideshow.refresh_interval) et
@@ -5023,8 +5145,12 @@ def _promo_page_public(page: dict) -> dict:
         'id':              page['id'],
         'frequency':       max(1, page['frequency']),
         'pause_seconds':   max(1, page['pause_seconds']),
+        'background_kind':   page.get('background_kind') or '',
         'background_url':  (url_for('static', filename=f'promo/{page["background_filename"]}')
-                             if page['background_filename'] else ''),
+                             if page.get('background_kind') == 'image' and page['background_filename'] else ''),
+        'background_color1': page.get('background_color1') or '',
+        'background_color2': page.get('background_color2') or '',
+        'background_angle':  page.get('background_angle') or 135,
         'overlay_enabled': bool(page['overlay_enabled']),
         'html_content':    resolve_dynamic_placeholders(page['html_content'] or ''),
         'text_font':       page['text_font'],
@@ -5035,6 +5161,7 @@ def _promo_page_public(page: dict) -> dict:
         'qr_url':          url_for('promo_qr_png', page_id=page['id']),
         'qr_size':         max(60, page['qr_size']),
         'qr_position':     page['qr_position'],
+        'custom_css':      page.get('custom_css') or '',
     }
 
 
@@ -5172,59 +5299,27 @@ def api_bestof_promo_pages():
     return jsonify({'pages': [_promo_page_public(p) for p in list_promo_pages() if p['active']]})
 
 
-@app.route('/admin/slideshow', methods=['GET', 'POST'])
+@app.route('/admin/slideshow')
 @require_admin_auth
-@csrf_protect
 def admin_slideshow():
     """Tuile « Slideshow Best Of ». « Paramètres » a sa propre route dédiée
-    ci-dessous et rejoint le système de blocs. « Images intermédiaires »
-    (upload/suppression), « Pages promo » et « Bibliothèque de fonds »
-    restent ici, hors système de blocs : ce ne sont pas des réglages mais la
-    gestion de contenu lui-même (CRUD à plusieurs entrées, comme
-    admin_captures/admin_frames)."""
-    if request.method == 'POST':
-        action = request.form.get('action', 'settings')
-
-        if action == 'upload':
-            file = request.files.get('image')
-            if not file or not file.filename:
-                return redirect(url_for('admin_slideshow', err='Aucun fichier sélectionné.'))
-            ext = Path(file.filename).suffix.lower()
-            if ext not in _SLIDESHOW_ALLOWED_EXT:
-                return redirect(url_for('admin_slideshow', err='Format non supporté (PNG, JPG, WEBP, GIF).'))
-            safe = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem) + ext
-            # Rendre le nom unique si collision
-            SLIDESHOW_DIR.mkdir(parents=True, exist_ok=True)
-            dest = SLIDESHOW_DIR / safe
-            if dest.exists():
-                safe = f'{Path(safe).stem}_{int(datetime.now().timestamp())}{ext}'
-                dest = SLIDESHOW_DIR / safe
-            file.save(str(dest))
-            add_slideshow_image(safe)
-            return redirect(url_for('admin_slideshow', ok=f'Image « {safe} » ajoutée.'))
-
-        if action == 'delete':
-            image_id = int(request.form.get('image_id', 0))
-            img = delete_slideshow_image_db(image_id)
-            if img:
-                (SLIDESHOW_DIR / img['filename']).unlink(missing_ok=True)
-                return redirect(url_for('admin_slideshow', ok=f'Image supprimée.'))
-            return redirect(url_for('admin_slideshow', err='Image introuvable.'))
-
-        abort(404)
-
+    ci-dessous et rejoint le système de blocs. « Images intermédiaires » a
+    déménagé dans la tuile « Médiathèque » (voir admin_media). « Pages promo »
+    et « Bibliothèque de fonds » restent ici, hors système de blocs : ce ne
+    sont pas des réglages mais la gestion de contenu lui-même (CRUD à
+    plusieurs entrées, comme admin_captures/admin_frames)."""
     blocks, block_context = _admin_render_blocks('slideshow')
-    images = list_slideshow_images()
     return render_template(
         'admin_slideshow.html', config=CONFIG,
         blocks=blocks, current_page='slideshow', admin_pages=_admin_all_pages(),
         page_label=_admin_page_label('slideshow', 'Slideshow Best Of'),
-        images=images,
         promo_pages=list_promo_pages(),
         promo_backgrounds=list_promo_backgrounds(),
         promo_fonts=_all_fonts(),
         promo_effects=_PROMO_EFFECTS,
         promo_qr_positions=_PROMO_QR_POSITIONS,
+        media_library=_promo_media_library(),
+        capture_library=_promo_capture_library(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -5320,6 +5415,11 @@ def admin_promo_page_update(page_id):
 
     fields['html_content'] = sanitize_promo_html(request.form.get('html_content', ''))
 
+    # CSS libre : aucun filtrage (voir commentaire sur la colonne, db.py) --
+    # simple plafond de taille pour éviter un abus de stockage, pas une
+    # validation de contenu.
+    fields['custom_css'] = (request.form.get('custom_css', '') or '')[:20000]
+
     update_promo_page(page_id, **fields)
     return redirect(url_for('admin_slideshow', ok='Page promo mise à jour.'))
 
@@ -5360,6 +5460,25 @@ def admin_promo_bg_upload():
     label = (request.form.get('label', '') or '').strip()[:80]
     add_promo_background(safe, label)
     return redirect(url_for('admin_slideshow', ok='Fond ajouté à la bibliothèque.'))
+
+
+@app.route('/admin/slideshow/promo/bg/gradient_add', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_promo_bg_gradient_add():
+    """Ajoute un fond dégradé (deux couleurs + angle, aucun fichier) à la
+    bibliothèque partagée — voir add_promo_gradient_background (db.py).
+    Remplace l'ancien dégradé par défaut unique et codé en dur : la
+    bibliothèque peut désormais contenir autant de dégradés que voulu."""
+    color1 = (request.form.get('color1') or '').strip()
+    color2 = (request.form.get('color2') or '').strip()
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', color1) or not re.fullmatch(r'#[0-9a-fA-F]{6}', color2):
+        return redirect(url_for('admin_slideshow', err='Couleurs de dégradé invalides.'))
+    raw_angle = (request.form.get('angle') or '135').strip()
+    angle = int(raw_angle) % 360 if raw_angle.lstrip('-').isdigit() else 135
+    label = (request.form.get('label', '') or '').strip()[:80]
+    add_promo_gradient_background(color1, color2, angle, label)
+    return redirect(url_for('admin_slideshow', ok='Dégradé ajouté à la bibliothèque.'))
 
 
 @app.route('/admin/slideshow/promo/bg/<int:bg_id>/delete', methods=['POST'])
@@ -5688,55 +5807,18 @@ def admin_guest_upload_qr():
     return send_file(generate_qr_png(share_url), mimetype='image/png', download_name='partage-qr.png')
 
 
-@app.route('/admin/screensaver', methods=['GET', 'POST'])
+@app.route('/admin/screensaver')
 @require_admin_auth
-@csrf_protect
 def admin_screensaver():
     """Tuile « Écran de veille ». « Paramètres » a sa propre route dédiée
-    ci-dessous et rejoint le système de blocs. « Images » (upload/
-    suppression) reste ici, hors du système de blocs : ce n'est pas un
-    réglage mais la gestion du contenu lui-même (comme
-    admin_captures/admin_emails)."""
-    if request.method == 'POST':
-        action = request.form.get('action', 'settings')
-
-        if action == 'upload':
-            file = request.files.get('image')
-            if not file or not file.filename:
-                return redirect(url_for('admin_screensaver', err='Aucun fichier sélectionné.'))
-            ext = Path(file.filename).suffix.lower()
-            if ext not in _SCREENSAVER_ALLOWED_EXT:
-                return redirect(url_for('admin_screensaver', err='Format non supporté (PNG, JPG, WEBP, GIF).'))
-            safe = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem) + ext
-            SCREENSAVER_DIR.mkdir(parents=True, exist_ok=True)
-            dest = SCREENSAVER_DIR / safe
-            if dest.exists():
-                safe = f'{Path(safe).stem}_{int(datetime.now().timestamp())}{ext}'
-                dest = SCREENSAVER_DIR / safe
-            file.save(str(dest))
-            add_screensaver_image(safe)
-            return redirect(url_for('admin_screensaver', ok=f'Image « {safe} » ajoutée.'))
-
-        if action == 'delete':
-            image_id = int(request.form.get('image_id', 0))
-            img = delete_screensaver_image_db(image_id)
-            if img:
-                (SCREENSAVER_DIR / img['filename']).unlink(missing_ok=True)
-                return redirect(url_for('admin_screensaver', ok='Image supprimée.'))
-            return redirect(url_for('admin_screensaver', err='Image introuvable.'))
-
-        abort(404)
-
+    ci-dessous et rejoint le système de blocs. « Images » a déménagé dans la
+    tuile « Médiathèque » (voir admin_media) : cette route est désormais
+    GET seule, elle n'a plus aucune action POST propre."""
     blocks, block_context = _admin_render_blocks('screensaver')
     return render_template(
         'admin_screensaver.html', config=CONFIG,
         blocks=blocks, current_page='screensaver', admin_pages=_admin_all_pages(),
         page_label=_admin_page_label('screensaver', 'Écran de veille'),
-        images=list_screensaver_images(),
-        # « Images » (hors blocs) affiche un sous-titre conditionné par
-        # include_captures — indépendant du contexte du bloc
-        # screensaver_settings (qui peut ne pas être sur cette page si
-        # déplacé ailleurs).
         settings=_screensaver_settings(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),

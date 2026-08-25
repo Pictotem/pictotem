@@ -116,8 +116,20 @@ def generate_qr_png_custom(data: str, fill_color: str = '#000000',
 _PROMO_HTML_ALLOWED_TAGS = {
     'p': set(), 'br': set(), 'b': set(), 'strong': set(), 'i': set(), 'em': set(),
     'u': set(), 'ul': set(), 'ol': set(), 'li': set(), 'div': {'style'}, 'span': {'style'},
+    # v2.0.1 : image (sélecteur médiathèque/captures du WYSIWYG -- voir
+    # static/promo-editor.js) et tableaux basiques.
+    'img': {'src', 'alt'},
+    'table': set(), 'thead': set(), 'tbody': set(), 'tr': set(),
+    'td': {'colspan', 'rowspan'}, 'th': {'colspan', 'rowspan'},
 }
 _PROMO_HTML_STYLE_RE = re.compile(r'^text-align\s*:\s*(left|center|right|justify)\s*;?$')
+# src d'image : uniquement un chemin relatif au même site -- jamais de
+# protocole (javascript:, data:...), jamais "//hôte-externe/..." qui serait
+# interprété comme une URL protocole-relative vers un autre domaine.
+# Cohérent avec le fait que le sélecteur ne propose que des chemins locaux
+# (/static/..., /media/...).
+_PROMO_HTML_IMG_SRC_RE = re.compile(r'^/(?!/)[A-Za-z0-9_\-./%]+$')
+_PROMO_HTML_SPAN_RE = re.compile(r'^[1-9][0-9]?$')
 
 
 class _PromoHtmlSanitizer(HTMLParser):
@@ -139,6 +151,14 @@ class _PromoHtmlSanitizer(HTMLParser):
             if (name == 'style' and 'style' in allowed_attrs and value
                     and _PROMO_HTML_STYLE_RE.match(value.strip())):
                 kept.append(f'style="{escape(value.strip(), quote=True)}"')
+            elif (name == 'src' and 'src' in allowed_attrs and value
+                    and _PROMO_HTML_IMG_SRC_RE.match(value.strip())):
+                kept.append(f'src="{escape(value.strip(), quote=True)}"')
+            elif name == 'alt' and 'alt' in allowed_attrs and value is not None:
+                kept.append(f'alt="{escape(value, quote=True)}"')
+            elif (name in ('colspan', 'rowspan') and name in allowed_attrs and value
+                    and _PROMO_HTML_SPAN_RE.match(value.strip())):
+                kept.append(f'{name}="{value.strip()}"')
         attr_str = (' ' + ' '.join(kept)) if kept else ''
         self.out.append(f'<{tag}{attr_str}>')
 
@@ -154,7 +174,7 @@ class _PromoHtmlSanitizer(HTMLParser):
 
     def handle_endtag(self, tag):
         if tag in _PROMO_HTML_ALLOWED_TAGS:
-            if tag != 'br':
+            if tag not in ('br', 'img'):
                 self.out.append(f'</{tag}>')
         elif self._skip_depth > 0:
             self._skip_depth -= 1

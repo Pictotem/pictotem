@@ -124,14 +124,46 @@
     .wysiwyg-editable:focus { outline: none; border-color: var(--accent); }
     .wysiwyg-editable:empty:before { content: attr(data-placeholder); color: var(--muted); }
 
+    .promo-custom-css { width: 100%; box-sizing: border-box; background: var(--surface-2);
+                         border: 1px solid var(--border); color: var(--text); border-radius: 10px;
+                         padding: 12px 14px; font-size: 13px; font-family: "Courier New", monospace;
+                         resize: vertical; }
+    .promo-custom-css:focus { outline: none; border-color: var(--accent); }
+
+    .wysiwyg-media-btn { font-size: 15px; }
+
+    .media-picker-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.6);
+                           display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .media-picker-modal.hidden { display: none; }
+    .media-picker-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+                            width: 100%; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column;
+                            overflow: hidden; }
+    .media-picker-head { display: flex; align-items: center; justify-content: space-between;
+                          padding: 14px 18px; border-bottom: 1px solid var(--border); }
+    .media-picker-tabs { display: flex; gap: 6px; }
+    .media-picker-tab { background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+                         border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+    .media-picker-tab.active { color: var(--text); border-color: var(--accent); }
+    .media-picker-close { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+    .media-picker-close:hover { color: var(--text); }
+    .media-picker-body { padding: 18px; overflow-y: auto; }
+    .media-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+    .media-picker-grid.hidden { display: none; }
+    .media-picker-item { padding: 0; border: 2px solid transparent; border-radius: 10px; overflow: hidden;
+                          cursor: pointer; background: var(--surface-2); line-height: 0; }
+    .media-picker-item:hover { border-color: var(--accent); }
+    .media-picker-item img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; }
+    .media-picker-empty { color: var(--muted); font-size: 13px; grid-column: 1 / -1; }
+
     .promo-bg-picker { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); margin-bottom: 4px; }
     .promo-bg-choice { display: block; cursor: pointer; border: 2px solid transparent; position: relative; }
     .promo-bg-choice input { position: absolute; top: 8px; left: 8px; z-index: 2; }
     .promo-bg-choice.selected { border-color: var(--accent); }
     .promo-bg-choice:has(input:checked) { border-color: var(--accent); }
     .promo-bg-none { aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center;
-                     background: linear-gradient(135deg, #0d8b8f 0%, #145b5e 55%, #111315 100%);
+                     background: #14161a;
                      color: #fff; font-size: 12px; text-align: center; padding: 8px; }
+    .bg-gradient-swatch { aspect-ratio: 16/9; width: 100%; display: block; }
     .qr-subcard h2 { font-size: 15px; margin-bottom: 4px; }
   </style>
 </head>
@@ -177,54 +209,6 @@
   </div>
   {% endfor %}
 
-  <!-- Images intermédiaires -->
-  <div class="section">
-    <p class="section-title">Images intermédiaires
-      <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
-        Insérées entre les captures (régulièrement en mode chrono, mélangées en mode aléatoire)
-      </span>
-    </p>
-
-    {% if images %}
-    <div class="img-grid">
-      {% for img in images %}
-      <div class="img-card">
-        <img src="{{ url_for('static', filename='slideshow/' + img.filename) }}"
-             alt="{{ img.filename }}" loading="lazy">
-        <div class="img-card-foot">
-          <span class="img-card-name" title="{{ img.filename }}">{{ img.filename }}</span>
-          <form method="post" onsubmit="return confirm('Supprimer cette image ?')">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="action" value="delete">
-            <input type="hidden" name="image_id" value="{{ img.id }}">
-            <button class="btn-danger" type="submit">✕</button>
-          </form>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p style="color:var(--muted);font-size:14px;margin-bottom:20px">Aucune image intermédiaire.</p>
-    {% endif %}
-
-    <!-- Upload -->
-    <form method="post" enctype="multipart/form-data">
-      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="action" value="upload">
-      <div class="upload-zone">
-        <label class="upload-label" for="slide-img-input">Choisir une image…</label>
-        <input type="file" id="slide-img-input" name="image"
-               accept=".png,.jpg,.jpeg,.webp,.gif"
-               onchange="document.getElementById('upload-name').textContent = this.files[0]?.name || ''">
-        <span id="upload-name"></span>
-        <p class="upload-hint">PNG, JPG, WEBP, GIF — résolution recommandée : 1920×1080</p>
-        <div style="margin-top:14px">
-          <button class="btn-primary" type="submit">Ajouter</button>
-        </div>
-      </div>
-    </form>
-  </div>
-
   <!-- Bibliothèque de fonds (partagée par toutes les pages promo) -->
   <div class="section" id="promo-backgrounds">
     <p class="section-title">Bibliothèque de fonds
@@ -237,10 +221,14 @@
     <div class="img-grid">
       {% for bg in promo_backgrounds %}
       <div class="img-card">
+        {% if bg.kind == 'gradient' %}
+        <div class="bg-gradient-swatch" style="background:linear-gradient({{ bg.angle }}deg, {{ bg.color1 }}, {{ bg.color2 }})"></div>
+        {% else %}
         <img src="{{ url_for('static', filename='promo/' + bg.filename) }}"
              alt="{{ bg.label or bg.filename }}" loading="lazy">
+        {% endif %}
         <div class="img-card-foot">
-          <span class="img-card-name" title="{{ bg.label or bg.filename }}">{{ bg.label or bg.filename }}</span>
+          <span class="img-card-name" title="{{ bg.label or bg.filename }}">{{ bg.label or (bg.kind == 'gradient' and 'Dégradé') or bg.filename }}</span>
           <form method="post" action="{{ url_for('admin_promo_bg_delete', bg_id=bg.id) }}"
                 onsubmit="return confirm('Supprimer ce fond de la bibliothèque ?')">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -252,27 +240,55 @@
     </div>
     {% else %}
     <p style="color:var(--muted);font-size:14px;margin-bottom:20px">
-      Aucun fond dans la bibliothèque — un dégradé par défaut est utilisé tant qu'aucun fond n'est choisi.
+      Aucun fond dans la bibliothèque — un fond neutre est utilisé tant qu'aucun fond n'est choisi.
     </p>
     {% endif %}
 
-    <form method="post" action="{{ url_for('admin_promo_bg_upload') }}" enctype="multipart/form-data">
-      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <div class="upload-zone">
-        <label class="upload-label" for="promo-bg-input">Choisir une image de fond…</label>
-        <input type="file" id="promo-bg-input" name="background" accept=".png,.jpg,.jpeg,.webp"
-               onchange="document.getElementById('promo-bg-name').textContent = this.files[0]?.name || ''">
-        <span id="promo-bg-name"></span>
-        <div class="field" style="margin-top:12px;max-width:320px">
+    <div class="field-row" style="align-items:stretch">
+      <form method="post" action="{{ url_for('admin_promo_bg_upload') }}" enctype="multipart/form-data"
+            class="field field-half" style="min-width:280px">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="upload-zone" style="height:100%;box-sizing:border-box">
+          <label class="upload-label" for="promo-bg-input">Choisir une image de fond…</label>
+          <input type="file" id="promo-bg-input" name="background" accept=".png,.jpg,.jpeg,.webp"
+                 onchange="document.getElementById('promo-bg-name').textContent = this.files[0]?.name || ''">
+          <span id="promo-bg-name"></span>
+          <div class="field" style="margin-top:12px;max-width:320px">
+            <label>Nom (optionnel)</label>
+            <input type="text" name="label" maxlength="80" placeholder="ex. Fond bleu nuit">
+          </div>
+          <p class="upload-hint">PNG, JPG, WEBP — résolution recommandée : 1920×1080</p>
+          <div style="margin-top:14px">
+            <button class="btn-primary" type="submit">Ajouter à la bibliothèque</button>
+          </div>
+        </div>
+      </form>
+
+      <form method="post" action="{{ url_for('admin_promo_bg_gradient_add') }}"
+            class="field field-half form-card" style="min-width:280px;background:var(--surface-2)">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <p style="font-weight:700;font-size:14px;margin:0 0 14px">Nouveau dégradé (2 couleurs)</p>
+        <div class="field-row">
+          <div class="field field-half">
+            <label>Couleur 1</label>
+            <input type="color" name="color1" value="#0d8b8f">
+          </div>
+          <div class="field field-half">
+            <label>Couleur 2</label>
+            <input type="color" name="color2" value="#111315">
+          </div>
+        </div>
+        <div class="field">
+          <label>Angle (°)</label>
+          <input type="number" name="angle" min="0" max="359" value="135" style="max-width:120px">
+        </div>
+        <div class="field">
           <label>Nom (optionnel)</label>
-          <input type="text" name="label" maxlength="80" placeholder="ex. Fond bleu nuit">
+          <input type="text" name="label" maxlength="80" placeholder="ex. Bleu nuit">
         </div>
-        <p class="upload-hint">PNG, JPG, WEBP — résolution recommandée : 1920×1080</p>
-        <div style="margin-top:14px">
-          <button class="btn-primary" type="submit">Ajouter à la bibliothèque</button>
-        </div>
-      </div>
-    </form>
+        <button class="btn-primary" type="submit">Ajouter à la bibliothèque</button>
+      </form>
+    </div>
   </div>
 
   <!-- Pages promo -->
@@ -351,13 +367,18 @@
             <div class="img-grid promo-bg-picker">
               <label class="img-card promo-bg-choice{% if not page.background_id %} selected{% endif %}">
                 <input type="radio" name="background_id" value="" {% if not page.background_id %}checked{% endif %}>
-                <div class="promo-bg-none">Dégradé par défaut</div>
+                <div class="promo-bg-none">Aucun fond<br>(neutre)</div>
               </label>
               {% for bg in promo_backgrounds %}
               <label class="img-card promo-bg-choice{% if page.background_id == bg.id %} selected{% endif %}">
                 <input type="radio" name="background_id" value="{{ bg.id }}" {% if page.background_id == bg.id %}checked{% endif %}>
+                {% if bg.kind == 'gradient' %}
+                <div class="bg-gradient-swatch" style="background:linear-gradient({{ bg.angle }}deg, {{ bg.color1 }}, {{ bg.color2 }})"
+                     title="{{ bg.label or 'Dégradé' }}"></div>
+                {% else %}
                 <img src="{{ url_for('static', filename='promo/' + bg.filename) }}"
                      alt="{{ bg.label or bg.filename }}" loading="lazy">
+                {% endif %}
               </label>
               {% endfor %}
             </div>
@@ -377,6 +398,9 @@
               <button type="button" data-cmd="justifyLeft" title="Aligner à gauche">⇤</button>
               <button type="button" data-cmd="justifyCenter" title="Centrer">⇔</button>
               <button type="button" data-cmd="justifyRight" title="Aligner à droite">⇥</button>
+              <span class="wysiwyg-sep"></span>
+              <button type="button" class="wysiwyg-media-btn" data-target="wysiwyg-{{ page.id }}" title="Insérer une image (médiathèque ou capture)">🖼</button>
+              <button type="button" data-cmd="insertHTML" data-html="<table><tbody><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></tbody></table>" title="Insérer un tableau 3×3">▦</button>
               <span class="wysiwyg-sep"></span>
               <button type="button" data-cmd="removeFormat" title="Effacer la mise en forme">⌫</button>
             </div>
@@ -406,6 +430,17 @@
           <div class="field">
             <label>Couleur du texte</label>
             <input type="color" name="text_color" value="{{ page.text_color }}">
+          </div>
+
+          <div class="field">
+            <label>CSS libre pour cette page <span style="font-weight:400;color:var(--muted)">(avancé)</span></label>
+            <textarea name="custom_css" rows="6" class="promo-custom-css" spellcheck="false"
+                      placeholder=".promo-text { text-shadow: 0 2px 10px #000; }">{{ page.custom_css }}</textarea>
+            <p class="upload-hint">
+              Appliqué uniquement à cette page (portée automatique via <code>@scope</code>, aucune fuite vers les
+              autres pages ni le reste du site) — <strong>non filtré</strong> côté serveur : une erreur ici peut
+              casser l'affichage de cette page (jamais celui des autres).
+            </p>
           </div>
 
           <div class="form-card qr-subcard" style="background:var(--surface-2);margin:20px 0 18px">
@@ -464,6 +499,43 @@
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <button class="btn-primary" type="submit">+ Nouvelle page promo</button>
     </form>
+  </div>
+
+  <!-- Sélecteur d'image du WYSIWYG (partagé par toutes les pages promo) —
+       voir static/promo-editor.js. Deux onglets : Médiathèque (médias
+       « site » agrégés depuis la tuile Médiathèque, voir
+       _promo_media_library côté serveur) et Captures (dernières photos
+       visiteurs, voir _promo_capture_library). -->
+  <div id="media-picker-modal" class="media-picker-modal hidden" aria-hidden="true">
+    <div class="media-picker-dialog">
+      <div class="media-picker-head">
+        <div class="media-picker-tabs">
+          <button type="button" class="media-picker-tab active" data-tab="site">Médiathèque</button>
+          <button type="button" class="media-picker-tab" data-tab="captures">Captures</button>
+        </div>
+        <button type="button" class="media-picker-close" aria-label="Fermer">✕</button>
+      </div>
+      <div class="media-picker-body">
+        <div class="media-picker-grid" data-panel="site">
+          {% for m in media_library %}
+          <button type="button" class="media-picker-item" data-url="{{ m.url }}" title="{{ m.label }}">
+            <img src="{{ m.url }}" alt="{{ m.label }}" loading="lazy">
+          </button>
+          {% else %}
+          <p class="media-picker-empty">Aucun média dans la Médiathèque.</p>
+          {% endfor %}
+        </div>
+        <div class="media-picker-grid hidden" data-panel="captures">
+          {% for m in capture_library %}
+          <button type="button" class="media-picker-item" data-url="{{ m.url }}" title="{{ m.label }}">
+            <img src="{{ m.thumb_url }}" alt="{{ m.label }}" loading="lazy">
+          </button>
+          {% else %}
+          <p class="media-picker-empty">Aucune capture disponible.</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
   </div>
 
 </div>

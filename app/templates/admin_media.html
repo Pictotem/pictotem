@@ -24,17 +24,6 @@
     .text-section { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
                     padding: 24px; margin-bottom: 24px; }
     .text-section h2 { font-size: 18px; font-weight: 700; margin: 0; }
-    .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
-    .field { margin-bottom: 18px; }
-    .field label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
-    .field input[type=number] {
-      width: 100%; max-width: 200px; background: var(--surface-2); border: 1px solid var(--border);
-      color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px;
-    }
-    .field-row  { display: flex; gap: 24px; flex-wrap: wrap; }
-    .field-half { flex: 1; min-width: 180px; }
-    .checkbox-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-    .checkbox-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
     .btn-primary { background: var(--accent); color: #000; font-weight: 700; border: none;
                    border-radius: 10px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
     .btn-primary:hover { opacity: .85; }
@@ -59,17 +48,16 @@
     .upload-zone input[type=file] { display: none; }
     .upload-label { color: var(--accent); font-size: 14px; cursor: pointer; display: block; margin-bottom: 6px; }
     .upload-hint  { font-size: 12px; color: var(--muted); }
-    #upload-name  { margin-top: 4px; font-size: 13px; color: var(--text); }
   </style>
 </head>
-<body class="gallery-body" data-admin-page="screensaver">
+<body class="gallery-body" data-admin-page="media">
 <div class="admin-wrap">
 
   <a class="back-link" href="{{ url_for('admin_home') }}">← Administration</a>
   <h1>{{ page_label }}</h1>
   <p class="subtitle">
-    Diaporama plein écran affiché sur l'interface principale après une période d'inactivité sur l'accueil.
-    N'interrompt jamais une capture en cours et se referme au premier appui/clic/touche.
+    Médias autres que les captures visiteurs : fond d'écran Windows, images intermédiaires du diaporama
+    /bestof et images dédiées à l'écran de veille.
   </p>
 
   {% if alert_success %}
@@ -103,6 +91,101 @@
   </div>
   {% endfor %}
 
+  <!-- Images intermédiaires (diaporama /bestof) -->
+  <div class="section">
+    <p class="section-title">Images intermédiaires
+      <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
+        Insérées entre les captures dans le diaporama /bestof (régulièrement en mode chrono, mélangées en mode aléatoire)
+      </span>
+    </p>
+
+    {% if slideshow_images %}
+    <div class="img-grid">
+      {% for img in slideshow_images %}
+      <div class="img-card">
+        <img src="{{ url_for('static', filename='slideshow/' + img.filename) }}"
+             alt="{{ img.filename }}" loading="lazy">
+        <div class="img-card-foot">
+          <span class="img-card-name" title="{{ img.filename }}">{{ img.filename }}</span>
+          <form method="post" onsubmit="return confirm('Supprimer cette image ?')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="delete_slideshow">
+            <input type="hidden" name="image_id" value="{{ img.id }}">
+            <button class="btn-danger" type="submit">✕</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:var(--muted);font-size:14px;margin-bottom:20px">Aucune image intermédiaire.</p>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="upload_slideshow">
+      <div class="upload-zone">
+        <label class="upload-label" for="slide-img-input">Choisir une image…</label>
+        <input type="file" id="slide-img-input" name="image"
+               accept=".png,.jpg,.jpeg,.webp,.gif"
+               onchange="document.getElementById('upload-name-slideshow').textContent = this.files[0]?.name || ''">
+        <span id="upload-name-slideshow"></span>
+        <p class="upload-hint">PNG, JPG, WEBP, GIF — résolution recommandée : 1920×1080</p>
+        <div style="margin-top:14px">
+          <button class="btn-primary" type="submit">Ajouter</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- Images de l'écran de veille -->
+  <div class="section">
+    <p class="section-title">Images de l'écran de veille
+      <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
+        Diffusées par l'écran de veille (voir tuile « Écran de veille » pour les réglages : délai, inclusion des captures…)
+      </span>
+    </p>
+
+    {% if screensaver_images %}
+    <div class="img-grid">
+      {% for img in screensaver_images %}
+      <div class="img-card">
+        <img src="{{ url_for('static', filename='screensaver/' + img.filename) }}"
+             alt="{{ img.filename }}" loading="lazy">
+        <div class="img-card-foot">
+          <span class="img-card-name" title="{{ img.filename }}">{{ img.filename }}</span>
+          <form method="post" onsubmit="return confirm('Supprimer cette image ?')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="delete_screensaver">
+            <input type="hidden" name="image_id" value="{{ img.id }}">
+            <button class="btn-danger" type="submit">✕</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:var(--muted);font-size:14px;margin-bottom:20px">
+      Aucune image dédiée — l'écran de veille utilisera uniquement les photos/vidéos de la borne (si activé).
+    </p>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="upload_screensaver">
+      <div class="upload-zone">
+        <label class="upload-label" for="ss-img-input">Choisir une image…</label>
+        <input type="file" id="ss-img-input" name="image"
+               accept=".png,.jpg,.jpeg,.webp,.gif"
+               onchange="document.getElementById('upload-name-screensaver').textContent = this.files[0]?.name || ''">
+        <span id="upload-name-screensaver"></span>
+        <p class="upload-hint">PNG, JPG, WEBP, GIF — résolution recommandée : 1920×1080</p>
+        <div style="margin-top:14px">
+          <button class="btn-primary" type="submit">Ajouter</button>
+        </div>
+      </div>
+    </form>
+  </div>
 
 </div>
 </body>
