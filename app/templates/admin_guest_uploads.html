@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Upload invités — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
+  <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
   <style>
     .admin-wrap  { max-width: 900px; margin: 0 auto; padding: 40px 20px 60px; }
     .back-link   { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
@@ -23,6 +26,9 @@
     }
     .section-title .tag.on  { color: #4ecca0; border-color: rgba(78,204,160,.4); }
     .section { margin-bottom: 48px; }
+    .text-section { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+                    padding: 24px; margin-bottom: 24px; }
+    .text-section h2 { font-size: 18px; font-weight: 700; margin: 0; }
     .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
     .field { margin-bottom: 18px; }
     .field label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
@@ -69,7 +75,7 @@
     .empty-hint { color: var(--muted); font-size: 14px; }
   </style>
 </head>
-<body class="gallery-body">
+<body class="gallery-body" data-admin-page="guest_uploads">
 <div class="admin-wrap">
 
   <a class="back-link" href="{{ url_for('admin_home') }}">← Administration</a>
@@ -83,98 +89,29 @@
   {% if alert_success %}<div class="alert alert-ok">{{ alert_success }}</div>{% endif %}
   {% if alert_error   %}<div class="alert alert-err">{{ alert_error }}</div>{% endif %}
 
-  <!-- Paramètres -->
-  <div class="section">
-    <p class="section-title">
-      Paramètres
-      <span class="tag {% if settings.enabled %}on{% endif %}">
-        {{ 'Activé' if settings.enabled else 'Désactivé' }}
-      </span>
-    </p>
-    <div class="form-card">
-      <form method="post">
-        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="action" value="settings">
-
-        <label class="checkbox-row">
-          <input type="checkbox" name="enabled" {% if settings.enabled %}checked{% endif %}>
-          <span>
-            <span class="cb-label">Activer l'upload invités</span>
-            <span class="cb-desc">Affiche le lien « Ajoutez vos photos » dans la galerie et ouvre la page /share.</span>
-          </span>
-        </label>
-
-        <label class="checkbox-row">
-          <input type="checkbox" name="require_moderation" {% if settings.require_moderation %}checked{% endif %}>
-          <span>
-            <span class="cb-label">Modération avant publication</span>
-            <span class="cb-desc">Les photos envoyées restent « en attente » jusqu'à validation ci-dessous. Décoché : publication immédiate dans /bestof.</span>
-          </span>
-        </label>
-
-        <label class="checkbox-row">
-          <input type="checkbox" name="include_in_bestof" {% if settings.include_in_bestof %}checked{% endif %}>
-          <span>
-            <span class="cb-label">Inclure dans le diaporama /bestof</span>
-            <span class="cb-desc">Décoché : les photos approuvées restent stockées mais n'apparaissent pas dans le diaporama.</span>
-          </span>
-        </label>
-
-        <label class="checkbox-row">
-          <input type="checkbox" name="include_in_gallery" {% if settings.include_in_gallery %}checked{% endif %}>
-          <span>
-            <span class="cb-label">Inclure dans la galerie officielle (/gallery)</span>
-            <span class="cb-desc">Ajoute un filtre Toutes/Officielles/Invités dans la galerie. Les photos invités y sont signalées par un badge « Invité » et ne sont pas votables.</span>
-          </span>
-        </label>
-
-        <div class="field-row">
-          <div class="field field-half">
-            <label>Taille maximum par photo (Mo)</label>
-            <input type="number" name="max_file_size_mb" min="1" max="100" value="{{ settings.max_file_size_mb }}">
-          </div>
-          <div class="field field-half">
-            <label>Quota par invité (nombre de photos)</label>
-            <input type="number" name="max_per_guest" min="1" max="500" value="{{ settings.max_per_guest }}">
-            <p style="font-size:12px;color:var(--muted);margin-top:6px">
-              Compté par appareil (cookie), indépendamment de la modération.
-            </p>
-          </div>
-        </div>
-
-        <button class="btn-primary" type="submit">Enregistrer</button>
-      </form>
+  {% for block in blocks %}
+  <div class="text-section{% if block.variant %} {{ block.variant }}{% endif %}{% if block.collapsed %} block-collapsed{% endif %}" data-block-id="{{ block.id }}">
+    <div class="block-header-row">
+      <span class="block-drag-handle" title="Glisser pour réordonner">⠿</span>
+      <h2>{{ block.title }}</h2>
+      <button type="button" class="block-collapse-toggle" aria-label="Replier / déplier">▾</button>
     </div>
-  </div>
-
-  <!-- Lien de partage -->
-  <div class="section">
-    <p class="section-title">Lien de partage</p>
-    <div class="form-card">
-      {% if share_url %}
-      <div class="share-link-box">
-        <img src="{{ url_for('admin_guest_upload_qr') }}" alt="QR code">
-        <div>
-          <p class="share-link-url">{{ share_url }}</p>
-          <p style="font-size:12px;color:var(--muted);margin-top:8px">
-            À afficher/imprimer pour l'évènement. La régénération ci-dessous invalide immédiatement
-            ce lien et ce QR code.
-          </p>
-        </div>
-      </div>
-      {% else %}
-      <p class="empty-hint">Aucun lien configuré — enregistrez les paramètres pour en générer un.</p>
-      {% endif %}
-      <form method="post" style="margin-top:16px">
-        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="action" value="regenerate_token">
-        <button class="btn-ghost" type="submit"
-                onclick="return confirm('Régénérer le lien ? L\'ancien lien/QR cessera de fonctionner immédiatement.')">
-          Régénérer le lien
-        </button>
-      </form>
+    <div class="admin-block-body">
+      {% include block.template %}
     </div>
+    <form method="post" action="{{ url_for('admin_move_block') }}" class="block-move-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="block_id" value="{{ block.id }}">
+      <label>Déplacer vers</label>
+      <select name="target_page">
+        {% for slug, label, _ep in admin_pages %}
+        <option value="{{ slug }}" {% if slug == current_page %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Déplacer</button>
+    </form>
   </div>
+  {% endfor %}
 
   <!-- Modération -->
   <div class="section">

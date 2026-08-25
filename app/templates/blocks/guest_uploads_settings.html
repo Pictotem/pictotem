@@ -1,0 +1,53 @@
+<div class="form-card">
+  <form method="post" action="{{ url_for('admin_guest_uploads_set_settings') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <label class="checkbox-row">
+      <input type="checkbox" name="enabled" {% if guest_uploads_settings.enabled %}checked{% endif %}>
+      <span>
+        <span class="cb-label">Activer l'upload invités</span>
+        <span class="cb-desc">Affiche le lien « Ajoutez vos photos » dans la galerie et ouvre la page /share.</span>
+      </span>
+    </label>
+
+    <label class="checkbox-row">
+      <input type="checkbox" name="require_moderation" {% if guest_uploads_settings.require_moderation %}checked{% endif %}>
+      <span>
+        <span class="cb-label">Modération avant publication</span>
+        <span class="cb-desc">Les photos envoyées restent « en attente » jusqu'à validation ci-dessous. Décoché : publication immédiate dans /bestof.</span>
+      </span>
+    </label>
+
+    <label class="checkbox-row">
+      <input type="checkbox" name="include_in_bestof" {% if guest_uploads_settings.include_in_bestof %}checked{% endif %}>
+      <span>
+        <span class="cb-label">Inclure dans le diaporama /bestof</span>
+        <span class="cb-desc">Décoché : les photos approuvées restent stockées mais n'apparaissent pas dans le diaporama.</span>
+      </span>
+    </label>
+
+    <label class="checkbox-row">
+      <input type="checkbox" name="include_in_gallery" {% if guest_uploads_settings.include_in_gallery %}checked{% endif %}>
+      <span>
+        <span class="cb-label">Inclure dans la galerie officielle (/gallery)</span>
+        <span class="cb-desc">Ajoute un filtre Toutes/Officielles/Invités dans la galerie. Les photos invités y sont signalées par un badge « Invité » et ne sont pas votables.</span>
+      </span>
+    </label>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Taille maximum par photo (Mo)</label>
+        <input type="number" name="max_file_size_mb" min="1" max="100" value="{{ guest_uploads_settings.max_file_size_mb }}">
+      </div>
+      <div class="field field-half">
+        <label>Quota par invité (nombre de photos)</label>
+        <input type="number" name="max_per_guest" min="1" max="500" value="{{ guest_uploads_settings.max_per_guest }}">
+        <p style="font-size:12px;color:var(--muted);margin-top:6px">
+          Compté par appareil (cookie), indépendamment de la modération.
+        </p>
+      </div>
+    </div>
+
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+</div>

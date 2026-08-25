@@ -1,0 +1,23 @@
+<div class="form-card">
+  {% if guest_uploads_share_url %}
+  <div class="share-link-box">
+    <img src="{{ url_for('admin_guest_upload_qr') }}" alt="QR code">
+    <div>
+      <p class="share-link-url">{{ guest_uploads_share_url }}</p>
+      <p style="font-size:12px;color:var(--muted);margin-top:8px">
+        À afficher/imprimer pour l'évènement. La régénération ci-dessous invalide immédiatement
+        ce lien et ce QR code.
+      </p>
+    </div>
+  </div>
+  {% else %}
+  <p class="empty-hint">Aucun lien configuré — enregistrez les paramètres pour en générer un.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('admin_guest_uploads_regenerate_token') }}" style="margin-top:16px">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button class="btn-ghost" type="submit"
+            onclick="return confirm('Régénérer le lien ? L\'ancien lien/QR cessera de fonctionner immédiatement.')">
+      Régénérer le lien
+    </button>
+  </form>
+</div>

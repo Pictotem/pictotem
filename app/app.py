@@ -2837,6 +2837,8 @@ _ADMIN_BLOCKS = {
     'slideshow_promo_settings': {'title': "Page promo",                         'default_page': 'slideshow',   'template': 'blocks/slideshow_promo_settings.html', 'context_fn': '_block_ctx_slideshow_promo_settings'},
     'slideshow_promo_bg':      {'title': "Fond de la page promo",               'default_page': 'slideshow',   'template': 'blocks/slideshow_promo_bg.html',      'context_fn': '_block_ctx_slideshow_promo_bg'},
     'screensaver_settings':    {'title': "Paramètres",                          'default_page': 'screensaver', 'template': 'blocks/screensaver_settings.html',    'context_fn': '_block_ctx_screensaver_settings'},
+    'guest_uploads_settings':   {'title': "Paramètres",                         'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_settings.html',   'context_fn': '_block_ctx_guest_uploads_settings'},
+    'guest_uploads_share_link': {'title': "Lien de partage",                    'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_share_link.html', 'context_fn': '_block_ctx_guest_uploads_share_link'},
 }
 # (slug, libellé affiché dans le menu « Déplacer vers », endpoint Flask) —
 # seulement les tuiles qui exécutent déjà la boucle de rendu de blocs
@@ -2855,6 +2857,7 @@ _ADMIN_PAGES = [
     ('tags',        'Tags & ID média',      'admin_tags'),
     ('slideshow',   'Slideshow Best Of',    'admin_slideshow'),
     ('screensaver', 'Écran de veille',      'admin_screensaver'),
+    ('guest_uploads', 'Upload invités',     'admin_guest_uploads'),
 ]
 _ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
 
@@ -3028,6 +3031,21 @@ def _block_ctx_slideshow_promo_bg() -> dict:
 
 def _block_ctx_screensaver_settings() -> dict:
     return {'screensaver_settings': _screensaver_settings()}
+
+
+def _block_ctx_guest_uploads_settings() -> dict:
+    return {'guest_uploads_settings': _guest_upload_settings()}
+
+
+def _block_ctx_guest_uploads_share_link() -> dict:
+    # Même source que _block_ctx_guest_uploads_settings (clé
+    # 'guest_uploads_settings' partagée à l'identique) ; share_url calculé
+    # ici plutôt que dans la route GET, puisque ce bloc peut désormais être
+    # affiché depuis n'importe quelle tuile qui l'héberge.
+    s = _guest_upload_settings()
+    share_url = (request.host_url.rstrip('/') + url_for('guest_upload_page', token=s['token'])
+                if s['token'] else None)
+    return {'guest_uploads_settings': s, 'guest_uploads_share_url': share_url}
 
 
 @app.route('/admin/ui/block_collapse', methods=['POST'])
@@ -5105,29 +5123,13 @@ def media_guest(filename):
 @require_admin_auth
 @csrf_protect
 def admin_guest_uploads():
+    """Tuile « Upload invités ». « Paramètres » et « Lien de partage » ont
+    chacune leur propre route dédiée ci-dessous et rejoignent le système de
+    blocs. « Photos reçues » (modération : approbation/suppression) reste
+    ici, hors du système de blocs : ce n'est pas un réglage mais la gestion
+    du contenu lui-même (comme admin_captures/admin_emails)."""
     if request.method == 'POST':
         action = request.form.get('action', 'settings')
-
-        if action == 'settings':
-            set_setting('guest_upload.enabled', '1' if request.form.get('enabled') else '0')
-            set_setting('guest_upload.require_moderation',
-                       '1' if request.form.get('require_moderation') else '0')
-            set_setting('guest_upload.include_in_bestof',
-                       '1' if request.form.get('include_in_bestof') else '0')
-            set_setting('guest_upload.include_in_gallery',
-                       '1' if request.form.get('include_in_gallery') else '0')
-            raw_size = (request.form.get('max_file_size_mb') or '').strip()
-            if raw_size.isdigit() and int(raw_size) > 0:
-                set_setting('guest_upload.max_file_size_mb', raw_size)
-            raw_quota = (request.form.get('max_per_guest') or '').strip()
-            if raw_quota.isdigit() and int(raw_quota) > 0:
-                set_setting('guest_upload.max_uploads_per_guest', raw_quota)
-            return redirect(url_for('admin_guest_uploads', ok='Paramètres mis à jour.'))
-
-        if action == 'regenerate_token':
-            set_setting('guest_upload.token', secrets.token_urlsafe(6))
-            return redirect(url_for('admin_guest_uploads',
-                                    ok="Nouveau lien généré — l'ancien lien/QR ne fonctionne plus."))
 
         if action == 'approve':
             item = set_guest_upload_status(int(request.form.get('upload_id', 0)), 'approved')
@@ -5144,15 +5146,46 @@ def admin_guest_uploads():
                 return redirect(url_for('admin_guest_uploads', ok='Photo supprimée.'))
             return redirect(url_for('admin_guest_uploads', err='Photo introuvable.'))
 
-    s = _guest_upload_settings()
-    share_url = (request.host_url.rstrip('/') + url_for('guest_upload_page', token=s['token'])
-                if s['token'] else None)
+        abort(404)
+
+    blocks, block_context = _admin_render_blocks('guest_uploads')
     return render_template(
-        'admin_guest_uploads.html', config=CONFIG, settings=s, share_url=share_url,
+        'admin_guest_uploads.html', config=CONFIG,
+        blocks=blocks, current_page='guest_uploads', admin_pages=_ADMIN_PAGES,
         pending=list_guest_uploads('pending'), approved=list_guest_uploads('approved'),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
+
+
+@app.route('/admin/guest-uploads/settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_uploads_set_settings():
+    set_setting('guest_upload.enabled', '1' if request.form.get('enabled') else '0')
+    set_setting('guest_upload.require_moderation',
+               '1' if request.form.get('require_moderation') else '0')
+    set_setting('guest_upload.include_in_bestof',
+               '1' if request.form.get('include_in_bestof') else '0')
+    set_setting('guest_upload.include_in_gallery',
+               '1' if request.form.get('include_in_gallery') else '0')
+    raw_size = (request.form.get('max_file_size_mb') or '').strip()
+    if raw_size.isdigit() and int(raw_size) > 0:
+        set_setting('guest_upload.max_file_size_mb', raw_size)
+    raw_quota = (request.form.get('max_per_guest') or '').strip()
+    if raw_quota.isdigit() and int(raw_quota) > 0:
+        set_setting('guest_upload.max_uploads_per_guest', raw_quota)
+    return _admin_block_redirect('guest_uploads_settings', ok='Paramètres mis à jour.')
+
+
+@app.route('/admin/guest-uploads/regenerate_token', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_uploads_regenerate_token():
+    set_setting('guest_upload.token', secrets.token_urlsafe(6))
+    return _admin_block_redirect('guest_uploads_share_link',
+                                  ok="Nouveau lien généré — l'ancien lien/QR ne fonctionne plus.")
 
 
 @app.route('/admin/guest-uploads/qr.png')
