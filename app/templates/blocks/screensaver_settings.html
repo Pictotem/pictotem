@@ -1,0 +1,35 @@
+<div class="form-card">
+  <form method="post" action="{{ url_for('admin_screensaver_set_settings') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field">
+      <label class="checkbox-row">
+        <input type="checkbox" name="enabled" value="1" {% if screensaver_settings.enabled %}checked{% endif %}>
+        Activer l'écran de veille
+      </label>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Délai avant veille (minutes d'inactivité sur l'accueil)</label>
+        <input type="number" name="timeout_min" min="1" max="120" value="{{ screensaver_settings.timeout_min }}">
+      </div>
+      <div class="field field-half">
+        <label>Délai entre chaque image (secondes)</label>
+        <input type="number" name="delay" min="1" max="300" value="{{ screensaver_settings.delay }}">
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="checkbox-row">
+        <input type="checkbox" name="include_captures" value="1" {% if screensaver_settings.include_captures %}checked{% endif %}>
+        Inclure les photos/vidéos prises par les visiteurs à la borne
+      </label>
+      <p style="font-size:12px;color:var(--muted);margin:6px 0 0 28px">
+        Décoché : le diaporama de veille n'utilise que les images ci-dessous, jamais les captures des visiteurs.
+      </p>
+    </div>
+
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+</div>

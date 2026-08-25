@@ -2836,6 +2836,7 @@ _ADMIN_BLOCKS = {
     'slideshow_settings':      {'title': "Paramètres",                          'default_page': 'slideshow',   'template': 'blocks/slideshow_settings.html',      'context_fn': '_block_ctx_slideshow_settings'},
     'slideshow_promo_settings': {'title': "Page promo",                         'default_page': 'slideshow',   'template': 'blocks/slideshow_promo_settings.html', 'context_fn': '_block_ctx_slideshow_promo_settings'},
     'slideshow_promo_bg':      {'title': "Fond de la page promo",               'default_page': 'slideshow',   'template': 'blocks/slideshow_promo_bg.html',      'context_fn': '_block_ctx_slideshow_promo_bg'},
+    'screensaver_settings':    {'title': "Paramètres",                          'default_page': 'screensaver', 'template': 'blocks/screensaver_settings.html',    'context_fn': '_block_ctx_screensaver_settings'},
 }
 # (slug, libellé affiché dans le menu « Déplacer vers », endpoint Flask) —
 # seulement les tuiles qui exécutent déjà la boucle de rendu de blocs
@@ -2853,6 +2854,7 @@ _ADMIN_PAGES = [
     ('buttons',     'Boutons',              'admin_buttons'),
     ('tags',        'Tags & ID média',      'admin_tags'),
     ('slideshow',   'Slideshow Best Of',    'admin_slideshow'),
+    ('screensaver', 'Écran de veille',      'admin_screensaver'),
 ]
 _ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
 
@@ -3022,6 +3024,10 @@ def _block_ctx_slideshow_promo_bg() -> dict:
     # 'slideshow_promo' partagée à l'identique) : les deux blocs lisent
     # _promo_settings(), sans risque si cohabités sur une même page.
     return {'slideshow_promo': _promo_settings()}
+
+
+def _block_ctx_screensaver_settings() -> dict:
+    return {'screensaver_settings': _screensaver_settings()}
 
 
 @app.route('/admin/ui/block_collapse', methods=['POST'])
@@ -5163,19 +5169,13 @@ def admin_guest_upload_qr():
 @require_admin_auth
 @csrf_protect
 def admin_screensaver():
+    """Tuile « Écran de veille ». « Paramètres » a sa propre route dédiée
+    ci-dessous et rejoint le système de blocs. « Images » (upload/
+    suppression) reste ici, hors du système de blocs : ce n'est pas un
+    réglage mais la gestion du contenu lui-même (comme
+    admin_captures/admin_emails)."""
     if request.method == 'POST':
         action = request.form.get('action', 'settings')
-
-        if action == 'settings':
-            set_setting('ui.screensaver_enabled', '1' if request.form.get('enabled') else '0')
-            raw_timeout = (request.form.get('timeout_min') or '').strip()
-            if raw_timeout.isdigit() and int(raw_timeout) > 0:
-                set_setting('ui.screensaver_timeout_min', raw_timeout)
-            raw_delay = (request.form.get('delay') or '').strip()
-            if raw_delay.isdigit() and int(raw_delay) > 0:
-                set_setting('ui.screensaver_delay', raw_delay)
-            set_setting('ui.screensaver_include_captures', '1' if request.form.get('include_captures') else '0')
-            return redirect(url_for('admin_screensaver', ok='Paramètres mis à jour.'))
 
         if action == 'upload':
             file = request.files.get('image')
@@ -5202,12 +5202,37 @@ def admin_screensaver():
                 return redirect(url_for('admin_screensaver', ok='Image supprimée.'))
             return redirect(url_for('admin_screensaver', err='Image introuvable.'))
 
+        abort(404)
+
+    blocks, block_context = _admin_render_blocks('screensaver')
     return render_template(
         'admin_screensaver.html', config=CONFIG,
-        settings=_screensaver_settings(), images=list_screensaver_images(),
+        blocks=blocks, current_page='screensaver', admin_pages=_ADMIN_PAGES,
+        images=list_screensaver_images(),
+        # « Images » (hors blocs) affiche un sous-titre conditionné par
+        # include_captures — indépendant du contexte du bloc
+        # screensaver_settings (qui peut ne pas être sur cette page si
+        # déplacé ailleurs).
+        settings=_screensaver_settings(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
+
+
+@app.route('/admin/screensaver/settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_screensaver_set_settings():
+    set_setting('ui.screensaver_enabled', '1' if request.form.get('enabled') else '0')
+    raw_timeout = (request.form.get('timeout_min') or '').strip()
+    if raw_timeout.isdigit() and int(raw_timeout) > 0:
+        set_setting('ui.screensaver_timeout_min', raw_timeout)
+    raw_delay = (request.form.get('delay') or '').strip()
+    if raw_delay.isdigit() and int(raw_delay) > 0:
+        set_setting('ui.screensaver_delay', raw_delay)
+    set_setting('ui.screensaver_include_captures', '1' if request.form.get('include_captures') else '0')
+    return _admin_block_redirect('screensaver_settings', ok='Paramètres mis à jour.')
 
 
 # ── Admin — import de pack de frames ─────────────────────────────────────────

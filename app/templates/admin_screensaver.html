@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Écran de veille — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
+  <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
   <style>
     .admin-wrap  { max-width: 900px; margin: 0 auto; padding: 40px 20px 60px; }
     .back-link   { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
@@ -18,6 +21,9 @@
     .section-title { font-size: 18px; font-weight: 700; border-bottom: 1px solid var(--border);
                      padding-bottom: 10px; margin: 0 0 20px; }
     .section { margin-bottom: 48px; }
+    .text-section { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+                    padding: 24px; margin-bottom: 24px; }
+    .text-section h2 { font-size: 18px; font-weight: 700; margin: 0; }
     .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
     .field { margin-bottom: 18px; }
     .field label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
@@ -56,7 +62,7 @@
     #upload-name  { margin-top: 4px; font-size: 13px; color: var(--text); }
   </style>
 </head>
-<body class="gallery-body">
+<body class="gallery-body" data-admin-page="screensaver">
 <div class="admin-wrap">
 
   <a class="back-link" href="{{ url_for('admin_home') }}">← Administration</a>
@@ -73,46 +79,29 @@
   <div class="alert alert-err">{{ alert_error }}</div>
   {% endif %}
 
-  <!-- Paramètres -->
-  <div class="section">
-    <p class="section-title">Paramètres</p>
-    <div class="form-card">
-      <form method="post">
-        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="action" value="settings">
-
-        <div class="field">
-          <label class="checkbox-row">
-            <input type="checkbox" name="enabled" value="1" {% if settings.enabled %}checked{% endif %}>
-            Activer l'écran de veille
-          </label>
-        </div>
-
-        <div class="field-row">
-          <div class="field field-half">
-            <label>Délai avant veille (minutes d'inactivité sur l'accueil)</label>
-            <input type="number" name="timeout_min" min="1" max="120" value="{{ settings.timeout_min }}">
-          </div>
-          <div class="field field-half">
-            <label>Délai entre chaque image (secondes)</label>
-            <input type="number" name="delay" min="1" max="300" value="{{ settings.delay }}">
-          </div>
-        </div>
-
-        <div class="field">
-          <label class="checkbox-row">
-            <input type="checkbox" name="include_captures" value="1" {% if settings.include_captures %}checked{% endif %}>
-            Inclure les photos/vidéos prises par les visiteurs à la borne
-          </label>
-          <p style="font-size:12px;color:var(--muted);margin:6px 0 0 28px">
-            Décoché : le diaporama de veille n'utilise que les images ci-dessous, jamais les captures des visiteurs.
-          </p>
-        </div>
-
-        <button class="btn-primary" type="submit">Enregistrer</button>
-      </form>
+  {% for block in blocks %}
+  <div class="text-section{% if block.variant %} {{ block.variant }}{% endif %}{% if block.collapsed %} block-collapsed{% endif %}" data-block-id="{{ block.id }}">
+    <div class="block-header-row">
+      <span class="block-drag-handle" title="Glisser pour réordonner">⠿</span>
+      <h2>{{ block.title }}</h2>
+      <button type="button" class="block-collapse-toggle" aria-label="Replier / déplier">▾</button>
     </div>
+    <div class="admin-block-body">
+      {% include block.template %}
+    </div>
+    <form method="post" action="{{ url_for('admin_move_block') }}" class="block-move-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="block_id" value="{{ block.id }}">
+      <label>Déplacer vers</label>
+      <select name="target_page">
+        {% for slug, label, _ep in admin_pages %}
+        <option value="{{ slug }}" {% if slug == current_page %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Déplacer</button>
+    </form>
   </div>
+  {% endfor %}
 
   <!-- Images -->
   <div class="section">
