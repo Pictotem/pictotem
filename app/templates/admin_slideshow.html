@@ -411,6 +411,15 @@
           </div>
 
           <div class="field">
+            <label>Couleur du fond d'écran</label>
+            <input type="color" name="background_bg_color" value="{{ page.background_bg_color }}">
+            <p class="upload-hint">
+              Visible derrière l'image (ou le dégradé) de fond sélectionnée ci-dessus --
+              utile pour une image avec de la transparence, ou si aucun fond n'est choisi.
+            </p>
+          </div>
+
+          <div class="field">
             <label>Texte</label>
             <div class="wysiwyg-toolbar" data-target="wysiwyg-{{ page.id }}">
               <button type="button" data-cmd="bold" title="Gras"><b>G</b></button>

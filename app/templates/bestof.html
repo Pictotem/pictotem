@@ -69,14 +69,6 @@
       position: absolute; inset: 0; width: 100%; height: 100%;
       object-fit: cover; z-index: 0;
     }
-    .promo-bg-fallback {
-      /* Fond neutre (aucun fond choisi sur la page — voir /admin/slideshow →
-         Pages promo → Fond) — les dégradés eux-mêmes sont désormais des
-         entrées de la bibliothèque de fonds, créées par l'admin (2 couleurs
-         + angle), rendues en style inline ci-dessous plutôt qu'ici. */
-      position: absolute; inset: 0; z-index: 0;
-      background: #14161a;
-    }
     .promo-overlay { position: absolute; inset: 0; z-index: 1; background: rgba(0,0,0,.42); }
     /* Doit rester au-dessus de .promo-overlay (texte + QR toujours visibles,
        jamais recouverts par le voile d'assombrissement du fond). */
@@ -214,8 +206,16 @@
   function buildPromoContent(el, page) {
     el.innerHTML = '';
     el.style.setProperty('--promo-duration', (page.pause_seconds || 8) + 's');
+    // Couleur derrière l'image/dégradé de fond (voir /admin/slideshow →
+    // Pages promo → Fond → Couleur du fond d'écran) : posée directement sur
+    // le slide lui-même, sous .promo-bg (image/dégradé, z-index 0) -- visible
+    // dès que ce dernier ne couvre pas tout (transparence PNG), ou seule s'il
+    // n'y a pas de fond du tout (remplace l'ancien fallback CSS fixe).
+    // Défaut identique à l'ancienne couleur fixe : aucun changement visuel
+    // pour les pages existantes tant que l'admin ne touche pas ce champ.
+    el.style.backgroundColor = page.background_bg_color || '#14161a';
 
-    let bg;
+    let bg = '';
     if (page.background_kind === 'gradient' && page.background_color1) {
       const angle = page.background_angle || 135;
       const c1 = escapeHtml(page.background_color1);
@@ -223,8 +223,6 @@
       bg = `<div class="promo-bg" style="background:linear-gradient(${angle}deg, ${c1}, ${c2})"></div>`;
     } else if (page.background_url) {
       bg = `<img class="promo-bg" src="${escapeHtml(page.background_url)}" alt="">`;
-    } else {
-      bg = `<div class="promo-bg-fallback"></div>`;
     }
     const textStyle = `font-family:${page.text_font || 'system-ui, sans-serif'};`
       + `font-size:${page.text_size || 28}px;color:${page.text_color || '#ffffff'};`;

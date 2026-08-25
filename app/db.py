@@ -286,6 +286,7 @@ def init_db():
             qr_size INTEGER NOT NULL DEFAULT 220,
             qr_position TEXT NOT NULL DEFAULT 'center',
             qr_color TEXT NOT NULL DEFAULT '#000000',
+            background_bg_color TEXT NOT NULL DEFAULT '#14161a',
             created_at TEXT NOT NULL
         )
         """)
@@ -317,6 +318,17 @@ def init_db():
         # '' : les pages existantes n'ont simplement aucun CSS additionnel.
         try:
             conn.execute("ALTER TABLE promo_pages ADD COLUMN custom_css TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        except Exception:
+            pass  # colonne déjà présente
+
+        # Couleur de fond derrière l'image/dégradé de la page (v2.0.2) :
+        # utile pour une image de fond avec de la transparence (PNG) ou
+        # lorsqu'aucun fond n'est choisi -- voir bestof.html ->
+        # buildPromoContent(). Défaut identique à l'ancien fallback fixe
+        # (#14161a) pour ne rien changer visuellement aux pages existantes.
+        try:
+            conn.execute("ALTER TABLE promo_pages ADD COLUMN background_bg_color TEXT NOT NULL DEFAULT '#14161a'")
             conn.commit()
         except Exception:
             pass  # colonne déjà présente
@@ -759,8 +771,8 @@ def delete_promo_background_db(bg_id):
 # update_promo_page ni lues côté app -- volontairement absentes d'ici.
 _PROMO_PAGE_COLUMNS = (
     'active', 'sort_order', 'frequency', 'pause_seconds', 'html_content',
-    'background_id', 'overlay_enabled', 'text_font', 'text_size', 'text_color',
-    'effect', 'custom_css',
+    'background_id', 'background_bg_color', 'overlay_enabled', 'text_font',
+    'text_size', 'text_color', 'effect', 'custom_css',
 )
 
 

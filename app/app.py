@@ -5153,6 +5153,7 @@ def _promo_page_public(page: dict) -> dict:
         'background_color1': page.get('background_color1') or '',
         'background_color2': page.get('background_color2') or '',
         'background_angle':  page.get('background_angle') or 135,
+        'background_bg_color': page.get('background_bg_color') or '#14161a',
         'overlay_enabled': bool(page['overlay_enabled']),
         'html_content':    _resolve_inline_qrcodes(resolve_dynamic_placeholders(page['html_content'] or '')),
         'text_font':       page['text_font'],
@@ -5444,6 +5445,10 @@ def admin_promo_page_update(page_id):
     color_value = request.form.get('text_color', '').strip()
     if re.fullmatch(r'#[0-9a-fA-F]{6}', color_value):
         fields['text_color'] = color_value
+
+    bg_color_value = request.form.get('background_bg_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color_value):
+        fields['background_bg_color'] = bg_color_value
 
     effect_value = request.form.get('effect', '')
     if effect_value in dict(_PROMO_EFFECTS):
