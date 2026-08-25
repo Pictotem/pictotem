@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Codes invités — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <title>{{ page_label }} — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('custom_fonts_css') }}">
@@ -109,7 +109,7 @@
 <div class="admin-wrap">
 
   <a class="back-link" href="{{ url_for('admin_home') }}">← Administration</a>
-  <h1>Codes invités</h1>
+  <h1>{{ page_label }}</h1>
   <p class="subtitle">
     Codes numériques associés à un texte, restitués à la place du contenu brut d'un QR-code —
     réglages de détection et d'apparence QR-code inclus.

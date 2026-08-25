@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Textes — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <title>{{ page_label }} — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('custom_fonts_css') }}">
@@ -41,7 +41,7 @@
 
   <div class="admin-header">
     <div>
-      <h1>Textes de l'interface</h1>
+      <h1>{{ page_label }}</h1>
       <p>Laissez un champ vide pour utiliser la valeur par défaut.</p>
     </div>
     <nav class="admin-nav">

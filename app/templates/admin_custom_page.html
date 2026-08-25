@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
   <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
   <style>
-    .admin-wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 60px; }
+    .admin-wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 60px; }
     .admin-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 36px; flex-wrap: wrap; }
     .admin-header h1 { font-size: 28px; font-weight: 700; margin: 0 0 4px; }
     .admin-header p { color: var(--muted); margin: 0; }
@@ -18,32 +18,31 @@
     .flash-list { list-style: none; padding: 0; margin: 0 0 24px; }
     .flash-list li { padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; font-weight: 600; }
     .flash-list li.success { background: rgba(13,139,143,.18); border: 1px solid rgba(13,139,143,.4); color: #5cf5f9; }
-    .flash-list li.error   { background: rgba(200,50,50,.18);  border: 1px solid rgba(200,50,50,.4);  color: #f97b7b; }
-    .text-section { margin-bottom: 40px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
-    .text-section h2 { font-size: 18px; font-weight: 700; margin: 0 0 20px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+    .flash-list li.error   { background: rgba(200,50,50,.18); border: 1px solid rgba(200,50,50,.4); color: #f97b7b; }
+    .text-section { margin-bottom: 36px; }
+    .text-section h2 { font-size: 16px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+                       letter-spacing: .07em; margin: 0 0 14px; padding-bottom: 10px;
+                       border-bottom: 1px solid var(--border); }
+    .empty-tuile-hint { background: var(--surface); border: 1px dashed var(--border); border-radius: 14px;
+                        padding: 24px; color: var(--muted); font-size: 14px; text-align: center; }
   </style>
 </head>
-<body class="gallery-body" data-admin-page="gallery">
+<body class="gallery-body" data-admin-page="{{ current_page }}">
 <div class="admin-wrap">
 
   <div class="admin-header">
     <div>
       <h1>{{ page_label }}</h1>
-      <p>{{ config.get('ui', {}).get('app_title', 'Pictotem') }}</p>
+      {% if page_desc %}<p>{{ page_desc }}</p>{% endif %}
     </div>
     <nav class="admin-nav">
       <a class="action-btn" href="{{ url_for('admin_home') }}">← Admin</a>
-      <a class="action-btn" href="{{ url_for('gallery') }}">Voir la galerie</a>
       <a class="action-btn" href="{{ url_for('logout') }}">Déconnexion</a>
     </nav>
   </div>
 
-  {% if alert_success %}
-  <ul class="flash-list"><li class="success">{{ alert_success }}</li></ul>
-  {% endif %}
-  {% if alert_error %}
-  <ul class="flash-list"><li class="error">{{ alert_error }}</li></ul>
-  {% endif %}
+  {% if alert_success %}<ul class="flash-list"><li class="success">{{ alert_success }}</li></ul>{% endif %}
+  {% if alert_error   %}<ul class="flash-list"><li class="error">{{ alert_error }}</li></ul>{% endif %}
 
   {% for block in blocks %}
   <div class="text-section{% if block.variant %} {{ block.variant }}{% endif %}{% if block.collapsed %} block-collapsed{% endif %}" data-block-id="{{ block.id }}">
@@ -68,6 +67,13 @@
     </form>
   </div>
   {% endfor %}
+
+  {% if not blocks %}
+  <p class="empty-tuile-hint">
+    Cette tuile est vide — déplacez-y un bloc depuis n'importe quelle autre page via son menu
+    « Déplacer vers » en bas de bloc.
+  </p>
+  {% endif %}
 
 </div>
 </body>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Archive &amp; nettoyage — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <title>{{ page_label }} — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('custom_fonts_css') }}">
@@ -50,7 +50,7 @@
 
   <div class="admin-header">
     <div>
-      <h1>Archive &amp; nettoyage</h1>
+      <h1>{{ page_label }}</h1>
       <p>Export et suppression des captures par plage de dates (bornes incluses), ou en totalité via l'option « Tout ».</p>
     </div>
     <nav class="admin-nav">

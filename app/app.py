@@ -2195,6 +2195,7 @@ def admin_home():
         ffmpeg_ok=Path(FFMPEG_EXE).is_file() if FFMPEG_EXE.endswith('.exe') else True,
         printer_configured=bool(CONFIG.get('print', {}).get('printer_name', '').strip()),
         camera_device=get_setting('camera.device', '') or CONFIG.get('camera', {}).get('device', 0),
+        tuiles=_admin_home_tuiles(), hidden_tuiles=_admin_hidden_native_pages(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
     )
@@ -2416,7 +2417,8 @@ def admin_archive():
     blocks, block_context = _admin_render_blocks('archive')
     return render_template(
         'admin_archive.html', config=CONFIG,
-        blocks=blocks, current_page='archive', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='archive', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('archive', 'Archive & nettoyage'),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -2599,7 +2601,8 @@ def admin_texts():
                            photostrip_step=_photostrip_step_settings(),
                            photostrip_step_fonts=_all_fonts(),
                            photostrip_step_positions=_PHOTOSTRIP_STEP_POSITION_LABELS,
-                           blocks=blocks, current_page='texts', admin_pages=_ADMIN_PAGES,
+                           blocks=blocks, current_page='texts', admin_pages=_admin_all_pages(),
+                           page_label=_admin_page_label('texts', "Textes de l'interface"),
                            alert_success=request.args.get('ok'),
                            alert_error=request.args.get('err'),
                            **block_context)
@@ -2678,7 +2681,8 @@ def admin_gallery():
     cette page poste vers sa propre route dédiée ci-dessous."""
     blocks, block_context = _admin_render_blocks('gallery')
     return render_template('admin_gallery.html', config=CONFIG,
-                           blocks=blocks, current_page='gallery', admin_pages=_ADMIN_PAGES,
+                           blocks=blocks, current_page='gallery', admin_pages=_admin_all_pages(),
+                           page_label=_admin_page_label('gallery', 'Administration galerie'),
                            alert_success=request.args.get('ok'),
                            alert_error=request.args.get('err'),
                            **block_context)
@@ -2726,7 +2730,8 @@ def admin_system():
     blocks, block_context = _admin_render_blocks('system')
     return render_template(
         'admin_system.html', config=CONFIG,
-        blocks=blocks, current_page='system', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='system', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('system', 'Caméra & écran'),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -2868,12 +2873,175 @@ _ADMIN_PAGES = [
 ]
 _ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
 
+# Description par défaut de chaque tuile native (texte actuellement en dur
+# dans admin_home.html avant la vague 11) — sert de valeur de repli à
+# ui.page_desc.<id> tant que l'admin n'a pas renommé la tuile. Purement
+# affiché sur /admin, aucune logique n'en dépend.
+_ADMIN_PAGE_DESCRIPTIONS = {
+    'application':    "Plein écran, redémarrage de l'application, démarrage automatique Windows",
+    'access':         "Mot de passe unique protégeant l'accès au back office",
+    'archive':        "Exporter en ZIP (médias, tags, votes, dates) ou supprimer par plage de dates",
+    'texts':          "Boutons, messages et libellés de l'interface kiosque",
+    'system':         "Choix de la caméra, résolution, rotation, miroir, écran kiosque",
+    'gallery':        "Texte d'introduction affiché dans la galerie",
+    'frames':         "Cadres de capture, cadre d'accueil, cadre par défaut",
+    'votes':          "Activer les votes sur la galerie, couleurs et seuils du gradient",
+    'buttons':        "Forme, police et taille communes ; couleur et graisse propres à chaque bouton",
+    'tags':           "Tags prédéfinis/libre sur les captures, ID unique recherchable et affichable",
+    'slideshow':      "Diaporama public /bestof — type, délai, ordre, dates, images intermédiaires",
+    'screensaver':    "Diaporama plein écran après inactivité sur l'accueil — délai, images dédiées",
+    'guest_uploads':  "Lien de partage /share, modération, quota — alimente le best-of et/ou la galerie",
+    'guest_codes':    "Codes numériques associés à un texte ; détection, apparence et incrustation QR-code",
+}
+
+# Tuiles natives dont le contenu n'est JAMAIS entièrement composé de blocs
+# (liste CRUD, upload, formulaire fixe...) — voir chaque template pour le
+# détail. Ne peuvent donc jamais être "vides" et ne sont jamais
+# supprimables/masquables, quel que soit l'état de leurs blocs — voir
+# _admin_page_deletable. admin_captures/admin_emails ne sont volontairement
+# PAS dans ce registre du tout (jamais dans _ADMIN_PAGES) : ce sont des
+# pages de contenu pur, hors système de blocs et hors CRUD de tuiles,
+# comme pour le reste de la migration blocs.
+_ADMIN_NATIVE_ALWAYS_NONEMPTY = {
+    'texts', 'frames', 'tags', 'slideshow', 'screensaver',
+    'guest_uploads', 'guest_codes',
+}
+
+
+def _admin_page_label(page_id: str, default: str = '') -> str:
+    return get_setting(f'ui.page_label.{page_id}', default)
+
+
+def _admin_page_desc(page_id: str, default: str = '') -> str:
+    return get_setting(f'ui.page_desc.{page_id}', default)
+
+
+def _admin_custom_page_ids() -> list:
+    raw = get_setting('ui.custom_pages', '')
+    try:
+        return json.loads(raw) if raw else []
+    except (ValueError, TypeError):
+        return []
+
+
+def _admin_all_page_ids() -> list:
+    """Tous les ids de tuiles valides (natives + personnalisées), SANS
+    filtrer les masquées — c'est le référentiel de validation (move_block,
+    /admin/ui/block_order/tuile_order, résolution d'URL) : une tuile
+    native masquée reste une cible valide pour un bloc qui y est déjà
+    assigné, seulement invisible sur /admin et dans les menus "Déplacer
+    vers" (voir _admin_all_pages, qui filtre les masquées)."""
+    return [slug for slug, _label, _endpoint in _ADMIN_PAGES] + _admin_custom_page_ids()
+
+
+def _admin_page_hidden(slug: str) -> bool:
+    return get_setting(f'ui.page_hidden.{slug}', '0') == '1'
+
+
+def _admin_tuile_order(candidate_ids: list) -> list:
+    """Ordre d'affichage des TUILES elles-mêmes sur /admin — même principe
+    que _admin_page_order ci-dessous pour les blocs à l'intérieur d'une
+    page, mais appliqué au registre des tuiles (clé ui.tuile_order)."""
+    raw = get_setting('ui.tuile_order', '')
+    try:
+        stored = json.loads(raw) if raw else []
+    except (ValueError, TypeError):
+        stored = []
+    ordered = [p for p in stored if p in candidate_ids]
+    ordered += [p for p in candidate_ids if p not in ordered]
+    return ordered
+
+
+def _admin_all_pages(include_hidden: bool = False) -> list:
+    """(id, libellé, endpoint_ou_None) pour chaque tuile gérée (natives +
+    personnalisées), libellés résolus via _admin_page_label (repli sur le
+    libellé natif d'origine, ou "Tuile sans nom" pour une personnalisée
+    dont le libellé aurait été vidé), ordonnés selon ui.tuile_order.
+    Remplace _ADMIN_PAGES en dur comme valeur passée aux templates
+    (admin_pages=...) partout où une tuile est référencée : menus
+    "Déplacer vers" de chaque page à blocs, et grille de /admin. Les
+    tuiles natives masquées (voir _admin_page_hidden) sont exclues sauf
+    include_hidden=True — jamais le cas pour une tuile personnalisée
+    (supprimée = retirée du registre pour de vrai, jamais "masquée",
+    voir _admin_page_deletable / la route /admin/tuiles/delete)."""
+    items = []
+    for slug, default_label, endpoint in _ADMIN_PAGES:
+        if not include_hidden and _admin_page_hidden(slug):
+            continue
+        items.append((slug, _admin_page_label(slug, default_label), endpoint))
+    for page_id in _admin_custom_page_ids():
+        items.append((page_id, _admin_page_label(page_id, 'Tuile sans nom'), None))
+    by_id = {p[0]: p for p in items}
+    ordered_ids = _admin_tuile_order(list(by_id.keys()))
+    return [by_id[pid] for pid in ordered_ids]
+
+
+def _admin_home_tuiles() -> list:
+    """Version enrichie de _admin_all_pages() pour la grille réordonnable de
+    /admin : ajoute description, URL déjà résolue et éligibilité à la
+    suppression (voir _admin_page_deletable) — inutile pour les menus
+    "Déplacer vers" des autres pages (qui n'utilisent que id/libellé),
+    donc gardé séparé plutôt que d'alourdir _admin_all_pages()."""
+    result = []
+    for page_id, label, _endpoint in _admin_all_pages():
+        default_desc = _ADMIN_PAGE_DESCRIPTIONS.get(page_id, '')
+        deletable, _reason = _admin_page_deletable(page_id)
+        result.append({
+            'id': page_id,
+            'label': label,
+            'description': _admin_page_desc(page_id, default_desc),
+            'url': _admin_page_url(page_id),
+            'deletable': deletable,
+            'native': page_id in _ADMIN_PAGE_SLUGS,
+        })
+    return result
+
+
+def _admin_hidden_native_pages() -> list:
+    """Tuiles natives actuellement masquées (voir /admin/tuiles/delete) —
+    alimente le panneau "Tuiles masquées" de /admin, affiché seulement
+    s'il y en a."""
+    return [{'id': slug, 'label': _admin_page_label(slug, default_label)}
+            for slug, default_label, _endpoint in _ADMIN_PAGES if _admin_page_hidden(slug)]
+
 
 def _admin_block_page(block_id: str) -> str:
-    return get_setting(f'ui.block_page.{block_id}', _ADMIN_BLOCKS[block_id]['default_page'])
+    page = get_setting(f'ui.block_page.{block_id}', _ADMIN_BLOCKS[block_id]['default_page'])
+    # Filet de sécurité (vague 11) : si la page enregistrée n'existe plus
+    # (tuile personnalisée supprimée entre-temps, données obsolètes),
+    # retombe sur la page d'origine du bloc plutôt que de renvoyer un id
+    # invalide — même esprit que le repli déjà présent ci-dessous dans
+    # _admin_block_redirect.
+    if page not in _admin_all_page_ids():
+        return _ADMIN_BLOCKS[block_id]['default_page']
+    return page
 
 
 _ADMIN_PAGE_ENDPOINTS = {slug: endpoint for slug, _label, endpoint in _ADMIN_PAGES}
+
+
+def _admin_page_url(page_id: str, **kwargs) -> str:
+    """Résout l'URL de n'importe quelle tuile (native ou personnalisée) à
+    partir de son id — natif : route dédiée existante (_ADMIN_PAGE_ENDPOINTS,
+    inchangé) ; personnalisée : route générique partagée admin_custom_page
+    (voir /admin/custom/<page_id>)."""
+    if page_id in _ADMIN_PAGE_ENDPOINTS:
+        return url_for(_ADMIN_PAGE_ENDPOINTS[page_id], **kwargs)
+    return url_for('admin_custom_page', page_id=page_id, **kwargs)
+
+
+def _admin_page_deletable(page_id: str) -> tuple:
+    """(bool, raison_si_non). Une tuile n'est supprimable (masquée pour une
+    tuile native, réellement retirée du registre pour une personnalisée)
+    que si elle n'a aucun contenu fixe hors blocs (voir
+    _ADMIN_NATIVE_ALWAYS_NONEMPTY) ET qu'aucun bloc ne lui est
+    actuellement assigné — voir la route /admin/tuiles/delete."""
+    if page_id in _ADMIN_NATIVE_ALWAYS_NONEMPTY:
+        return False, "Cette tuile contient du contenu qui n'est pas un bloc, elle ne peut pas être supprimée."
+    remaining = [bid for bid in _ADMIN_BLOCKS if _admin_block_page(bid) == page_id]
+    if remaining:
+        return False, f"Déplacez d'abord le(s) {len(remaining)} bloc(s) restant(s) avant de supprimer cette tuile."
+    return True, ''
 
 
 def _admin_block_redirect(block_id: str, **kwargs):
@@ -2885,8 +3053,7 @@ def _admin_block_redirect(block_id: str, **kwargs):
     garantit que l'utilisateur revient bien sur cette page-là plutôt que
     sur la tuile d'origine du bloc."""
     page = _admin_block_page(block_id)
-    endpoint = _ADMIN_PAGE_ENDPOINTS.get(page, _ADMIN_PAGE_ENDPOINTS[_ADMIN_BLOCKS[block_id]['default_page']])
-    return redirect(url_for(endpoint, **kwargs))
+    return redirect(_admin_page_url(page, **kwargs))
 
 
 def _admin_block_collapsed(block_id: str) -> bool:
@@ -3124,7 +3291,7 @@ def admin_ui_block_order():
     par static/admin-blocks.js après un glisser-déposer. `order` : ids
     séparés par des virgules, dans le nouvel ordre voulu."""
     page = request.form.get('page', '')
-    if page not in _ADMIN_PAGE_SLUGS:
+    if page not in _admin_all_page_ids():
         return jsonify(ok=False, error='page inconnue'), 404
     order = [b for b in (request.form.get('order', '')).split(',') if b in _ADMIN_BLOCKS]
     set_setting(f'ui.page_order.{page}', json.dumps(order))
@@ -3142,20 +3309,143 @@ def admin_move_block():
     déplacement se fait ici côté serveur (le bloc est ensuite rendu
     normalement, comme tous les autres, par la route de sa page cible) suivi
     d'un rechargement classique de page — beaucoup plus sûr qu'une
-    manipulation du DOM en JavaScript entre deux pages."""
+    manipulation du DOM en JavaScript entre deux pages. `target_page` peut
+    être une tuile native OU personnalisée (vague 11) — voir _admin_page_url."""
     block_id = request.form.get('block_id', '')
     target_page = request.form.get('target_page', '')
     if block_id not in _ADMIN_BLOCKS:
         return redirect(url_for('admin_home', err='Bloc inconnu.'))
-    if target_page not in _ADMIN_PAGE_SLUGS:
+    if target_page not in _admin_all_page_ids():
         return redirect(url_for('admin_home', err='Page de destination inconnue.'))
     current_page = _admin_block_page(block_id)
     set_setting(f'ui.block_page.{block_id}', target_page)
-    target_endpoint = dict((slug, endpoint) for slug, _label, endpoint in _ADMIN_PAGES)[target_page]
     if target_page == current_page:
-        return redirect(url_for(target_endpoint))
-    target_label = dict((slug, label) for slug, label, _endpoint in _ADMIN_PAGES)[target_page]
-    return redirect(url_for(target_endpoint, ok=f"Bloc « {_ADMIN_BLOCKS[block_id]['title']} » déplacé vers « {target_label} »."))
+        return redirect(_admin_page_url(target_page))
+    target_label = dict((pid, label) for pid, label, _ep in _admin_all_pages(include_hidden=True)).get(target_page, target_page)
+    return redirect(_admin_page_url(target_page, ok=f"Bloc « {_ADMIN_BLOCKS[block_id]['title']} » déplacé vers « {target_label} »."))
+
+
+@app.route('/admin/ui/tuile_order', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_ui_tuile_order():
+    """Persiste l'ordre d'affichage des TUILES elles-mêmes sur /admin —
+    même contrat que /admin/ui/block_order ci-dessus mais pour
+    _admin_tuile_order. `order` : ids séparés par des virgules."""
+    order = [p for p in (request.form.get('order', '')).split(',') if p in _admin_all_page_ids()]
+    set_setting('ui.tuile_order', json.dumps(order))
+    return jsonify(ok=True)
+
+
+@app.route('/admin/tuiles/create', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tuiles_create():
+    """Crée une tuile personnalisée vide (aucun contenu natif, aucun bloc
+    au départ) — voir GET /admin/custom/<page_id> (admin_custom_page) pour
+    la route générique qui l'affiche. Redirige directement vers la
+    nouvelle tuile plutôt que vers /admin : l'action naturelle suivante
+    est d'y déplacer des blocs existants."""
+    label = (request.form.get('label') or '').strip()[:60]
+    if not label:
+        return redirect(url_for('admin_home', err='Le libellé de la tuile est obligatoire.'))
+    description = (request.form.get('description') or '').strip()[:200]
+    existing = set(_admin_all_page_ids())
+    page_id = 'custom_' + secrets.token_hex(4)
+    while page_id in existing:  # collision quasi impossible, filet de sécurité
+        page_id = 'custom_' + secrets.token_hex(4)
+    set_setting(f'ui.page_label.{page_id}', label)
+    if description:
+        set_setting(f'ui.page_desc.{page_id}', description)
+    custom_pages = _admin_custom_page_ids()
+    custom_pages.append(page_id)
+    set_setting('ui.custom_pages', json.dumps(custom_pages))
+    order = _admin_tuile_order(_admin_all_page_ids())
+    order.append(page_id)
+    set_setting('ui.tuile_order', json.dumps(order))
+    return redirect(url_for('admin_custom_page', page_id=page_id, ok=f"Tuile « {label} » créée."))
+
+
+@app.route('/admin/tuiles/rename', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tuiles_rename():
+    """Renomme n'importe quelle tuile (native ou personnalisée) : libellé
+    (obligatoire) et description (optionnelle), visibles partout — /admin,
+    menus "Déplacer vers" de toutes les pages à blocs, et le <h1>/<title>
+    de la tuile elle-même (voir page_label= passé par chaque route GET)."""
+    page_id = request.form.get('page_id', '')
+    if page_id not in _admin_all_page_ids():
+        return redirect(url_for('admin_home', err='Tuile inconnue.'))
+    label = (request.form.get('label') or '').strip()[:60]
+    if not label:
+        return redirect(url_for('admin_home', err='Le libellé de la tuile est obligatoire.'))
+    set_setting(f'ui.page_label.{page_id}', label)
+    set_setting(f'ui.page_desc.{page_id}', (request.form.get('description') or '').strip()[:200])
+    return redirect(url_for('admin_home', ok=f"Tuile renommée « {label} »."))
+
+
+@app.route('/admin/tuiles/delete', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tuiles_delete():
+    """Supprime une tuile — voir _admin_page_deletable pour les conditions
+    (jamais de contenu natif fixe, plus aucun bloc assigné). Personnalisée :
+    retirée du registre pour de vrai (sa route redevient un 404). Native :
+    masquée (ui.page_hidden.<slug> = '1') — sa route reste fonctionnelle si
+    on la visite directement, pour ne jamais casser un lien déjà ouvert ;
+    réversible via /admin/tuiles/unhide."""
+    page_id = request.form.get('page_id', '')
+    if page_id not in _admin_all_page_ids():
+        return redirect(url_for('admin_home', err='Tuile inconnue.'))
+    ok, reason = _admin_page_deletable(page_id)
+    if not ok:
+        return redirect(url_for('admin_home', err=reason))
+    label = _admin_page_label(page_id, dict((s, l) for s, l, _e in _ADMIN_PAGES).get(page_id, page_id))
+    if page_id in _ADMIN_PAGE_SLUGS:
+        set_setting(f'ui.page_hidden.{page_id}', '1')
+    else:
+        custom_pages = [p for p in _admin_custom_page_ids() if p != page_id]
+        set_setting('ui.custom_pages', json.dumps(custom_pages))
+    order = [p for p in _admin_tuile_order(_admin_all_page_ids()) if p != page_id]
+    set_setting('ui.tuile_order', json.dumps(order))
+    return redirect(url_for('admin_home', ok=f"Tuile « {label} » supprimée."))
+
+
+@app.route('/admin/tuiles/unhide', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tuiles_unhide():
+    """Réaffiche une tuile native masquée (voir /admin/tuiles/delete) —
+    sans effet sur une tuile personnalisée (elle n'a jamais d'état masqué,
+    la supprimer la retire du registre pour de vrai)."""
+    page_id = request.form.get('page_id', '')
+    if page_id not in _ADMIN_PAGE_SLUGS:
+        return redirect(url_for('admin_home', err='Tuile inconnue.'))
+    set_setting(f'ui.page_hidden.{page_id}', '0')
+    label = _admin_page_label(page_id, dict((s, l) for s, l, _e in _ADMIN_PAGES).get(page_id, page_id))
+    return redirect(url_for('admin_home', ok=f"Tuile « {label} » réaffichée."))
+
+
+@app.route('/admin/custom/<page_id>')
+@require_admin_auth
+def admin_custom_page(page_id):
+    """Route générique partagée par TOUTES les tuiles personnalisées (voir
+    /admin/tuiles/create) — l'équivalent d'une route dédiée admin_application()
+    etc. mais paramétrée par page_id plutôt que hardcodée une fois par
+    tuile : une tuile personnalisée n'a par construction aucun contenu
+    natif, seulement des blocs (voir templates/admin_custom_page.html)."""
+    if page_id not in _admin_custom_page_ids():
+        abort(404)
+    blocks, block_context = _admin_render_blocks(page_id)
+    label = _admin_page_label(page_id, 'Tuile sans nom')
+    return render_template(
+        'admin_custom_page.html', config=CONFIG,
+        blocks=blocks, current_page=page_id, admin_pages=_admin_all_pages(),
+        page_label=label, page_desc=_admin_page_desc(page_id, ''),
+        alert_success=request.args.get('ok'), alert_error=request.args.get('err'),
+        **block_context,
+    )
 
 
 # ── Fond d'écran Windows (réglable depuis la tuile « Application ») ───────────
@@ -3187,7 +3477,8 @@ def admin_application():
     blocks, block_context = _admin_render_blocks('application')
     return render_template(
         'admin_application.html', config=CONFIG,
-        blocks=blocks, current_page='application', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='application', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('application', 'Application'),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -3229,7 +3520,8 @@ def admin_access():
     blocks, block_context = _admin_render_blocks('access', locally_visible=visible)
     return render_template(
         'admin_access.html', config=CONFIG,
-        blocks=blocks, current_page='access', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='access', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('access', 'Admin'),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -3472,7 +3764,8 @@ def admin_frames():
     blocks, block_context = _admin_render_blocks('frames')
     return render_template(
         'admin_frames.html', config=CONFIG, frames=list_frames(),
-        blocks=blocks, current_page='frames', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='frames', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('frames', 'Gestion des cadres'),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -3693,7 +3986,8 @@ def admin_votes():
     blocks, block_context = _admin_render_blocks('votes')
     return render_template(
         'admin_votes.html', config=CONFIG,
-        blocks=blocks, current_page='votes', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='votes', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('votes', 'Système de votes'),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -3775,7 +4069,8 @@ def admin_tags():
     blocks, block_context = _admin_render_blocks('tags')
     return render_template(
         'admin_tags.html', config=CONFIG,
-        blocks=blocks, current_page='tags', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='tags', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('tags', 'Tags & ID média'),
         tags=list_tags(), assignments=list_capture_tags_with_media(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
@@ -4369,7 +4664,8 @@ def admin_guest_codes():
     list_q = request.args.get('q', '')
     return render_template(
         'admin_guest_codes.html', config=CONFIG,
-        blocks=blocks, current_page='guest_codes', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='guest_codes', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('guest_codes', 'Codes invités'),
         guest_codes=list_guest_codes(sort=list_sort, q=list_q),
         guest_codes_sorts=_GUEST_CODES_SORTS,
         guest_codes_bulk_max=_GUEST_CODES_BULK_MAX,
@@ -4635,7 +4931,8 @@ def admin_buttons():
     blocks, block_context = _admin_render_blocks('buttons')
     return render_template(
         'admin_buttons.html', config=CONFIG,
-        blocks=blocks, current_page='buttons', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='buttons', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('buttons', 'Boutons'),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -4896,7 +5193,8 @@ def admin_slideshow():
     images = list_slideshow_images()
     return render_template(
         'admin_slideshow.html', config=CONFIG,
-        blocks=blocks, current_page='slideshow', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='slideshow', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('slideshow', 'Slideshow Best Of'),
         images=images,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
@@ -5246,7 +5544,8 @@ def admin_guest_uploads():
     blocks, block_context = _admin_render_blocks('guest_uploads')
     return render_template(
         'admin_guest_uploads.html', config=CONFIG,
-        blocks=blocks, current_page='guest_uploads', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='guest_uploads', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('guest_uploads', 'Upload invités'),
         pending=list_guest_uploads('pending'), approved=list_guest_uploads('approved'),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
@@ -5335,7 +5634,8 @@ def admin_screensaver():
     blocks, block_context = _admin_render_blocks('screensaver')
     return render_template(
         'admin_screensaver.html', config=CONFIG,
-        blocks=blocks, current_page='screensaver', admin_pages=_ADMIN_PAGES,
+        blocks=blocks, current_page='screensaver', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('screensaver', 'Écran de veille'),
         images=list_screensaver_images(),
         # « Images » (hors blocs) affiche un sous-titre conditionné par
         # include_captures — indépendant du contexte du bloc

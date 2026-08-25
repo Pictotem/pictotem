@@ -278,3 +278,67 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
 .field:last-child { margin-bottom: 0; }
 .field-inactive { opacity: .45; }
 .field-inactive input { cursor: not-allowed; }
+
+/* ── Vague 11 : CRUD des tuiles sur /admin (templates/admin_home.html) ──
+   Grille de cartes réordonnables par glisser-déposer (voir static/
+   admin-blocks.js, wireDragReorder généralisé, conteneur .tuiles-grid,
+   attribut data-tuile-id) + actions inline renommer/supprimer sur chaque
+   carte + petits panneaux création / tuiles masquées en dessous. */
+.tuiles-grid { position: relative; }
+.tuile-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  padding: 16px 18px; display: flex; flex-direction: column; gap: 8px;
+  transition: border-color .15s, background .15s;
+}
+.tuile-card:hover { border-color: var(--accent); }
+[data-tuile-id].dragging { opacity: .4; }
+[data-tuile-id].drag-over { outline: 2px dashed var(--accent); outline-offset: 4px; }
+.tuile-card-head { display: flex; align-items: flex-start; gap: 6px; }
+.tuile-card-head .block-drag-handle { margin-top: 2px; }
+.tuile-card-link { text-decoration: none; color: var(--text); flex: 1; min-width: 0;
+                   display: flex; flex-direction: column; gap: 4px; }
+.tuile-card-link:hover .admin-card-title { color: var(--accent); }
+.tuile-card-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.tuile-rename summary {
+  font-size: 12px; color: var(--muted); cursor: pointer; list-style: none;
+  padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px; display: inline-block;
+}
+.tuile-rename summary::-webkit-details-marker { display: none; }
+.tuile-rename summary:hover { color: var(--accent); border-color: var(--accent); }
+.tuile-rename[open] summary { margin-bottom: 10px; }
+.tuile-rename-form { display: flex; flex-direction: column; gap: 8px; max-width: 280px; }
+.tuile-rename-form input[type=text] {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 8px 10px; font-size: 13px;
+}
+.tuile-rename-form button { align-self: flex-start; }
+.tuile-delete-form { display: inline-flex; margin: 0; }
+.tuile-delete-btn {
+  background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 8px;
+  padding: 4px 9px; font-size: 13px; cursor: pointer; line-height: 1;
+}
+.tuile-delete-btn:hover { border-color: rgba(200,50,50,.6); color: #f97b7b; }
+.tuile-locked { font-size: 13px; opacity: .5; cursor: help; padding: 4px 9px; }
+
+.tuile-create { margin-top: 14px; }
+.tuile-create-form {
+  margin-top: 14px; display: flex; flex-direction: column; gap: 4px; max-width: 360px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px;
+}
+
+.hidden-tuiles-panel {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 8px 18px;
+}
+.hidden-tuile-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid var(--border); margin: 0;
+}
+.hidden-tuile-row:last-child { border-bottom: none; }
+.hidden-tuile-label { font-size: 14px; color: var(--muted); }
+
+/* Tuile personnalisée vide (templates/admin_custom_page.html) — invite à y
+   déplacer un bloc plutôt qu'une page qui semble cassée. */
+.empty-tuile-hint {
+  border: 1px dashed var(--border); border-radius: 14px; padding: 28px 20px;
+  text-align: center; color: var(--muted); font-size: 14px;
+}

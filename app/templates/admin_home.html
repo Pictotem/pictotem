@@ -4,7 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Administration — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
+  <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
   <style>
     .admin-wrap { max-width: 860px; margin: 0 auto; padding: 40px 20px 60px; }
     .admin-hero { margin-bottom: 32px; }
@@ -132,18 +135,6 @@
 
   <p class="section-label">Contenu</p>
   <div class="admin-cards">
-    <a class="admin-card" href="{{ url_for('admin_frames') }}">
-      <div class="admin-card-title">Cadres</div>
-      <div class="admin-card-desc">Cadres de capture, cadre d'accueil, cadre par défaut</div>
-    </a>
-    <a class="admin-card" href="{{ url_for('admin_gallery') }}">
-      <div class="admin-card-title">Galerie</div>
-      <div class="admin-card-desc">Texte d'introduction affiché dans la galerie</div>
-    </a>
-    <a class="admin-card" href="{{ url_for('admin_texts') }}">
-      <div class="admin-card-title">Textes</div>
-      <div class="admin-card-desc">Boutons, messages et libellés de l'interface kiosque</div>
-    </a>
     <a class="admin-card" href="{{ url_for('admin_emails') }}">
       <div class="admin-card-title">Emails</div>
       <div class="admin-card-desc">Liste, filtrage, CRUD et export des emails collectés</div>
@@ -152,55 +143,74 @@
       <div class="admin-card-title">Captures</div>
       <div class="admin-card-desc">Parcourir et supprimer les photos et vidéos enregistrées</div>
     </a>
-    <a class="admin-card" href="{{ url_for('admin_archive') }}">
-      <div class="admin-card-title">Archive &amp; nettoyage</div>
-      <div class="admin-card-desc">Exporter en ZIP (médias, tags, votes, dates) ou supprimer par plage de dates</div>
-    </a>
-    <a class="admin-card" href="{{ url_for('admin_system') }}">
-      <div class="admin-card-title">Caméra &amp; écran</div>
-      <div class="admin-card-desc">Choix de la caméra, résolution, rotation, miroir, écran kiosque</div>
-    </a>
-    <a class="admin-card" href="{{ url_for('admin_application') }}">
-      <div class="admin-card-title">Application</div>
-      <div class="admin-card-desc">Plein écran, redémarrage de l'application, démarrage automatique Windows</div>
-    </a>
-    <a class="admin-card" href="{{ url_for('admin_access') }}">
-      <div class="admin-card-title">Admin</div>
-      <div class="admin-card-desc">Mot de passe unique protégeant l'accès au back office</div>
-    </a>
   </div>
 
-  <p class="section-label">Diaporamas &amp; interactions</p>
-  <div class="admin-cards">
-    <a class="admin-card" href="{{ url_for('admin_slideshow') }}">
-      <div class="admin-card-title">Slideshow Best Of</div>
-      <div class="admin-card-desc">Diaporama public /bestof — type, délai, ordre, dates, images intermédiaires</div>
-    </a>
-    <a class="admin-card" href="{{ url_for('admin_screensaver') }}">
-      <div class="admin-card-title">Écran de veille</div>
-      <div class="admin-card-desc">Diaporama plein écran après inactivité sur l'accueil — délai, images dédiées</div>
-    </a>
-    <a class="admin-card" href="{{ url_for('admin_votes') }}">
-      <div class="admin-card-title">Votes</div>
-      <div class="admin-card-desc">Activer les votes sur la galerie, couleurs et seuils du gradient</div>
-    </a>
-    <a class="admin-card" href="{{ url_for('admin_guest_uploads') }}">
-      <div class="admin-card-title">Upload invités</div>
-      <div class="admin-card-desc">Lien de partage /share, modération, quota — alimente le best-of et/ou la galerie</div>
-    </a>
-    <a class="admin-card" href="{{ url_for('admin_tags') }}">
-      <div class="admin-card-title">Tags &amp; ID média</div>
-      <div class="admin-card-desc">Tags prédéfinis/libre sur les captures, ID unique recherchable et affichable</div>
-    </a>
-    <a class="admin-card" href="{{ url_for('admin_guest_codes') }}">
-      <div class="admin-card-title">Codes invités</div>
-      <div class="admin-card-desc">Codes numériques associés à un texte ; détection, apparence et incrustation QR-code</div>
-    </a>
-    <a class="admin-card" href="{{ url_for('admin_buttons') }}">
-      <div class="admin-card-title">Boutons</div>
-      <div class="admin-card-desc">Forme, police et taille communes ; couleur et graisse propres à chaque bouton</div>
-    </a>
+  <p class="section-label">Tuiles</p>
+  <div class="tuiles-grid admin-cards">
+    {% for t in tuiles %}
+    <div class="tuile-card" data-tuile-id="{{ t.id }}">
+      <div class="tuile-card-head">
+        <span class="block-drag-handle" title="Glisser pour réordonner">⠿</span>
+        <a class="tuile-card-link" href="{{ t.url }}">
+          <div class="admin-card-title">{{ t.label }}</div>
+          {% if t.description %}<div class="admin-card-desc">{{ t.description }}</div>{% endif %}
+        </a>
+      </div>
+      <div class="tuile-card-actions">
+        <details class="tuile-rename">
+          <summary title="Renommer">✎ Renommer</summary>
+          <form method="post" action="{{ url_for('admin_tuiles_rename') }}" class="tuile-rename-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="page_id" value="{{ t.id }}">
+            <input type="text" name="label" value="{{ t.label }}" maxlength="60" required placeholder="Libellé">
+            <input type="text" name="description" value="{{ t.description }}" maxlength="200" placeholder="Description (optionnel)">
+            <button type="submit" class="btn-ghost">Enregistrer</button>
+          </form>
+        </details>
+        {% if t.deletable %}
+        <form method="post" action="{{ url_for('admin_tuiles_delete') }}" class="tuile-delete-form"
+              onsubmit="return confirm('Supprimer la tuile « {{ t.label }} » ?')">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="page_id" value="{{ t.id }}">
+          <button type="submit" class="tuile-delete-btn" title="Supprimer">🗑</button>
+        </form>
+        {% else %}
+        <span class="tuile-locked" title="Cette tuile contient du contenu qui n'est pas un bloc, ou des blocs encore assignés — elle ne peut pas être supprimée.">🔒</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
   </div>
+
+  <details class="tuile-create">
+    <summary class="btn-ghost" style="display:inline-block;margin-top:14px;cursor:pointer">+ Créer une tuile</summary>
+    <form method="post" action="{{ url_for('admin_tuiles_create') }}" class="tuile-create-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="field">
+        <label>Libellé</label>
+        <input type="text" name="label" maxlength="60" required placeholder="Nom de la tuile">
+      </div>
+      <div class="field">
+        <label>Description (optionnel)</label>
+        <input type="text" name="description" maxlength="200" placeholder="Courte description">
+      </div>
+      <button type="submit" class="btn-primary">Créer</button>
+    </form>
+  </details>
+
+  {% if hidden_tuiles %}
+  <p class="section-label">Tuiles masquées</p>
+  <div class="hidden-tuiles-panel">
+    {% for h in hidden_tuiles %}
+    <form method="post" action="{{ url_for('admin_tuiles_unhide') }}" class="hidden-tuile-row">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="page_id" value="{{ h.id }}">
+      <span class="hidden-tuile-label">{{ h.label }}</span>
+      <button type="submit" class="btn-ghost">Réafficher</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <p class="section-label">Navigation</p>
   <div class="admin-cards">

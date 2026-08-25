@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Écran de veille — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <title>{{ page_label }} — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
@@ -66,7 +66,7 @@
 <div class="admin-wrap">
 
   <a class="back-link" href="{{ url_for('admin_home') }}">← Administration</a>
-  <h1>Écran de veille</h1>
+  <h1>{{ page_label }}</h1>
   <p class="subtitle">
     Diaporama plein écran affiché sur l'interface principale après une période d'inactivité sur l'accueil.
     N'interrompt jamais une capture en cours et se referme au premier appui/clic/touche.
