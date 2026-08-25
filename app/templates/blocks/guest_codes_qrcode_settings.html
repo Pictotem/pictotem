@@ -1,0 +1,60 @@
+<div class="form-card">
+  <p class="section-hint">
+    À chaque photo (capture simple ou photo strip), scanne l'image à la recherche de
+    QR-codes et ajoute automatiquement chaque code détecté comme tag libre sur le média —
+    sans action de l'invité. Pour la vidéo, ce tag n'est ajouté que si « Incruster la forme +
+    le texte sur la vidéo capturée » ci-dessous est également coché (c'est cette option qui
+    déclenche l'analyse de la vidéo ; sans elle, aucune frame n'est jamais scannée). Utilise
+    les mêmes règles (longueur, nombre max. par média) que le tag libre de la tuile « Tags &amp;
+    ID média ». Si le contenu décodé correspond à un code de la liste ci-dessus, c'est le
+    texte associé qui est utilisé — jamais le code numérique brut. Nécessite que « Activer
+    les tags sur les captures » (tuile « Tags &amp; ID média ») soit coché pour que ces tags
+    soient visibles (galerie, journal, /bestof).
+  </p>
+
+  <form method="post" action="{{ url_for('admin_guest_codes_set_qrcode_settings') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field">
+      <div class="check-row">
+        <input type="checkbox" id="qrcode_enabled" name="enabled" {% if guest_codes_qrcode_settings.enabled %}checked{% endif %}>
+        <span>Activer la détection automatique de QR-codes</span>
+      </div>
+    </div>
+    <div class="field">
+      <div class="check-row">
+        <input type="checkbox" id="qrcode_live_overlay" name="live_overlay" {% if guest_codes_qrcode_settings.live_overlay %}checked{% endif %}>
+        <span>Afficher le contenu en direct au-dessus du QR-code sur l'aperçu caméra</span>
+      </div>
+      <p class="section-hint" style="margin-top:6px">
+        Avant même la capture (accueil, choix du cadre) : si un QR-code est présenté devant
+        l'objectif, son contenu s'affiche en surimpression pendant que le visiteur le tient.
+        Indépendant du tag automatique ci-dessus — peut être activé seul.
+      </p>
+    </div>
+    <div class="field">
+      <div class="check-row">
+        <input type="checkbox" id="qrcode_burn_photo" name="burn_photo" {% if guest_codes_qrcode_burn_settings.photo %}checked{% endif %}>
+        <span>Incruster la forme + le texte sur la photo capturée</span>
+      </div>
+      <div class="check-row" style="margin-top:8px">
+        <input type="checkbox" id="qrcode_burn_video" name="burn_video" {% if guest_codes_qrcode_burn_settings.video %}checked{% endif %}>
+        <span>Incruster la forme + le texte sur la vidéo capturée</span>
+      </div>
+      <div class="check-row" style="margin-top:8px">
+        <input type="checkbox" id="qrcode_burn_strip" name="burn_strip" {% if guest_codes_qrcode_burn_settings.strip %}checked{% endif %}>
+        <span>Incruster la forme + le texte sur le photo strip capturé</span>
+      </div>
+      <p class="section-hint" style="margin-top:6px">
+        Grave définitivement dans le média final (photo, vidéo ou photo strip) la même forme et
+        le même texte que ceux affichés en direct au-dessus du QR-code présenté devant l'objectif
+        (réglages ci-dessous, « Apparence du QR-code affiché en direct ») — uniquement si le
+        QR-code a bien pu être décodé. Le message d'erreur (QR-code détecté mais illisible)
+        n'est jamais incrusté : il n'a de sens que pour signaler un problème en direct au
+        visiteur, pas sur un média déjà enregistré.
+      </p>
+    </div>
+
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+</div>

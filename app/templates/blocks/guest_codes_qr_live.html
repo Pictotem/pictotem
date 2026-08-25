@@ -1,0 +1,477 @@
+<!-- Fusionne « Apparence du texte affiché en direct » (qrcode_live_style) et
+     « Message d'erreur » (qrcode_live_error_style) dans UN SEUL bloc : le
+     message d'erreur lit en direct (JS) forme/taille/marge du 1er
+     formulaire (voir updateQrLiveErrorPreview ci-dessous) — ils doivent
+     donc toujours cohabiter sur la même page, même si chacun garde sa
+     propre route de sauvegarde (2 formulaires indépendants). -->
+
+<div class="form-card">
+  <p class="section-title" style="margin:0 0 4px">Apparence du texte affiché en direct</p>
+  <p class="section-hint">
+    Style de l'étiquette qui affiche le contenu décodé au-dessus du QR-code présenté devant
+    l'objectif. Forme, taille et position sont aussi utilisées par le message d'erreur
+    ci-dessous (QR-code détecté mais illisible), qui a ses propres couleurs/police/taille.
+  </p>
+
+  <form method="post" enctype="multipart/form-data" action="{{ url_for('admin_guest_codes_set_qrcode_live_style') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field">
+      <label>Position relative au QR-code</label>
+      <select name="position" id="qr_live_position">
+        {% for value, label in guest_codes_qrcode_live_positions %}
+        <option value="{{ value }}" {% if guest_codes_qrcode_live_style.position == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Police</label>
+        <select name="font" id="qr_live_font">
+          {% for value, label in guest_codes_fonts %}
+          <option value="{{ value }}" {% if guest_codes_qrcode_live_style.font == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>Taille du texte (px)</label>
+        <input type="number" name="font_size" id="qr_live_font_size" min="8" max="72" value="{{ guest_codes_qrcode_live_style.font_size }}">
+      </div>
+      <div class="field">
+        <label>Couleur du texte</label>
+        <div class="color-row">
+          <input type="color" id="cp_qr_text" value="{{ guest_codes_qrcode_live_style.text_color }}"
+                 oninput="document.getElementById('qr_live_text_color').value=this.value; updateQrLivePreview()">
+          <input type="text" id="qr_live_text_color" name="text_color" class="color-hex"
+                 value="{{ guest_codes_qrcode_live_style.text_color }}" maxlength="7"
+                 oninput="document.getElementById('cp_qr_text').value=this.value; updateQrLivePreview()">
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Arrière-plan</label>
+      <div class="field-row" style="gap:14px;align-items:center;margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:14px;font-weight:400;color:var(--text);cursor:pointer">
+          <input type="radio" name="bg_mode" value="shape" id="qr_bg_mode_shape"
+                 {% if guest_codes_qrcode_live_style.bg_mode == 'shape' %}checked{% endif %}
+                 onchange="updateQrLiveBgModeUi()" style="width:16px;height:16px;accent-color:var(--accent)">
+          Forme + couleur
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:14px;font-weight:400;color:var(--text);cursor:pointer">
+          <input type="radio" name="bg_mode" value="image" id="qr_bg_mode_image"
+                 {% if guest_codes_qrcode_live_style.bg_mode == 'image' %}checked{% endif %}
+                 onchange="updateQrLiveBgModeUi()" style="width:16px;height:16px;accent-color:var(--accent)">
+          Image de fond
+        </label>
+      </div>
+
+      <div id="qr_bg_shape_fields" class="field-row">
+        <div class="field">
+          <label>Forme</label>
+          <select name="bg_shape" id="qr_live_bg_shape" onchange="updateQrLivePreview(); updateQrLiveErrorPreview()">
+            {% for value, label in guest_codes_qrcode_live_shapes %}
+            <option value="{{ value }}" {% if guest_codes_qrcode_live_style.bg_shape == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Taille de la forme (%)</label>
+          <input type="number" name="bg_size_pct" id="qr_live_bg_size_pct" min="50" max="300" step="10"
+                 value="{{ guest_codes_qrcode_live_style.bg_size_pct }}" oninput="updateQrLivePreview()">
+          <p class="field-hint">Défaut : 100 %. Agrandit ou réduit la forme sans changer la taille du texte.</p>
+        </div>
+        <div class="field">
+          <label>Largeur de la forme (px)</label>
+          <input type="number" name="bg_width_px" id="qr_live_bg_width_px" min="20" max="800" step="5"
+                 placeholder="Auto" value="{{ guest_codes_qrcode_live_style.bg_width_px or '' }}" oninput="updateQrLivePreview()">
+          <p class="field-hint">Vide = automatique (la forme s'ajuste au texte).</p>
+        </div>
+        <div class="field">
+          <label>Hauteur de la forme (px)</label>
+          <input type="number" name="bg_height_px" id="qr_live_bg_height_px" min="20" max="800" step="5"
+                 placeholder="Auto" value="{{ guest_codes_qrcode_live_style.bg_height_px or '' }}" oninput="updateQrLivePreview()">
+          <p class="field-hint">Vide = automatique (la forme s'ajuste au texte).</p>
+        </div>
+        <div class="field">
+          <label>Couleur de fond</label>
+          <div class="color-row">
+            <input type="color" id="cp_qr_bg" value="{{ guest_codes_qrcode_live_style.bg_color }}"
+                   oninput="document.getElementById('qr_live_bg_color').value=this.value; updateQrLivePreview()">
+            <input type="text" id="qr_live_bg_color" name="bg_color" class="color-hex"
+                   value="{{ guest_codes_qrcode_live_style.bg_color }}" maxlength="7"
+                   oninput="document.getElementById('cp_qr_bg').value=this.value; updateQrLivePreview()">
+          </div>
+        </div>
+        <div class="field">
+          <label>Marge autour du texte (px)</label>
+          <input type="number" name="text_margin_px" id="qr_live_text_margin_px" min="0" max="60" step="2"
+                 value="{{ guest_codes_qrcode_live_style.text_margin_px }}" oninput="updateQrLivePreview()">
+          <p class="field-hint">
+            Défaut : 0 px. Espace ajouté entre le texte et le bord de la forme, en plus de
+            « Taille de la forme » ci-dessus. Sans effet en mode « Proportionnel » ci-dessous.
+          </p>
+        </div>
+      </div>
+
+      <div class="check-row" style="margin-top:-6px;margin-bottom:10px">
+        <input type="checkbox" id="qr_live_bg_proportional" name="bg_proportional"
+               {% if guest_codes_qrcode_live_style.bg_proportional %}checked{% endif %}
+               onchange="updateQrLiveProportionalUi()">
+        <span>Proportionnel à la taille du QR-code détecté</span>
+      </div>
+      <p class="field-hint" style="margin-top:-6px;margin-bottom:14px">
+        Activé : la taille de la forme et celle du texte s'adaptent automatiquement, en direct,
+        à la taille du QR-code repéré devant l'objectif (pour le recouvrir sans le dépasser) —
+        les valeurs « Taille (%) », « Largeur » et « Hauteur » ci-dessus sont alors ignorées.
+      </p>
+
+      <div class="field" id="qr_live_bg_proportional_adjust_field" style="max-width:260px;margin-top:-6px;margin-bottom:14px">
+        <label>Ajustement de la taille automatique (%)</label>
+        <input type="number" name="bg_proportional_adjust_pct" id="qr_live_bg_proportional_adjust_pct"
+               min="-50" max="50" step="5"
+               value="{{ guest_codes_qrcode_live_style.bg_proportional_adjust_pct }}" oninput="updateQrLivePreview()">
+        <p class="field-hint">
+          De -50 % à +50 %. Défaut : 0 %. Rétrécit ou agrandit la taille calculée
+          automatiquement (forme et texte ensemble) — actif uniquement si
+          « Proportionnel » ci-dessus est coché.
+        </p>
+      </div>
+      <p class="field-hint" style="margin-top:-6px;margin-bottom:14px">
+        La forme s'applique aussi en mode « Image de fond » ci-dessous (découpe l'image
+        selon le contour choisi). Cercle, ovale et étoile conviennent mieux à un texte
+        court : les contenus longs peuvent être rognés par les bords ou les pointes. La
+        forme « Cercle » est toujours un vrai disque (hauteur forcée à égalité avec la
+        largeur en taille automatique) — plus le texte est long, plus le disque est grand.
+      </p>
+
+      <div id="qr_bg_image_fields" class="field">
+        <label>Image de fond (PNG, JPG, WEBP)</label>
+        {% if guest_codes_qrcode_live_style.bg_image_url %}
+        <div style="margin-bottom:10px;display:flex;align-items:center;gap:12px">
+          <img src="{{ guest_codes_qrcode_live_style.bg_image_url }}" alt="Fond actuel"
+               style="max-height:50px;border-radius:8px;border:1px solid var(--border)">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer">
+            <input type="checkbox" name="bg_image_delete" style="width:16px;height:16px;accent-color:var(--accent)">
+            Supprimer cette image
+          </label>
+        </div>
+        {% endif %}
+        <input type="file" name="bg_image" accept=".png,.jpg,.jpeg,.webp">
+        <p class="field-hint">Envoyer un nouveau fichier remplace l'image actuelle. Laisser vide pour la conserver.</p>
+      </div>
+    </div>
+
+    <div class="tags-preview-wrap">
+      <p class="tags-preview-label">Aperçu</p>
+      <div class="tags-preview-box" style="justify-content:center">
+        <span class="tag-preview-chip" id="qrLivePreviewChip">https://exemple.fr/ma-galerie</span>
+      </div>
+    </div>
+
+    <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
+  </form>
+</div>
+
+<div class="form-card" style="margin-top:24px">
+  <p class="section-title" style="margin:0 0 4px">Message d'erreur (QR-code détecté mais illisible)</p>
+  <p class="section-hint">
+    Affiché à la même place que le contenu décodé ci-dessus, quand un QR-code est repéré
+    devant l'objectif (marqueurs détectés) sans pouvoir être lu — code trop petit, flou,
+    abîmé... Reprend la forme, la taille et la position réglées ci-dessus ; les champs
+    ci-dessous ne concernent que le contenu du message et ses couleurs.
+  </p>
+
+  <form method="post" enctype="multipart/form-data" action="{{ url_for('admin_guest_codes_set_qrcode_live_error_style') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field">
+      <div class="check-row">
+        <input type="checkbox" id="qr_error_enabled" name="error_enabled"
+               {% if guest_codes_qrcode_live_error_style.enabled %}checked{% endif %}>
+        <span>Afficher un message quand un QR-code est détecté mais illisible</span>
+      </div>
+      <p class="section-hint" style="margin-top:6px">
+        Décoché : ces QR-codes sont simplement ignorés, comme s'ils n'étaient pas présents.
+      </p>
+    </div>
+
+    <div class="field-row" style="gap:14px;align-items:center;margin-bottom:14px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:14px;font-weight:400;color:var(--text);cursor:pointer">
+        <input type="radio" name="error_mode" value="text" id="qr_error_mode_text"
+               {% if guest_codes_qrcode_live_error_style.mode == 'text' %}checked{% endif %}
+               onchange="updateQrLiveErrorModeUi()" style="width:16px;height:16px;accent-color:var(--accent)">
+        Message texte
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:14px;font-weight:400;color:var(--text);cursor:pointer">
+        <input type="radio" name="error_mode" value="image" id="qr_error_mode_image"
+               {% if guest_codes_qrcode_live_error_style.mode == 'image' %}checked{% endif %}
+               onchange="updateQrLiveErrorModeUi()" style="width:16px;height:16px;accent-color:var(--accent)">
+        Image
+      </label>
+    </div>
+
+    <div id="qr_error_text_fields">
+      <div class="field">
+        <label>Texte du message</label>
+        <input type="text" name="error_text" id="qr_error_text" maxlength="120"
+               value="{{ guest_codes_qrcode_live_error_style.text }}" oninput="updateQrLiveErrorPreview()">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Police</label>
+          <select name="error_font" id="qr_error_font" onchange="updateQrLiveErrorPreview()">
+            {% for value, label in guest_codes_fonts %}
+            <option value="{{ value }}" {% if guest_codes_qrcode_live_error_style.font == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Taille du texte (px)</label>
+          <input type="number" name="error_font_size" id="qr_error_font_size" min="8" max="72"
+                 value="{{ guest_codes_qrcode_live_error_style.font_size }}" oninput="updateQrLiveErrorPreview()">
+        </div>
+        <div class="field">
+          <label>Couleur du texte</label>
+          <div class="color-row">
+            <input type="color" id="cp_qr_error_text" value="{{ guest_codes_qrcode_live_error_style.text_color }}"
+                   oninput="document.getElementById('qr_error_text_color').value=this.value; updateQrLiveErrorPreview()">
+            <input type="text" id="qr_error_text_color" name="error_text_color" class="color-hex"
+                   value="{{ guest_codes_qrcode_live_error_style.text_color }}" maxlength="7"
+                   oninput="document.getElementById('cp_qr_error_text').value=this.value; updateQrLiveErrorPreview()">
+          </div>
+        </div>
+      </div>
+      <div class="field" style="max-width:260px">
+        <label>Couleur de fond</label>
+        <div class="color-row">
+          <input type="color" id="cp_qr_error_bg" value="{{ guest_codes_qrcode_live_error_style.bg_color }}"
+                 oninput="document.getElementById('qr_error_bg_color').value=this.value; updateQrLiveErrorPreview()">
+          <input type="text" id="qr_error_bg_color" name="error_bg_color" class="color-hex"
+                 value="{{ guest_codes_qrcode_live_error_style.bg_color }}" maxlength="7"
+                 oninput="document.getElementById('cp_qr_error_bg').value=this.value; updateQrLiveErrorPreview()">
+        </div>
+      </div>
+
+      <div class="tags-preview-wrap" id="qrErrorPreviewWrap">
+        <p class="tags-preview-label">Aperçu</p>
+        <div class="tags-preview-box" style="justify-content:center">
+          <span class="tag-preview-chip" id="qrErrorPreviewChip">QR-code détecté mais illisible</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="qr_error_image_fields" class="field">
+      <label>Image du message (PNG, JPG, WEBP)</label>
+      {% if guest_codes_qrcode_live_error_style.image_url %}
+      <div style="margin-bottom:10px;display:flex;align-items:center;gap:12px">
+        <img src="{{ guest_codes_qrcode_live_error_style.image_url }}" alt="Image actuelle"
+             style="max-height:50px;border-radius:8px;border:1px solid var(--border)">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer">
+          <input type="checkbox" name="error_image_delete" style="width:16px;height:16px;accent-color:var(--accent)">
+          Supprimer cette image
+        </label>
+      </div>
+      {% endif %}
+      <input type="file" name="error_image" accept=".png,.jpg,.jpeg,.webp">
+      <p class="field-hint">
+        Envoyer un nouveau fichier remplace l'image actuelle. Laisser vide pour la conserver.
+        L'image remplace entièrement le texte (pas de superposition).
+      </p>
+    </div>
+
+    <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
+  </form>
+</div>
+
+<script>
+  // Aperçu de l'étiquette QR-code affichée en direct (2 formulaires ci-dessus,
+  // fusionnés dans ce bloc pour ce couplage JS — voir _block_ctx_guest_codes_qr_live,
+  // app.py). L'image de fond n'est prévisualisable que si une image est déjà
+  // enregistrée (un nouveau fichier tout juste sélectionné n'est visible
+  // qu'après enregistrement). Miroir de _QR_LIVE_SHAPE_CSS (app.py) —
+  // uniquement pour l'aperçu local à cette page, la mise en forme réelle sur
+  // le kiosque vient des variables CSS injectées côté serveur dans index.html.
+  (function () {
+    const QR_LIVE_SHAPE_CSS = {
+      pill:    { radius: '999px', clip: 'none', padding: '7px 14px' },
+      rounded: { radius: '14px',  clip: 'none', padding: '7px 14px' },
+      square:  { radius: '0px',   clip: 'none', padding: '7px 14px' },
+      circle:  { radius: '50%',   clip: 'none', padding: '1.5em 1.7em' },
+      oval:    { radius: '50%',   clip: 'none', padding: '0.9em 2.4em' },
+      star:    {
+        radius: '0px',
+        clip: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+        padding: '1.9em 2.1em',
+      },
+    };
+    const QR_LIVE_EXISTING_BG_IMAGE_URL = {{ (guest_codes_qrcode_live_style.bg_image_url or '') | tojson }};
+
+    // Mirroir de _scale_padding_css (app.py) : multiplie chaque valeur
+    // numérique d'un padding CSS par un facteur, unité conservée.
+    function scaleQrLivePadding(paddingCss, scale) {
+      return paddingCss.split(' ').map((token) => {
+        const m = token.match(/^([\d.]+)(px|em)$/);
+        if (!m) return token;
+        return (parseFloat(m[1]) * scale).toFixed(3) + m[2];
+      }).join(' ');
+    }
+
+    // Mirroir de _add_padding_margin_css (app.py) : ajoute une marge (px) fixe
+    // à chaque valeur numérique d'un padding CSS déjà mis à l'échelle.
+    function addQrLivePaddingMargin(paddingCss, extraPx) {
+      if (!extraPx) return paddingCss;
+      return paddingCss.split(' ').map((token) => {
+        const m = token.match(/^([\d.]+)(px|em)$/);
+        if (!m) return token;
+        return `calc(${m[1]}${m[2]} + ${extraPx}px)`;
+      }).join(' ');
+    }
+
+    function updateQrLivePreviewImpl() {
+      const chip = document.getElementById('qrLivePreviewChip');
+      if (!chip) return;
+      const font = document.getElementById('qr_live_font')?.value || '';
+      const size = document.getElementById('qr_live_font_size')?.value || 15;
+      const textColor = document.getElementById('qr_live_text_color')?.value || '#ffffff';
+      const bgMode = document.querySelector('input[name="bg_mode"]:checked')?.value || 'shape';
+      const shape = document.getElementById('qr_live_bg_shape')?.value || 'pill';
+      const proportional = document.getElementById('qr_live_bg_proportional')?.checked || false;
+      const proportionalAdjustPct = Math.max(-50, Math.min(50,
+        Number(document.getElementById('qr_live_bg_proportional_adjust_pct')?.value || 0) || 0));
+      const sizePct = Number(document.getElementById('qr_live_bg_size_pct')?.value || 100) || 100;
+      const widthPx = Number(document.getElementById('qr_live_bg_width_px')?.value || 0) || 0;
+      const heightPx = Number(document.getElementById('qr_live_bg_height_px')?.value || 0) || 0;
+      const marginPx = Math.max(0, Math.min(60, Number(document.getElementById('qr_live_text_margin_px')?.value || 0) || 0));
+      const shapeCss = QR_LIVE_SHAPE_CSS[shape] || QR_LIVE_SHAPE_CSS.pill;
+      chip.style.display = 'inline-flex';
+      chip.style.alignItems = 'center';
+      chip.style.justifyContent = 'center';
+      chip.style.boxSizing = 'border-box';
+      chip.style.fontFamily = font;
+      chip.style.fontSize = size + 'px';
+      chip.style.color = textColor;
+      chip.style.borderRadius = shapeCss.radius;
+      chip.style.clipPath = shapeCss.clip;
+      // Forme « Cercle » : vrai disque (voir bg_aspect_ratio_css, app.py) —
+      // sans effet dès que largeur ET hauteur sont fixées explicitement
+      // ci-dessous (même règle CSS que sur le kiosque réel).
+      chip.style.aspectRatio = (shape === 'circle') ? '1 / 1' : 'auto';
+      if (proportional) {
+        // Calculée en direct à partir du QR-code réellement détecté (voir
+        // renderQrLiveBoxes dans app.js) — pas de taille fixe à prévisualiser
+        // ici, on retombe sur l'ajustement automatique au texte. Pas de marge
+        // additionnelle non plus : le padding réel est forcé à 0 dans ce mode.
+        chip.style.width = 'auto';
+        chip.style.height = 'auto';
+        chip.style.padding = scaleQrLivePadding(shapeCss.padding, 1 + proportionalAdjustPct / 100);
+      } else {
+        chip.style.width = widthPx ? widthPx + 'px' : 'auto';
+        chip.style.height = heightPx ? heightPx + 'px' : 'auto';
+        chip.style.padding = addQrLivePaddingMargin(scaleQrLivePadding(shapeCss.padding, sizePct / 100), marginPx);
+      }
+      if (bgMode === 'image' && QR_LIVE_EXISTING_BG_IMAGE_URL) {
+        chip.style.backgroundImage = `url('${QR_LIVE_EXISTING_BG_IMAGE_URL}')`;
+        chip.style.backgroundSize = '100% 100%';
+        chip.style.backgroundColor = 'transparent';
+      } else {
+        const bgColor = document.getElementById('qr_live_bg_color')?.value || '#0d8b8f';
+        chip.style.backgroundImage = 'none';
+        chip.style.backgroundColor = bgColor;
+      }
+    }
+    window.updateQrLivePreview = updateQrLivePreviewImpl;
+
+    function updateQrLiveBgModeUiImpl() {
+      const mode = document.querySelector('input[name="bg_mode"]:checked')?.value || 'shape';
+      const shapeFields = document.getElementById('qr_bg_shape_fields');
+      const imageFields = document.getElementById('qr_bg_image_fields');
+      if (shapeFields) shapeFields.style.display = mode === 'shape' ? '' : 'none';
+      if (imageFields) imageFields.style.display = mode === 'image' ? '' : 'none';
+      updateQrLivePreviewImpl();
+    }
+    window.updateQrLiveBgModeUi = updateQrLiveBgModeUiImpl;
+
+    // Mode « proportionnel au QR-code détecté » : les champs Taille (%),
+    // Largeur, Hauteur et Marge n'ont alors plus d'effet (padding forcé à 0,
+    // largeur/hauteur recalculées en direct côté client, voir
+    // renderQrLiveBoxes dans app.js) — on les grise pour éviter de laisser
+    // croire qu'ils s'appliquent encore.
+    function updateQrLiveProportionalUiImpl() {
+      const proportional = document.getElementById('qr_live_bg_proportional')?.checked || false;
+      // On grise ces champs (readOnly, pas disabled) plutôt que de les
+      // désactiver : leur valeur reste ainsi soumise et enregistrée comme
+      // repli si l'option est décochée plus tard, au lieu d'être perdue.
+      ['qr_live_bg_size_pct', 'qr_live_bg_width_px', 'qr_live_bg_height_px', 'qr_live_text_margin_px'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.readOnly = proportional;
+        el.closest('.field')?.classList.toggle('field-inactive', proportional);
+      });
+      // Inverse des 3 champs ci-dessus : l'ajustement (%) n'a d'effet QUE si
+      // le mode proportionnel est actif.
+      const adjustEl = document.getElementById('qr_live_bg_proportional_adjust_pct');
+      if (adjustEl) {
+        adjustEl.readOnly = !proportional;
+        adjustEl.closest('.field')?.classList.toggle('field-inactive', !proportional);
+      }
+      updateQrLivePreviewImpl();
+    }
+    window.updateQrLiveProportionalUi = updateQrLiveProportionalUiImpl;
+
+    document.getElementById('qr_live_font')?.addEventListener('change', updateQrLivePreviewImpl);
+    document.getElementById('qr_live_font_size')?.addEventListener('input', updateQrLivePreviewImpl);
+    document.getElementById('qr_live_position')?.addEventListener('change', updateQrLivePreviewImpl);
+    updateQrLiveBgModeUiImpl();
+    updateQrLiveProportionalUiImpl();
+
+    // ── Message d'erreur (QR-code détecté mais illisible) ────────────────────
+    // Bascule texte/image + aperçu, sur le même principe que updateQrLiveBgModeUi
+    // / updateQrLivePreview ci-dessus, mais dans son propre formulaire.
+    function updateQrLiveErrorModeUiImpl() {
+      const mode = document.querySelector('input[name="error_mode"]:checked')?.value || 'text';
+      const textFields = document.getElementById('qr_error_text_fields');
+      const imageFields = document.getElementById('qr_error_image_fields');
+      if (textFields) textFields.style.display = mode === 'text' ? '' : 'none';
+      if (imageFields) imageFields.style.display = mode === 'image' ? '' : 'none';
+      updateQrLiveErrorPreviewImpl();
+    }
+    window.updateQrLiveErrorModeUi = updateQrLiveErrorModeUiImpl;
+
+    function updateQrLiveErrorPreviewImpl() {
+      const chip = document.getElementById('qrErrorPreviewChip');
+      if (!chip) return;
+      const font = document.getElementById('qr_error_font')?.value || '';
+      const size = document.getElementById('qr_error_font_size')?.value || 15;
+      const textColor = document.getElementById('qr_error_text_color')?.value || '#ffffff';
+      const bgColor = document.getElementById('qr_error_bg_color')?.value || '#b26e0a';
+      const text = document.getElementById('qr_error_text')?.value || 'QR-code détecté mais illisible';
+      // Reprend la forme (radius/clip/padding/aspect-ratio) du texte décodé
+      // avec succès, partagée entre les deux formulaires (voir formulaire
+      // "Apparence" ci-dessus — même héritage CSS que sur le kiosque réel,
+      // .qr-live-label.too-small ne surchargeant que couleurs/police/taille).
+      const shape = document.getElementById('qr_live_bg_shape')?.value || 'pill';
+      const shapeCss = QR_LIVE_SHAPE_CSS[shape] || QR_LIVE_SHAPE_CSS.pill;
+      const sizePct = Number(document.getElementById('qr_live_bg_size_pct')?.value || 100) || 100;
+      const marginPx = Math.max(0, Math.min(60, Number(document.getElementById('qr_live_text_margin_px')?.value || 0) || 0));
+      chip.style.display = 'inline-flex';
+      chip.style.alignItems = 'center';
+      chip.style.justifyContent = 'center';
+      chip.style.boxSizing = 'border-box';
+      chip.textContent = text;
+      chip.style.fontFamily = font;
+      chip.style.fontSize = size + 'px';
+      chip.style.color = textColor;
+      chip.style.borderRadius = shapeCss.radius;
+      chip.style.clipPath = shapeCss.clip;
+      chip.style.aspectRatio = (shape === 'circle') ? '1 / 1' : 'auto';
+      chip.style.padding = addQrLivePaddingMargin(scaleQrLivePadding(shapeCss.padding, sizePct / 100), marginPx);
+      chip.style.backgroundImage = 'none';
+      chip.style.backgroundColor = bgColor;
+    }
+    window.updateQrLiveErrorPreview = updateQrLiveErrorPreviewImpl;
+
+    updateQrLiveErrorModeUiImpl();
+  })();
+</script>

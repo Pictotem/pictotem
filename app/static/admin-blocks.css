@@ -260,3 +260,21 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
 .share-link-box img { width: 110px; height: 110px; background: #fff; border-radius: 10px; padding: 6px; }
 .share-link-url { font-size: 13px; color: var(--muted); word-break: break-all; max-width: 340px; }
 .empty-hint { color: var(--muted); font-size: 14px; }
+
+/* Blocs « Réglages » / « Génération de QR-codes imprimables » / « Purger par
+   plage de dates » / « Purger les N premiers » / « Add-on — Détection de
+   QR-codes » / « Apparence du QR-code affiché en direct » (guest_codes_*) —
+   dupliqué depuis admin_guest_codes.html, qui reste la source visuelle
+   "native". .field input[type=number] est déjà dupliqué ci-dessus (vague 4,
+   largeur fixe 110px) ; guest_codes a aussi besoin d'un input[type=text] non
+   contraint en largeur (compagnon de .color-hex, qui reste, lui, à largeur
+   fixe) et de .field-inactive (grisage des champs de taille manuelle en
+   mode « proportionnel », voir updateQrLiveProportionalUi dans
+   templates/blocks/guest_codes_qr_live.html). */
+.field input[type=text] {
+  background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px;
+}
+.field:last-child { margin-bottom: 0; }
+.field-inactive { opacity: .45; }
+.field-inactive input { cursor: not-allowed; }

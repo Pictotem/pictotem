@@ -1,0 +1,17 @@
+<div class="form-card">
+  <p class="section-hint">
+    Longueur des codes générés automatiquement ci-dessous. Ne change pas les codes déjà
+    créés — utiliser « Régénérer » sur une ligne pour lui appliquer la nouvelle longueur.
+  </p>
+  <form method="post" action="{{ url_for('admin_guest_codes_set_code_settings') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+    <input type="hidden" name="q" value="{{ guest_codes_q }}">
+    <div class="field">
+      <label>Longueur du code</label>
+      <input type="number" name="code_length" min="2" max="10" value="{{ guest_codes_settings.code_length }}">
+      <p class="field-hint">Entre 2 et 10 chiffres.</p>
+    </div>
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+</div>

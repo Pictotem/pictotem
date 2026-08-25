@@ -2839,6 +2839,12 @@ _ADMIN_BLOCKS = {
     'screensaver_settings':    {'title': "Paramètres",                          'default_page': 'screensaver', 'template': 'blocks/screensaver_settings.html',    'context_fn': '_block_ctx_screensaver_settings'},
     'guest_uploads_settings':   {'title': "Paramètres",                         'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_settings.html',   'context_fn': '_block_ctx_guest_uploads_settings'},
     'guest_uploads_share_link': {'title': "Lien de partage",                    'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_share_link.html', 'context_fn': '_block_ctx_guest_uploads_share_link'},
+    'guest_codes_code_settings':    {'title': "Réglages",                                    'default_page': 'guest_codes', 'template': 'blocks/guest_codes_code_settings.html',    'context_fn': '_block_ctx_guest_codes_code_settings'},
+    'guest_codes_qr_export':        {'title': "Génération de QR-codes imprimables",          'default_page': 'guest_codes', 'template': 'blocks/guest_codes_qr_export.html',        'context_fn': '_block_ctx_guest_codes_qr_export'},
+    'guest_codes_purge_date':       {'title': "Purger par plage de dates",                   'default_page': 'guest_codes', 'template': 'blocks/guest_codes_purge_date.html',       'context_fn': None},
+    'guest_codes_purge_first_n':    {'title': "Purger les N premiers",                       'default_page': 'guest_codes', 'template': 'blocks/guest_codes_purge_first_n.html',    'context_fn': '_block_ctx_guest_codes_purge_first_n'},
+    'guest_codes_qrcode_settings':  {'title': "Add-on — Détection de QR-codes",              'default_page': 'guest_codes', 'template': 'blocks/guest_codes_qrcode_settings.html',  'context_fn': '_block_ctx_guest_codes_qrcode_settings'},
+    'guest_codes_qr_live':          {'title': "Apparence du QR-code affiché en direct",      'default_page': 'guest_codes', 'template': 'blocks/guest_codes_qr_live.html',          'context_fn': '_block_ctx_guest_codes_qr_live'},
 }
 # (slug, libellé affiché dans le menu « Déplacer vers », endpoint Flask) —
 # seulement les tuiles qui exécutent déjà la boucle de rendu de blocs
@@ -2858,6 +2864,7 @@ _ADMIN_PAGES = [
     ('slideshow',   'Slideshow Best Of',    'admin_slideshow'),
     ('screensaver', 'Écran de veille',      'admin_screensaver'),
     ('guest_uploads', 'Upload invités',     'admin_guest_uploads'),
+    ('guest_codes',   'Codes invités',      'admin_guest_codes'),
 ]
 _ADMIN_PAGE_SLUGS = {slug for slug, _label, _endpoint in _ADMIN_PAGES}
 
@@ -3046,6 +3053,54 @@ def _block_ctx_guest_uploads_share_link() -> dict:
     share_url = (request.host_url.rstrip('/') + url_for('guest_upload_page', token=s['token'])
                 if s['token'] else None)
     return {'guest_uploads_settings': s, 'guest_uploads_share_url': share_url}
+
+
+def _block_ctx_guest_codes_code_settings() -> dict:
+    return {'guest_codes_settings': _guest_codes_settings()}
+
+
+def _block_ctx_guest_codes_qr_export() -> dict:
+    return {
+        'guest_codes_qr_export': _guest_codes_qr_export_settings(),
+        'guest_codes_qr_formats': _GUEST_CODES_QR_FORMATS,
+        'guest_codes_qr_text_contents': _GUEST_CODES_QR_TEXT_CONTENTS,
+        'guest_codes_qr_text_positions': _GUEST_CODES_QR_TEXT_POSITIONS,
+        'guest_codes_qr_size_units': _GUEST_CODES_QR_SIZE_UNITS,
+        'guest_codes_fonts': _all_fonts(),
+    }
+
+
+def _block_ctx_guest_codes_purge_first_n() -> dict:
+    # Copie namensée de _GUEST_CODES_SORTS (déjà passé au niveau page par la
+    # route GET sous 'guest_codes_sorts', mais uniquement sur /admin/guest_codes)
+    # : ce bloc doit continuer à afficher un menu d'ordre correct même
+    # déplacé sur une autre tuile, dont la route GET ne passe pas cette
+    # variable — voir le principe déjà appliqué à screensaver_settings
+    # (vague 8) pour le même genre de dépendance.
+    return {'guest_codes_purge_sorts': _GUEST_CODES_SORTS}
+
+
+def _block_ctx_guest_codes_qrcode_settings() -> dict:
+    return {
+        'guest_codes_qrcode_settings': _qrcode_settings(),
+        'guest_codes_qrcode_burn_settings': _qr_burn_settings(),
+    }
+
+
+def _block_ctx_guest_codes_qr_live() -> dict:
+    # Fusionne qrcode_live_style et qrcode_live_error_style dans UN seul
+    # bloc (2 routes de sauvegarde distinctes, voir admin_guest_codes_set_
+    # qrcode_live_style / _error_style) : le formulaire du message d'erreur
+    # lit en direct (JS) forme/taille/marge du formulaire "Apparence" —
+    # couplage identique au principe déjà appliqué à votes_activation /
+    # buttons_style (vagues 4-5), voir templates/blocks/guest_codes_qr_live.html.
+    return {
+        'guest_codes_qrcode_live_style': _qr_live_style_settings(),
+        'guest_codes_qrcode_live_error_style': _qr_live_error_style_settings(),
+        'guest_codes_qrcode_live_positions': _QR_LIVE_POSITIONS,
+        'guest_codes_qrcode_live_shapes': _QR_LIVE_SHAPES,
+        'guest_codes_fonts': _all_fonts(),
+    }
 
 
 @app.route('/admin/ui/block_collapse', methods=['POST'])
@@ -4192,16 +4247,20 @@ def admin_guest_codes_qr_archive():
 @require_admin_auth
 @csrf_protect
 def admin_guest_codes():
+    """Tuile « Codes invités ». « Réglages », « Génération de QR-codes
+    imprimables », « Purger par plage de dates », « Purger les N premiers »,
+    « Add-on — Détection de QR-codes » et « Apparence du QR-code affiché en
+    direct » (qui fusionne qrcode_live_style et qrcode_live_error_style : le
+    message d'erreur lit en direct forme/taille/marge du premier formulaire,
+    voir templates/blocks/guest_codes_qr_live.html) ont chacune leur propre
+    route dédiée ci-dessous et rejoignent le système de blocs. « Codes
+    invités » (CRUD + import CSV) reste ici, hors du système de blocs : ce
+    n'est pas un réglage mais la gestion du contenu lui-même (comme
+    admin_captures/admin_emails)."""
     if request.method == 'POST':
-        action = request.form.get('action', 'code_settings')
+        action = request.form.get('action', 'guest_code_new')
         sort = request.form.get('sort', 'created_desc')
         q = request.form.get('q', '')
-
-        if action == 'code_settings':
-            raw_len = (request.form.get('code_length') or '').strip()
-            if raw_len.isdigit() and 2 <= int(raw_len) <= 10:
-                set_setting('guest_codes.code_length', raw_len)
-            return _admin_guest_codes_redirect(success='Réglages mis à jour.', sort=sort, q=q)
 
         if action == 'guest_code_new':
             texte = (request.form.get('texte') or '').strip()[:250]
@@ -4301,209 +4360,245 @@ def admin_guest_codes():
             msg = f'Import terminé : {created} créé(s), {updated} mis à jour, {skipped} ignoré(s).'
             return _admin_guest_codes_redirect(success=msg, sort=sort, q=q)
 
-        if action == 'guest_codes_purge_date':
-            date_from = (request.form.get('purge_date_from') or '').strip()
-            date_to = (request.form.get('purge_date_to') or '').strip()
-            if not date_from and not date_to:
-                return _admin_guest_codes_redirect(
-                    error='Indiquez au moins une date (début ou fin).', sort=sort, q=q)
-            count = purge_guest_codes_by_date(date_from, date_to)
-            return _admin_guest_codes_redirect(success=f'{count} code(s) supprimé(s).', sort=sort, q=q)
+        abort(404)
 
-        if action == 'guest_codes_purge_first_n':
-            raw_n = (request.form.get('purge_n') or '').strip()
-            purge_sort = request.form.get('purge_sort', 'created_asc')
-            if purge_sort not in dict(_GUEST_CODES_SORTS):
-                purge_sort = 'created_asc'
-            if not raw_n.isdigit() or int(raw_n) < 1:
-                return _admin_guest_codes_redirect(error='Nombre invalide.', sort=sort, q=q)
-            count = purge_guest_codes_first_n(int(raw_n), purge_sort)
-            return _admin_guest_codes_redirect(success=f'{count} code(s) supprimé(s).', sort=sort, q=q)
-
-        if action == 'qr_export_settings':
-            fmt = request.form.get('format', 'png')
-            if fmt in dict(_GUEST_CODES_QR_FORMATS):
-                set_setting('guest_codes.qr_export.format', fmt)
-            unit = request.form.get('size_unit', 'cm')
-            if unit in dict(_GUEST_CODES_QR_SIZE_UNITS):
-                set_setting('guest_codes.qr_export.size_unit', unit)
-            raw_size = (request.form.get('size_value') or '').strip()
-            try:
-                if 0.5 <= float(raw_size) <= 30:
-                    set_setting('guest_codes.qr_export.size_value', raw_size)
-            except ValueError:
-                pass
-            raw_dpi = (request.form.get('dpi') or '').strip()
-            if raw_dpi.isdigit() and 72 <= int(raw_dpi) <= 1200:
-                set_setting('guest_codes.qr_export.dpi', raw_dpi)
-            bg_color = (request.form.get('bg_color') or '').strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
-                set_setting('guest_codes.qr_export.bg_color', bg_color)
-            code_color = (request.form.get('code_color') or '').strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', code_color):
-                set_setting('guest_codes.qr_export.code_color', code_color)
-            set_setting('guest_codes.qr_export.text_enabled', '1' if request.form.get('text_enabled') else '0')
-            text_content = request.form.get('text_content', 'texte')
-            if text_content in dict(_GUEST_CODES_QR_TEXT_CONTENTS):
-                set_setting('guest_codes.qr_export.text_content', text_content)
-            text_position = request.form.get('text_position', 'below')
-            if text_position in dict(_GUEST_CODES_QR_TEXT_POSITIONS):
-                set_setting('guest_codes.qr_export.text_position', text_position)
-            text_font = request.form.get('text_font', '')
-            if text_font in dict(_all_fonts()):
-                set_setting('guest_codes.qr_export.text_font', text_font)
-            raw_text_size = (request.form.get('text_size_mm') or '').strip()
-            try:
-                if 1 <= float(raw_text_size) <= 30:
-                    set_setting('guest_codes.qr_export.text_size_mm', raw_text_size)
-            except ValueError:
-                pass
-            text_color = (request.form.get('text_color') or '').strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', text_color):
-                set_setting('guest_codes.qr_export.text_color', text_color)
-            raw_gap = (request.form.get('text_gap_mm') or '').strip()
-            try:
-                if 0 <= float(raw_gap) <= 30:
-                    set_setting('guest_codes.qr_export.text_gap_mm', raw_gap)
-            except ValueError:
-                pass
-            return _admin_guest_codes_redirect(success='Réglages de génération QR mis à jour.', sort=sort, q=q)
-
-        if action == 'qrcode_settings':
-            set_setting('qrcode.enabled', '1' if request.form.get('enabled') else '0')
-            set_setting('qrcode.live_overlay', '1' if request.form.get('live_overlay') else '0')
-            set_setting('qrcode.burn_into_media.photo', '1' if request.form.get('burn_photo') else '0')
-            set_setting('qrcode.burn_into_media.video', '1' if request.form.get('burn_video') else '0')
-            set_setting('qrcode.burn_into_media.strip', '1' if request.form.get('burn_strip') else '0')
-            return redirect(url_for('admin_guest_codes', ok='Réglages QR-code mis à jour.'))
-
-        if action == 'qrcode_live_style':
-            bg_mode = request.form.get('bg_mode', 'shape')
-            set_setting('qrcode.live_style.bg_mode', bg_mode if bg_mode in ('shape', 'image') else 'shape')
-            bg_shape = request.form.get('bg_shape', 'pill')
-            set_setting('qrcode.live_style.bg_shape', bg_shape if bg_shape in _QR_LIVE_SHAPE_CSS else 'pill')
-            raw_bg_size = (request.form.get('bg_size_pct') or '100').strip()
-            set_setting('qrcode.live_style.bg_size_pct',
-                        str(max(50, min(300, int(raw_bg_size)))) if raw_bg_size.isdigit() else '100')
-            raw_bg_width = (request.form.get('bg_width_px') or '').strip()
-            set_setting('qrcode.live_style.bg_width_px',
-                        str(max(20, min(800, int(raw_bg_width)))) if raw_bg_width.isdigit() else '')
-            raw_bg_height = (request.form.get('bg_height_px') or '').strip()
-            set_setting('qrcode.live_style.bg_height_px',
-                        str(max(20, min(800, int(raw_bg_height)))) if raw_bg_height.isdigit() else '')
-            raw_text_margin = (request.form.get('text_margin_px') or '0').strip()
-            set_setting('qrcode.live_style.text_margin_px',
-                        str(max(0, min(60, int(raw_text_margin)))) if raw_text_margin.isdigit() else '0')
-            set_setting('qrcode.live_style.bg_proportional',
-                        '1' if request.form.get('bg_proportional') else '0')
-            raw_prop_adjust = (request.form.get('bg_proportional_adjust_pct') or '0').strip()
-            try:
-                prop_adjust = max(-50, min(50, int(raw_prop_adjust)))
-            except ValueError:
-                prop_adjust = 0
-            set_setting('qrcode.live_style.bg_proportional_adjust_pct', str(prop_adjust))
-            bg_color = (request.form.get('bg_color') or '').strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
-                set_setting('qrcode.live_style.bg_color', bg_color)
-            font_value = request.form.get('font', '')
-            if font_value in dict(_all_fonts()):
-                set_setting('qrcode.live_style.font', font_value)
-            raw_size = (request.form.get('font_size') or '').strip()
-            if raw_size.isdigit() and int(raw_size) >= 8:
-                set_setting('qrcode.live_style.font_size', raw_size)
-            text_color = (request.form.get('text_color') or '').strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', text_color):
-                set_setting('qrcode.live_style.text_color', text_color)
-            position = request.form.get('position', 'above')
-            set_setting('qrcode.live_style.position', position if position in dict(_QR_LIVE_POSITIONS) else 'above')
-
-            file = request.files.get('bg_image')
-            if file and file.filename:
-                ext = Path(file.filename).suffix.lower()
-                if ext not in _QR_LIVE_ALLOWED_EXT:
-                    return redirect(url_for('admin_guest_codes', err="Format non supporté pour l'image de fond (PNG, JPG, WEBP)."))
-                QR_LIVE_DIR.mkdir(parents=True, exist_ok=True)
-                old = get_setting('qrcode.live_style.bg_image_filename', '')
-                if old:
-                    (QR_LIVE_DIR / old).unlink(missing_ok=True)
-                safe = f'qr-live-bg-{int(datetime.now().timestamp() * 1000)}{ext}'
-                file.save(str(QR_LIVE_DIR / safe))
-                set_setting('qrcode.live_style.bg_image_filename', safe)
-            elif request.form.get('bg_image_delete'):
-                old = get_setting('qrcode.live_style.bg_image_filename', '')
-                if old:
-                    (QR_LIVE_DIR / old).unlink(missing_ok=True)
-                    set_setting('qrcode.live_style.bg_image_filename', '')
-
-            return redirect(url_for('admin_guest_codes', ok='Apparence du texte QR-code mise à jour.'))
-
-        if action == 'qrcode_live_error_style':
-            set_setting('qrcode.live_error_style.enabled',
-                        '1' if request.form.get('error_enabled') else '0')
-            error_mode = request.form.get('error_mode', 'text')
-            set_setting('qrcode.live_error_style.mode', error_mode if error_mode in ('text', 'image') else 'text')
-            error_text = (request.form.get('error_text') or '').strip()
-            set_setting('qrcode.live_error_style.text', error_text or 'QR-code détecté mais illisible')
-            error_font_value = request.form.get('error_font', '')
-            if error_font_value in dict(_all_fonts()):
-                set_setting('qrcode.live_error_style.font', error_font_value)
-            raw_error_size = (request.form.get('error_font_size') or '').strip()
-            if raw_error_size.isdigit() and int(raw_error_size) >= 8:
-                set_setting('qrcode.live_error_style.font_size', raw_error_size)
-            error_text_color = (request.form.get('error_text_color') or '').strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', error_text_color):
-                set_setting('qrcode.live_error_style.text_color', error_text_color)
-            error_bg_color = (request.form.get('error_bg_color') or '').strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', error_bg_color):
-                set_setting('qrcode.live_error_style.bg_color', error_bg_color)
-
-            error_file = request.files.get('error_image')
-            if error_file and error_file.filename:
-                ext = Path(error_file.filename).suffix.lower()
-                if ext not in _QR_LIVE_ALLOWED_EXT:
-                    return redirect(url_for('admin_guest_codes', err="Format non supporté pour l'image du message d'erreur (PNG, JPG, WEBP)."))
-                QR_LIVE_DIR.mkdir(parents=True, exist_ok=True)
-                old = get_setting('qrcode.live_error_style.image_filename', '')
-                if old:
-                    (QR_LIVE_DIR / old).unlink(missing_ok=True)
-                safe = f'qr-live-error-{int(datetime.now().timestamp() * 1000)}{ext}'
-                error_file.save(str(QR_LIVE_DIR / safe))
-                set_setting('qrcode.live_error_style.image_filename', safe)
-            elif request.form.get('error_image_delete'):
-                old = get_setting('qrcode.live_error_style.image_filename', '')
-                if old:
-                    (QR_LIVE_DIR / old).unlink(missing_ok=True)
-                    set_setting('qrcode.live_error_style.image_filename', '')
-
-            return redirect(url_for('admin_guest_codes', ok="Message d'erreur QR-code mis à jour."))
-
+    blocks, block_context = _admin_render_blocks('guest_codes')
     list_sort = request.args.get('sort', 'created_desc')
     if list_sort not in dict(_GUEST_CODES_SORTS):
         list_sort = 'created_desc'
     list_q = request.args.get('q', '')
     return render_template(
         'admin_guest_codes.html', config=CONFIG,
-        guest_codes_settings=_guest_codes_settings(),
+        blocks=blocks, current_page='guest_codes', admin_pages=_ADMIN_PAGES,
         guest_codes=list_guest_codes(sort=list_sort, q=list_q),
         guest_codes_sorts=_GUEST_CODES_SORTS,
         guest_codes_bulk_max=_GUEST_CODES_BULK_MAX,
-        guest_codes_qr_export=_guest_codes_qr_export_settings(),
-        guest_codes_qr_formats=_GUEST_CODES_QR_FORMATS,
-        guest_codes_qr_text_contents=_GUEST_CODES_QR_TEXT_CONTENTS,
-        guest_codes_qr_text_positions=_GUEST_CODES_QR_TEXT_POSITIONS,
-        guest_codes_qr_size_units=_GUEST_CODES_QR_SIZE_UNITS,
         guest_codes_sort=list_sort,
         guest_codes_q=list_q,
-        tags_fonts=_all_fonts(),
-        qrcode_settings=_qrcode_settings(),
-        qrcode_burn_settings=_qr_burn_settings(),
-        qrcode_live_style=_qr_live_style_settings(),
-        qrcode_live_error_style=_qr_live_error_style_settings(),
-        qrcode_live_positions=_QR_LIVE_POSITIONS,
-        qrcode_live_shapes=_QR_LIVE_SHAPES,
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
+        **block_context,
     )
+
+
+@app.route('/admin/guest_codes/code_settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes_set_code_settings():
+    sort = request.form.get('sort', 'created_desc')
+    q = request.form.get('q', '')
+    raw_len = (request.form.get('code_length') or '').strip()
+    if raw_len.isdigit() and 2 <= int(raw_len) <= 10:
+        set_setting('guest_codes.code_length', raw_len)
+    return _admin_block_redirect('guest_codes_code_settings', sort=sort, q=q, ok='Réglages mis à jour.')
+
+
+@app.route('/admin/guest_codes/qr_export_settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes_set_qr_export_settings():
+    sort = request.form.get('sort', 'created_desc')
+    q = request.form.get('q', '')
+    fmt = request.form.get('format', 'png')
+    if fmt in dict(_GUEST_CODES_QR_FORMATS):
+        set_setting('guest_codes.qr_export.format', fmt)
+    unit = request.form.get('size_unit', 'cm')
+    if unit in dict(_GUEST_CODES_QR_SIZE_UNITS):
+        set_setting('guest_codes.qr_export.size_unit', unit)
+    raw_size = (request.form.get('size_value') or '').strip()
+    try:
+        if 0.5 <= float(raw_size) <= 30:
+            set_setting('guest_codes.qr_export.size_value', raw_size)
+    except ValueError:
+        pass
+    raw_dpi = (request.form.get('dpi') or '').strip()
+    if raw_dpi.isdigit() and 72 <= int(raw_dpi) <= 1200:
+        set_setting('guest_codes.qr_export.dpi', raw_dpi)
+    bg_color = (request.form.get('bg_color') or '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
+        set_setting('guest_codes.qr_export.bg_color', bg_color)
+    code_color = (request.form.get('code_color') or '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', code_color):
+        set_setting('guest_codes.qr_export.code_color', code_color)
+    set_setting('guest_codes.qr_export.text_enabled', '1' if request.form.get('text_enabled') else '0')
+    text_content = request.form.get('text_content', 'texte')
+    if text_content in dict(_GUEST_CODES_QR_TEXT_CONTENTS):
+        set_setting('guest_codes.qr_export.text_content', text_content)
+    text_position = request.form.get('text_position', 'below')
+    if text_position in dict(_GUEST_CODES_QR_TEXT_POSITIONS):
+        set_setting('guest_codes.qr_export.text_position', text_position)
+    text_font = request.form.get('text_font', '')
+    if text_font in dict(_all_fonts()):
+        set_setting('guest_codes.qr_export.text_font', text_font)
+    raw_text_size = (request.form.get('text_size_mm') or '').strip()
+    try:
+        if 1 <= float(raw_text_size) <= 30:
+            set_setting('guest_codes.qr_export.text_size_mm', raw_text_size)
+    except ValueError:
+        pass
+    text_color = (request.form.get('text_color') or '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', text_color):
+        set_setting('guest_codes.qr_export.text_color', text_color)
+    raw_gap = (request.form.get('text_gap_mm') or '').strip()
+    try:
+        if 0 <= float(raw_gap) <= 30:
+            set_setting('guest_codes.qr_export.text_gap_mm', raw_gap)
+    except ValueError:
+        pass
+    return _admin_block_redirect('guest_codes_qr_export', sort=sort, q=q, ok='Réglages de génération QR mis à jour.')
+
+
+@app.route('/admin/guest_codes/purge_date', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes_purge_date():
+    sort = request.form.get('sort', 'created_desc')
+    q = request.form.get('q', '')
+    date_from = (request.form.get('purge_date_from') or '').strip()
+    date_to = (request.form.get('purge_date_to') or '').strip()
+    if not date_from and not date_to:
+        return _admin_block_redirect('guest_codes_purge_date', sort=sort, q=q,
+                                      err='Indiquez au moins une date (début ou fin).')
+    count = purge_guest_codes_by_date(date_from, date_to)
+    return _admin_block_redirect('guest_codes_purge_date', sort=sort, q=q, ok=f'{count} code(s) supprimé(s).')
+
+
+@app.route('/admin/guest_codes/purge_first_n', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes_purge_first_n():
+    sort = request.form.get('sort', 'created_desc')
+    q = request.form.get('q', '')
+    raw_n = (request.form.get('purge_n') or '').strip()
+    purge_sort = request.form.get('purge_sort', 'created_asc')
+    if purge_sort not in dict(_GUEST_CODES_SORTS):
+        purge_sort = 'created_asc'
+    if not raw_n.isdigit() or int(raw_n) < 1:
+        return _admin_block_redirect('guest_codes_purge_first_n', sort=sort, q=q, err='Nombre invalide.')
+    count = purge_guest_codes_first_n(int(raw_n), purge_sort)
+    return _admin_block_redirect('guest_codes_purge_first_n', sort=sort, q=q, ok=f'{count} code(s) supprimé(s).')
+
+
+@app.route('/admin/guest_codes/qrcode_settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes_set_qrcode_settings():
+    set_setting('qrcode.enabled', '1' if request.form.get('enabled') else '0')
+    set_setting('qrcode.live_overlay', '1' if request.form.get('live_overlay') else '0')
+    set_setting('qrcode.burn_into_media.photo', '1' if request.form.get('burn_photo') else '0')
+    set_setting('qrcode.burn_into_media.video', '1' if request.form.get('burn_video') else '0')
+    set_setting('qrcode.burn_into_media.strip', '1' if request.form.get('burn_strip') else '0')
+    return _admin_block_redirect('guest_codes_qrcode_settings', ok='Réglages QR-code mis à jour.')
+
+
+@app.route('/admin/guest_codes/qrcode_live_style', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes_set_qrcode_live_style():
+    bg_mode = request.form.get('bg_mode', 'shape')
+    set_setting('qrcode.live_style.bg_mode', bg_mode if bg_mode in ('shape', 'image') else 'shape')
+    bg_shape = request.form.get('bg_shape', 'pill')
+    set_setting('qrcode.live_style.bg_shape', bg_shape if bg_shape in _QR_LIVE_SHAPE_CSS else 'pill')
+    raw_bg_size = (request.form.get('bg_size_pct') or '100').strip()
+    set_setting('qrcode.live_style.bg_size_pct',
+                str(max(50, min(300, int(raw_bg_size)))) if raw_bg_size.isdigit() else '100')
+    raw_bg_width = (request.form.get('bg_width_px') or '').strip()
+    set_setting('qrcode.live_style.bg_width_px',
+                str(max(20, min(800, int(raw_bg_width)))) if raw_bg_width.isdigit() else '')
+    raw_bg_height = (request.form.get('bg_height_px') or '').strip()
+    set_setting('qrcode.live_style.bg_height_px',
+                str(max(20, min(800, int(raw_bg_height)))) if raw_bg_height.isdigit() else '')
+    raw_text_margin = (request.form.get('text_margin_px') or '0').strip()
+    set_setting('qrcode.live_style.text_margin_px',
+                str(max(0, min(60, int(raw_text_margin)))) if raw_text_margin.isdigit() else '0')
+    set_setting('qrcode.live_style.bg_proportional',
+                '1' if request.form.get('bg_proportional') else '0')
+    raw_prop_adjust = (request.form.get('bg_proportional_adjust_pct') or '0').strip()
+    try:
+        prop_adjust = max(-50, min(50, int(raw_prop_adjust)))
+    except ValueError:
+        prop_adjust = 0
+    set_setting('qrcode.live_style.bg_proportional_adjust_pct', str(prop_adjust))
+    bg_color = (request.form.get('bg_color') or '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
+        set_setting('qrcode.live_style.bg_color', bg_color)
+    font_value = request.form.get('font', '')
+    if font_value in dict(_all_fonts()):
+        set_setting('qrcode.live_style.font', font_value)
+    raw_size = (request.form.get('font_size') or '').strip()
+    if raw_size.isdigit() and int(raw_size) >= 8:
+        set_setting('qrcode.live_style.font_size', raw_size)
+    text_color = (request.form.get('text_color') or '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', text_color):
+        set_setting('qrcode.live_style.text_color', text_color)
+    position = request.form.get('position', 'above')
+    set_setting('qrcode.live_style.position', position if position in dict(_QR_LIVE_POSITIONS) else 'above')
+
+    file = request.files.get('bg_image')
+    if file and file.filename:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in _QR_LIVE_ALLOWED_EXT:
+            return _admin_block_redirect('guest_codes_qr_live',
+                                          err="Format non supporté pour l'image de fond (PNG, JPG, WEBP).")
+        QR_LIVE_DIR.mkdir(parents=True, exist_ok=True)
+        old = get_setting('qrcode.live_style.bg_image_filename', '')
+        if old:
+            (QR_LIVE_DIR / old).unlink(missing_ok=True)
+        safe = f'qr-live-bg-{int(datetime.now().timestamp() * 1000)}{ext}'
+        file.save(str(QR_LIVE_DIR / safe))
+        set_setting('qrcode.live_style.bg_image_filename', safe)
+    elif request.form.get('bg_image_delete'):
+        old = get_setting('qrcode.live_style.bg_image_filename', '')
+        if old:
+            (QR_LIVE_DIR / old).unlink(missing_ok=True)
+            set_setting('qrcode.live_style.bg_image_filename', '')
+
+    return _admin_block_redirect('guest_codes_qr_live', ok='Apparence du texte QR-code mise à jour.')
+
+
+@app.route('/admin/guest_codes/qrcode_live_error_style', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes_set_qrcode_live_error_style():
+    set_setting('qrcode.live_error_style.enabled',
+                '1' if request.form.get('error_enabled') else '0')
+    error_mode = request.form.get('error_mode', 'text')
+    set_setting('qrcode.live_error_style.mode', error_mode if error_mode in ('text', 'image') else 'text')
+    error_text = (request.form.get('error_text') or '').strip()
+    set_setting('qrcode.live_error_style.text', error_text or 'QR-code détecté mais illisible')
+    error_font_value = request.form.get('error_font', '')
+    if error_font_value in dict(_all_fonts()):
+        set_setting('qrcode.live_error_style.font', error_font_value)
+    raw_error_size = (request.form.get('error_font_size') or '').strip()
+    if raw_error_size.isdigit() and int(raw_error_size) >= 8:
+        set_setting('qrcode.live_error_style.font_size', raw_error_size)
+    error_text_color = (request.form.get('error_text_color') or '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', error_text_color):
+        set_setting('qrcode.live_error_style.text_color', error_text_color)
+    error_bg_color = (request.form.get('error_bg_color') or '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', error_bg_color):
+        set_setting('qrcode.live_error_style.bg_color', error_bg_color)
+
+    error_file = request.files.get('error_image')
+    if error_file and error_file.filename:
+        ext = Path(error_file.filename).suffix.lower()
+        if ext not in _QR_LIVE_ALLOWED_EXT:
+            return _admin_block_redirect('guest_codes_qr_live',
+                                          err="Format non supporté pour l'image du message d'erreur (PNG, JPG, WEBP).")
+        QR_LIVE_DIR.mkdir(parents=True, exist_ok=True)
+        old = get_setting('qrcode.live_error_style.image_filename', '')
+        if old:
+            (QR_LIVE_DIR / old).unlink(missing_ok=True)
+        safe = f'qr-live-error-{int(datetime.now().timestamp() * 1000)}{ext}'
+        error_file.save(str(QR_LIVE_DIR / safe))
+        set_setting('qrcode.live_error_style.image_filename', safe)
+    elif request.form.get('error_image_delete'):
+        old = get_setting('qrcode.live_error_style.image_filename', '')
+        if old:
+            (QR_LIVE_DIR / old).unlink(missing_ok=True)
+            set_setting('qrcode.live_error_style.image_filename', '')
+
+    return _admin_block_redirect('guest_codes_qr_live', ok="Message d'erreur QR-code mis à jour.")
 
 
 @app.route('/admin/guest_codes/export/csv')

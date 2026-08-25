@@ -1,0 +1,30 @@
+<div class="form-card">
+  <p class="section-hint">Suppression définitive et irréversible — n'affecte que la table des codes invités, jamais les captures ou les tags déjà posés.</p>
+
+  <form method="post" action="{{ url_for('admin_guest_codes_purge_first_n') }}"
+        onsubmit="return confirm('Supprimer définitivement les N premiers codes invités selon l\'ordre choisi ?')">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+    <input type="hidden" name="q" value="{{ guest_codes_q }}">
+    <div class="field-row" style="align-items:end">
+      <div class="field">
+        <label>Nombre</label>
+        <input type="number" name="purge_n" min="1" step="1" placeholder="ex. 50">
+      </div>
+      <div class="field">
+        <label>Ordre (« premiers » = début de cet ordre)</label>
+        <select name="purge_sort">
+          {% for value, label in guest_codes_purge_sorts %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <button class="btn-primary" type="submit" style="background:#c84040">Purger</button>
+      </div>
+    </div>
+    <p class="field-hint">
+      Ex. « Date de création (ancien → récent) » + 50 supprime les 50 codes les plus anciens.
+    </p>
+  </form>
+</div>

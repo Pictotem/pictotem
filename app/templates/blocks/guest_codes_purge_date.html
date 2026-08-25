@@ -1,0 +1,24 @@
+<div class="form-card">
+  <p class="section-hint">Suppression définitive et irréversible — n'affecte que la table des codes invités, jamais les captures ou les tags déjà posés.</p>
+
+  <form method="post" action="{{ url_for('admin_guest_codes_purge_date') }}"
+        onsubmit="return confirm('Supprimer définitivement tous les codes invités créés dans cette plage de dates ?')">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+    <input type="hidden" name="q" value="{{ guest_codes_q }}">
+    <div class="field-row" style="align-items:end">
+      <div class="field">
+        <label>Du</label>
+        <input type="date" name="purge_date_from">
+      </div>
+      <div class="field">
+        <label>Au</label>
+        <input type="date" name="purge_date_to">
+      </div>
+      <div class="field">
+        <button class="btn-primary" type="submit" style="background:#c84040">Purger cette plage</button>
+      </div>
+    </div>
+    <p class="field-hint">Au moins une des deux dates est requise. Borne « Au » incluse (jusqu'à 23:59:59 ce jour-là).</p>
+  </form>
+</div>
