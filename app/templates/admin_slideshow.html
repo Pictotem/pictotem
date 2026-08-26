@@ -160,6 +160,17 @@
     }
     .promo-quill-editor .ql-editor table { border-collapse: collapse; }
     .promo-quill-editor .ql-editor td { border: 1px solid var(--border); padding: 4px 8px; }
+    /* white-space: pre-wrap -- un retour a la ligne tape DANS une cellule
+       (voir static/promo-editor.js, PromoTable) est un simple caractere
+       de retour a la ligne dans le texte (comportement natif du
+       navigateur en edition, cf. contenteditable des cellules), qu'un
+       <td> ignore par defaut (white-space: normal le fusionnerait avec la
+       ligne suivante) -- necessaire ici pour l'apercu du mode source
+       (#source-preview-*, qui n'est pas lui-meme editable et ne beneficie
+       donc pas du comportement par defaut du navigateur), et repris a
+       l'identique sur la page publique (voir bestof.html). */
+    .promo-quill-editor .ql-editor td, .promo-quill-editor .ql-editor th,
+    .promo-source-preview td, .promo-source-preview th { white-space: pre-wrap; }
 
     /* Police / taille / couleur de texte (WYSIWYG) + mode source + modale
        tableau (voir static/promo-editor.js) -- remplacent les anciens
@@ -273,6 +284,26 @@
     .media-picker-item:hover { border-color: var(--accent); }
     .media-picker-item img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; }
     .media-picker-empty { color: var(--muted); font-size: 13px; grid-column: 1 / -1; }
+    /* v2.0.8 : "Mes images" (voir promo_content_images, app.py) -- 3e onglet
+       du sélecteur, propre bibliothèque d'images à insérer dans le texte
+       (Créer/Lister/Supprimer, en plus du Lire déjà offert par Médiathèque/
+       Captures). .media-picker-panel généralise le mécanisme de bascule
+       d'onglet à un panneau qui n'est pas qu'une simple grille de vignettes
+       (voir static/promo-editor.js) -- Médiathèque/Captures gardent EN PLUS
+       leur classe .media-picker-grid (mise en page grille, inchangée). */
+    .media-picker-panel.hidden { display: none; }
+    .media-picker-upload-form { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                                 margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+    .media-picker-upload-form input[type=text] {
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 8px; padding: 6px 10px; font-size: 13px; max-width: 160px;
+    }
+    .media-picker-content-card { background: var(--surface-2); border: 1px solid var(--border);
+                                  border-radius: 10px; overflow: hidden; }
+    .media-picker-content-card .media-picker-item { border-radius: 0; }
+    .media-picker-content-delete { width: 100%; background: none; border: none; border-top: 1px solid var(--border);
+                                    color: #e57373; font-size: 11px; padding: 5px; cursor: pointer; }
+    .media-picker-content-delete:hover { background: rgba(180,40,40,.15); }
 
     .promo-bg-picker { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); margin-bottom: 4px; }
     .promo-bg-choice { display: block; cursor: pointer; border: 2px solid transparent; position: relative; }
@@ -481,11 +512,31 @@
           </div>
 
           <div class="field">
-            <label>Marge avec le bord de l'écran (px)</label>
-            <input type="number" name="content_padding" min="0" max="300"
-                   value="{{ page.content_padding }}" style="max-width:140px">
+            <label>Marges avec les bords de l'écran (px)</label>
+            <div class="field-row" style="gap:14px">
+              <div class="field" style="max-width:140px">
+                <label style="font-weight:400;font-size:12px;color:var(--muted)">Haute</label>
+                <input type="number" name="content_padding_top" min="0" max="300"
+                       value="{{ page.content_padding_top }}">
+              </div>
+              <div class="field" style="max-width:140px">
+                <label style="font-weight:400;font-size:12px;color:var(--muted)">Basse</label>
+                <input type="number" name="content_padding_bottom" min="0" max="300"
+                       value="{{ page.content_padding_bottom }}">
+              </div>
+              <div class="field" style="max-width:140px">
+                <label style="font-weight:400;font-size:12px;color:var(--muted)">Gauche</label>
+                <input type="number" name="content_padding_left" min="0" max="300"
+                       value="{{ page.content_padding_left }}">
+              </div>
+              <div class="field" style="max-width:140px">
+                <label style="font-weight:400;font-size:12px;color:var(--muted)">Droite</label>
+                <input type="number" name="content_padding_right" min="0" max="300"
+                       value="{{ page.content_padding_right }}">
+              </div>
+            </div>
             <p class="upload-hint">
-              Espace entre le bloc texte/QR code et les bords de l'écran (le fond, lui, couvre
+              Espace entre le bloc texte/QR code et chaque bord de l'écran (le fond, lui, couvre
               toujours l'écran en entier).
             </p>
           </div>
@@ -524,6 +575,13 @@
 
           <div class="field">
             <label>Texte</label>
+            <div class="field-row" style="align-items:center;gap:10px;margin-bottom:10px">
+              <input type="color" name="editor_bg_color" value="{{ page.editor_bg_color }}">
+              <span style="font-size:12px;color:var(--muted)">
+                Couleur de fond du champ ci-dessous, pour distinguer le texte pendant l'édition --
+                sans aucun effet sur l'affichage final (/bestof).
+              </span>
+            </div>
             <div id="toolbar-{{ page.id }}" class="promo-quill-toolbar">
               <select class="ql-font" title="Police">
                 <option value="" selected>Police…</option>
@@ -558,7 +616,8 @@
               <button type="button" class="promo-ql-source-btn" title="Voir / éditer le code source (HTML + CSS)">&lt;/&gt;</button>
             </div>
             <div id="wysiwyg-{{ page.id }}" class="promo-quill-editor"
-                 data-placeholder="Un photobox est à votre disposition !">{{ page.html_content | safe }}</div>
+                 data-placeholder="Un photobox est à votre disposition !"
+                 style="background-color:{{ page.editor_bg_color }}">{{ page.html_content | safe }}</div>
             <div id="source-wrap-{{ page.id }}" class="promo-source-wrap hidden">
               <div class="promo-source-col">
                 <label class="promo-source-label">Code source (balises HTML + styles CSS en ligne)</label>
@@ -566,7 +625,7 @@
               </div>
               <div class="promo-source-col">
                 <label class="promo-source-label">Aperçu en direct</label>
-                <div id="source-preview-{{ page.id }}" class="promo-source-preview ql-editor"></div>
+                <div id="source-preview-{{ page.id }}" class="promo-source-preview ql-editor" style="background-color:{{ page.editor_bg_color }}"></div>
               </div>
             </div>
             <input type="hidden" name="html_content">
@@ -617,10 +676,15 @@
   </div>
 
   <!-- Sélecteur d'image du WYSIWYG (partagé par toutes les pages promo) —
-       voir static/promo-editor.js. Deux onglets : Médiathèque (médias
+       voir static/promo-editor.js. Trois onglets : Médiathèque (médias
        « site » agrégés depuis la tuile Médiathèque, voir
-       _promo_media_library côté serveur) et Captures (dernières photos
-       visiteurs, voir _promo_capture_library). -->
+       _promo_media_library côté serveur, LECTURE SEULE ici), Captures
+       (dernières photos visiteurs, voir _promo_capture_library, LECTURE
+       SEULE) et Mes images (v2.0.8 -- bibliothèque DÉDIÉE au texte des
+       pages promo, CRUD complet directement dans cet onglet : ajout via le
+       formulaire d'upload, suppression par image, voir
+       promo_content_images/db.py et les routes admin_promo_content_image_*
+       ci-dessous dans app.py). -->
   <!-- Barre flottante d'une image sélectionnée dans le WYSIWYG (alignement +
        suppression ; le redimensionnement se fait par glisser sur le coin de
        l'image elle-même — voir .wysiwyg-img-selected ci-dessus et
@@ -679,6 +743,7 @@
             <button type="button" data-tp-action="row-below">+ en dessous</button>
             <button type="button" data-tp-action="row-delete" class="table-props-danger">Supprimer</button>
           </div>
+          <p class="table-props-hint">Cliquez directement dans une case pour la modifier : la touche Entrée y fait un retour à la ligne (n'ajoute plus de ligne/colonne).</p>
         </div>
 
         <div class="table-props-group" data-mode="edit">
@@ -693,6 +758,21 @@
             <input type="number" id="tp-row-height" min="10" max="2000">
             <button type="button" data-tp-action="apply-row-height">Appliquer</button>
           </div>
+          <div class="table-props-row">
+            <label>Largeur totale du tableau (px)</label>
+            <input type="number" id="tp-table-width" min="10" max="4000">
+            <button type="button" data-tp-action="apply-table-width">Appliquer</button>
+          </div>
+        </div>
+
+        <div class="table-props-group" data-mode="edit">
+          <h4>Espacement entre les cellules</h4>
+          <div class="table-props-row">
+            <label>Espacement (px)</label>
+            <input type="number" id="tp-cell-spacing" min="0" max="100" value="0">
+            <button type="button" data-tp-action="apply-spacing">Appliquer</button>
+          </div>
+          <p class="table-props-hint">0 = cellules jointives (bordures fusionnées). Une valeur supérieure sépare les cellules.</p>
         </div>
 
         <div class="table-props-group" data-mode="edit">
@@ -753,11 +833,12 @@
         <div class="media-picker-tabs">
           <button type="button" class="media-picker-tab active" data-tab="site">Médiathèque</button>
           <button type="button" class="media-picker-tab" data-tab="captures">Captures</button>
+          <button type="button" class="media-picker-tab" data-tab="promo">Mes images</button>
         </div>
         <button type="button" class="media-picker-close" aria-label="Fermer">✕</button>
       </div>
       <div class="media-picker-body">
-        <div class="media-picker-grid" data-panel="site">
+        <div class="media-picker-grid media-picker-panel" data-panel="site">
           {% for m in media_library %}
           <button type="button" class="media-picker-item" data-url="{{ m.url }}" title="{{ m.label }}">
             <img src="{{ m.url }}" alt="{{ m.label }}" loading="lazy">
@@ -766,7 +847,7 @@
           <p class="media-picker-empty">Aucun média dans la Médiathèque.</p>
           {% endfor %}
         </div>
-        <div class="media-picker-grid hidden" data-panel="captures">
+        <div class="media-picker-grid media-picker-panel hidden" data-panel="captures">
           {% for m in capture_library %}
           <button type="button" class="media-picker-item" data-url="{{ m.url }}" title="{{ m.label }}">
             <img src="{{ m.thumb_url }}" alt="{{ m.label }}" loading="lazy">
@@ -774,6 +855,34 @@
           {% else %}
           <p class="media-picker-empty">Aucune capture disponible.</p>
           {% endfor %}
+        </div>
+        <div class="media-picker-panel hidden" data-panel="promo">
+          <form method="post" action="{{ url_for('admin_promo_content_image_upload') }}"
+                enctype="multipart/form-data" class="media-picker-upload-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <label class="upload-label" for="promo-content-image-input" style="margin:0">Ajouter une image…</label>
+            <input type="file" id="promo-content-image-input" name="image" accept=".png,.jpg,.jpeg,.webp" required
+                   onchange="document.getElementById('promo-content-image-name').textContent = this.files[0]?.name || ''">
+            <span id="promo-content-image-name" style="font-size:12px;color:var(--muted)"></span>
+            <input type="text" name="label" maxlength="80" placeholder="Nom (optionnel)">
+            <button type="submit" class="btn-primary">Ajouter</button>
+          </form>
+          <div class="media-picker-grid">
+            {% for m in promo_content_images %}
+            <div class="media-picker-content-card">
+              <button type="button" class="media-picker-item" data-url="{{ m.url }}" title="{{ m.label }}">
+                <img src="{{ m.url }}" alt="{{ m.label }}" loading="lazy">
+              </button>
+              <form method="post" action="{{ url_for('admin_promo_content_image_delete', image_id=m.id) }}"
+                    onsubmit="return confirm('Supprimer cette image ? Elle restera visible là où elle a déjà été insérée dans un texte, mais deviendra une image cassée.')">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="media-picker-content-delete">✕ Supprimer</button>
+              </form>
+            </div>
+            {% else %}
+            <p class="media-picker-empty">Aucune image ajoutée pour l'instant -- utilisez le formulaire ci-dessus.</p>
+            {% endfor %}
+          </div>
         </div>
       </div>
     </div>

@@ -70,6 +70,114 @@
   }
   Quill.register(StyledImage, true);
 
+  // v2.0.5 : tableaux -- remplace le module `table` natif de Quill (retiré
+  // de la config plus bas), qui gérait les lignes/cellules comme des blots
+  // Delta à part entière. En pratique ce module (basique, prévu pour un
+  // usage minimal) casse dès qu'on tape un retour à la ligne DANS une
+  // cellule -- Quill intercepte Entrée pour scinder "la ligne courante" au
+  // niveau du Delta, une opération que la structure d'une TableCell ne
+  // supporte pas, et le clavier se retrouve dans un état incohérent
+  // (nouvelles cellules/lignes fantômes, contenu qui se mélange...).
+  //
+  // À la place : chaque tableau est un unique blot "embed" (comme une image
+  // ou une vidéo Quill) -- Quill le traite comme un bloc opaque et ne
+  // touche plus JAMAIS à ce qu'il y a dedans. À l'intérieur, un <table>
+  // HTML ordinaire dont chaque cellule est contenteditable="true" : la
+  // frappe, Entrée, Retour arrière, Ctrl+B/I/U... y sont gérés nativement
+  // par le navigateur, exactement comme dans un <textarea> ou n'importe
+  // quel contenteditable "normal" -- plus aucune interférence du modèle
+  // Delta de Quill. `contenteditable` n'est qu'un attribut d'édition : il
+  // n'est jamais autorisé par sanitize_promo_html (utils.py) et disparaît
+  // donc automatiquement à l'enregistrement (la page publique /bestof
+  // affiche un tableau normal, non éditable).
+  //
+  // Gestion des lignes/colonnes, largeur/hauteur, bordure, marge, padding,
+  // espacement entre cellules et couleur : mutation DIRECTE du DOM (ajout/
+  // suppression de <tr>/<td>, styles en ligne) -- voir la section « Modale
+  // Propriétés du tableau » plus bas. Plus de coordination avec un module
+  // Quill : le tableau n'étant plus qu'un bloc opaque pour Quill, il n'y a
+  // plus de blots internes à garder synchronisés.
+  const BlockEmbed = Quill.import('blots/block/embed');
+  const Delta = Quill.import('delta');
+
+  function _makeCellsEditable(table) {
+    // contenteditable="false" sur le <table> lui-même, "true" seulement sur
+    // chaque cellule : c'est ce qui transforme chaque cellule en véritable
+    // "îlot" d'édition indépendant (structure editable > non-editable >
+    // editable, standard et bien supportée par tous les navigateurs),
+    // plutôt qu'un simple attribut redondant hérité du contenteditable="true"
+    // déjà posé par Quill sur tout l'éditeur (.ql-editor). SANS cette
+    // frontière, les cellules ne forment jamais de région d'édition à part :
+    // le focus/la sélection restent rattachés à l'éditeur Quill dans son
+    // ensemble, et le comportement natif d'Entrée (insertParagraph) agit au
+    // niveau de CET ensemble -- pas au niveau de la cellule -- ce qui,
+    // vérifié empiriquement, fait disparaître le texte tapé après Entrée au
+    // lieu de simplement l'insérer sur une nouvelle ligne DANS la cellule.
+    table.setAttribute('contenteditable', 'false');
+    table.querySelectorAll('td, th').forEach(function (cell) {
+      cell.setAttribute('contenteditable', 'true');
+      // Une cellule totalement vide ne reçoit pas le curseur de façon
+      // fiable dans tous les navigateurs -- un <br> vide (comme les <p>
+      // vides de Quill lui-même) lui donne une hauteur de ligne cliquable.
+      if (!cell.hasChildNodes()) cell.appendChild(document.createElement('br'));
+    });
+  }
+
+  function _buildTableBody(rows, cols) {
+    const tbody = document.createElement('tbody');
+    for (let r = 0; r < rows; r += 1) {
+      const tr = document.createElement('tr');
+      for (let c = 0; c < cols; c += 1) {
+        const td = document.createElement('td');
+        td.appendChild(document.createElement('br'));
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    return tbody;
+  }
+
+  class PromoTable extends BlockEmbed {
+    static create(value) {
+      const node = super.create(value);
+      if (value && typeof value === 'object' && typeof value.innerHTML === 'string') {
+        // Recharge un tableau déjà enregistré (page existante, y compris
+        // créée par l'ancien module table Quill -- même structure HTML
+        // <tbody>/<tr>/<td>, voir sanitize_promo_html) : on réutilise son
+        // HTML tel quel, seule la ré-édition (contenteditable) est ajoutée.
+        node.innerHTML = value.innerHTML;
+        if (value.style) node.setAttribute('style', value.style);
+      } else {
+        const rows = (value && value.rows) || 3;
+        const cols = (value && value.cols) || 3;
+        node.appendChild(_buildTableBody(rows, cols));
+      }
+      _makeCellsEditable(node);
+      // Un tableau se comporte comme un bloc opaque pour Quill (Enter,
+      // Retour arrière, frappe... y sont gérés nativement par le
+      // navigateur à l'intérieur des cellules) -- on empêche donc les
+      // évènements clavier nés dans une cellule de remonter jusqu'aux
+      // raccourcis globaux de Quill (module Keyboard, écouté sur
+      // quill.root), qui tenterait sinon de les interpréter au niveau du
+      // Delta et produirait des effets de bord incohérents (exactement le
+      // bug que ce blot remplace). 'keydown' suffit : Quill n'écoute que
+      // les évènements clavier, jamais 'input'/'beforeinput' pour ses
+      // raccourcis de structure.
+      node.addEventListener('keydown', function (e) { e.stopPropagation(); });
+      return node;
+    }
+    static value() {
+      // Jamais lu : le contenu réel est toujours relu depuis le DOM
+      // (quill.root.innerHTML, voir l'écouteur 'submit' plus bas), jamais
+      // depuis le Delta de Quill -- seule une valeur non vide est requise
+      // pour que Quill considère ce blot valide.
+      return true;
+    }
+  }
+  PromoTable.blotName = 'promo-table';
+  PromoTable.tagName = 'TABLE';
+  Quill.register(PromoTable, true);
+
   // ── Une instance Quill par page promo ───────────────────────────────────
   // Map id de conteneur ("wysiwyg-<page.id>") -> instance Quill, pour
   // retrouver la bonne instance à l'envoi du formulaire (voir tout en bas).
@@ -78,6 +186,14 @@
   document.querySelectorAll('.promo-quill-editor').forEach(function (editorEl) {
     const toolbarEl = document.getElementById('toolbar-' + editorEl.id.replace(/^wysiwyg-/, ''));
     if (!toolbarEl) return;
+    // Le HTML initial (page déjà enregistrée, voir {{ page.html_content }}
+    // côté template) est retiré AVANT d'instancier Quill, puis réinjecté
+    // juste après via dangerouslyPasteHTML (voir plus bas) -- sinon Quill le
+    // convertirait dès son constructeur, AVANT que notre clipboard matcher
+    // pour <table> (ci-dessous) n'ait pu être enregistré, et un tableau déjà
+    // enregistré serait décomposé en texte au premier chargement de la page.
+    const initialHtml = editorEl.innerHTML;
+    editorEl.innerHTML = '';
     const quill = new Quill(editorEl, {
       theme: 'snow',
       // Quill lit son placeholder via l'option JS ci-dessous (jamais un
@@ -95,10 +211,39 @@
             image: function () { openMediaPicker(quill); },
           },
         },
-        table: true,
+        // Plus de module `table` natif de Quill (voir PromoTable ci-dessus)
+        // -- un tableau existant dans le HTML initial de l'éditeur (page
+        // déjà enregistrée) est reconnu par le clipboard matcher enregistré
+        // juste après l'instanciation, ci-dessous.
       },
     });
     quillInstances.set(editorEl.id, quill);
+
+    // Reconnaît un <table> déjà présent dans le HTML initial (page promo
+    // existante, y compris enregistrée par l'ancien module table Quill) ou
+    // collé depuis ailleurs, et le convertit en blot PromoTable (ci-dessus)
+    // plutôt que de le laisser Quill essayer de le décomposer en lignes/
+    // paragraphes (ce qui casserait sa structure). L'admin est seul à
+    // fournir ce contenu (voir sanitize_promo_html, utils.py) -- pas de
+    // risque à en relire le HTML tel quel.
+    quill.clipboard.addMatcher('table', function (node) {
+      const tbody = node.querySelector('tbody');
+      return new Delta().insert({
+        'promo-table': {
+          innerHTML: tbody ? tbody.outerHTML : node.innerHTML,
+          style: node.getAttribute('style') || '',
+        },
+      });
+    });
+
+    // Réinjection du contenu initial, maintenant que le matcher <table>
+    // ci-dessus est en place (voir commentaire plus haut) -- 'silent' : ce
+    // n'est pas une action de l'admin, Quill ne doit pas la verser dans
+    // l'historique (Ctrl+Z ne doit pas faire disparaître le contenu déjà
+    // enregistré au premier undo).
+    if (initialHtml && initialHtml.trim()) {
+      quill.clipboard.dangerouslyPasteHTML(initialHtml, 'silent');
+    }
 
     // v2.0.4 : le bouton tableau ouvre désormais la modale « Propriétés du
     // tableau » (voir #table-props-modal, admin_slideshow.html, et la
@@ -224,7 +369,13 @@
         t.classList.toggle('active', t === tab);
       });
       const wanted = tab.getAttribute('data-tab');
-      modal.querySelectorAll('.media-picker-grid').forEach(function (g) {
+      // v2.0.8 : .media-picker-panel (pas .media-picker-grid) -- généralise
+      // la bascule d'onglet à un panneau qui n'est pas qu'une simple grille
+      // de vignettes (voir "Mes images", qui ajoute un formulaire d'upload
+      // au-dessus de sa grille) ; Médiathèque/Captures portent les DEUX
+      // classes (voir admin_slideshow.html) et gardent leur mise en page
+      // grille inchangée.
+      modal.querySelectorAll('.media-picker-panel').forEach(function (g) {
         g.classList.toggle('hidden', g.getAttribute('data-panel') !== wanted);
       });
       return;
@@ -483,55 +634,69 @@
   // ── Modale « Propriétés du tableau » (voir #table-props-modal, template)
   // ────────────────────────────────────────────────────────────────────
   // Un seul jeu de contrôles partagé par toutes les pages promo (comme le
-  // sélecteur média ci-dessus). Deux registres bien séparés :
-  //  - structure (insérer/supprimer ligne/colonne/tableau) : passe TOUJOURS
-  //    par this.quill.getModule('table') pour garder le Delta interne de
-  //    Quill cohérent avec le DOM -- jamais de manipulation DOM directe ici ;
-  //  - mise en forme (largeur/hauteur/bordure/marge/padding/couleur) :
-  //    mutation DIRECTE du style des éléments <table>/<tr>/<td> concernés,
-  //    comme pour le redimensionnement d'image plus haut -- pas de format
-  //    Quill dédié pour ces réglages, mais innerHTML lu à l'envoi du
-  //    formulaire (voir plus haut) capture bien le style ainsi posé.
+  // sélecteur média ci-dessus). Plus de module `table` Quill à interroger
+  // (voir PromoTable plus haut : un tableau est un unique bloc opaque pour
+  // Quill) -- TOUT ici (structure ligne/colonne, largeur/hauteur, bordure,
+  // marge, padding, espacement, couleur) est de la manipulation DOM
+  // DIRECTE sur le <table>/<tr>/<td> concerné, lu à l'envoi du formulaire
+  // via innerHTML (voir plus haut) comme n'importe quel autre style posé
+  // dans l'éditeur.
   //
-  // getTable() du module table (this.quill.getModule('table').getTable())
-  // s'appuie sur la sélection Quill COURANTE (this.quill.getSelection(),
-  // sans forcer le focus) -- avant chaque action structurelle, on rappelle
-  // donc explicitement quill.getSelection(true) pour restaurer le focus et
-  // la dernière sélection connue (perdue dès qu'on clique dans la modale,
-  // hors de l'éditeur), exactement comme le fait déjà le bouton d'insertion
-  // de tableau ou le sélecteur média ci-dessus.
+  // Le contexte (quel tableau/ligne/cellule/colonne éditer) n'est donc plus
+  // dérivé de la sélection Quill (qui n'a plus aucune visibilité sur
+  // l'intérieur d'un tableau, désormais hors de son modèle Delta), mais du
+  // dernier focus natif reçu par une cellule contenteditable -- écouteur
+  // 'focusin' ci-dessous, qui se déclenche à chaque clic/Tab dans une
+  // cellule, exactement comme le ferait n'importe quel <textarea> ou champ
+  // de formulaire ordinaire.
   let _tpQuill = null;
   let _tpTableEl = null;
   let _tpRowEl = null;
   let _tpCellEl = null;
   let _tpColIndex = -1;
 
+  document.addEventListener('focusin', function (e) {
+    const cell = e.target.closest
+      ? e.target.closest('.promo-quill-editor table td, .promo-quill-editor table th')
+      : null;
+    if (!cell) return;
+    const table = cell.closest('table');
+    const row = cell.closest('tr');
+    const editorEl = cell.closest('.promo-quill-editor');
+    if (!table || !row || !editorEl) return;
+    _tpTableEl = table;
+    _tpRowEl = row;
+    _tpCellEl = cell;
+    _tpColIndex = Array.prototype.indexOf.call(row.children, cell);
+    _tpQuill = quillInstances.get(editorEl.id) || _tpQuill;
+  });
+
   function _tpModal() { return document.getElementById('table-props-modal'); }
 
-  function _tpRefreshFromSelection(quill) {
-    const table = quill.getModule('table');
-    const [tableBlot, rowBlot, cellBlot] = table.getTable();
-    if (!tableBlot || !rowBlot || !cellBlot) {
-      _tpTableEl = null; _tpRowEl = null; _tpCellEl = null; _tpColIndex = -1;
-      return false;
-    }
-    _tpTableEl = tableBlot.domNode;
-    _tpRowEl = rowBlot.domNode;
-    _tpCellEl = cellBlot.domNode;
-    _tpColIndex = (typeof cellBlot.cellOffset === 'function') ? cellBlot.cellOffset() : -1;
-    return true;
-  }
-
+  // Mode édition seulement si le dernier focus enregistré ci-dessus pointe
+  // encore vers un tableau de CE MÊME éditeur Quill (celui dont le bouton
+  // tableau vient d'être cliqué) et toujours présent dans le document (pas
+  // supprimé entre-temps) -- sinon, insertion d'un nouveau tableau.
   function openTableProps(quill) {
-    _tpQuill = quill;
-    const inTable = _tpRefreshFromSelection(quill);
+    const inTable = (_tpQuill === quill) && !!_tpTableEl && _tpTableEl.isConnected;
+    if (!inTable) {
+      _tpQuill = quill;
+      _tpTableEl = null;
+      _tpRowEl = null;
+      _tpCellEl = null;
+      _tpColIndex = -1;
+    }
     const modal = _tpModal();
     if (!modal) return;
     modal.setAttribute('data-mode', inTable ? 'edit' : 'insert');
     const wInput = document.getElementById('tp-col-width');
     const hInput = document.getElementById('tp-row-height');
+    const twInput = document.getElementById('tp-table-width');
+    const spInput = document.getElementById('tp-cell-spacing');
     if (wInput) wInput.value = (inTable && _tpCellEl) ? Math.round(_tpCellEl.getBoundingClientRect().width) : '';
     if (hInput) hInput.value = (inTable && _tpRowEl) ? Math.round(_tpRowEl.getBoundingClientRect().height) : '';
+    if (twInput) twInput.value = (inTable && _tpTableEl) ? Math.round(_tpTableEl.getBoundingClientRect().width) : '';
+    if (spInput) spInput.value = (inTable && _tpTableEl) ? (parseInt(_tpTableEl.style.borderSpacing, 10) || 0) : '';
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
   }
@@ -543,11 +708,118 @@
     modal.setAttribute('aria-hidden', 'true');
   }
 
-  function _tpWithFreshSelection(fn) {
-    if (!_tpQuill) return;
-    _tpQuill.getSelection(true);
-    fn(_tpQuill.getModule('table'));
-    _tpRefreshFromSelection(_tpQuill);
+  // ── Structure (ligne/colonne/tableau) : création/suppression de noeuds
+  // <tr>/<td> ordinaires. Le tableau reste un unique blot Quill (occupant
+  // toujours exactement 1 position dans le Delta, voir PromoTable) -- ces
+  // mutations, purement internes à son DOM, ne concernent jamais Quill.
+  function _tpColCount() {
+    return (_tpRowEl && _tpRowEl.children.length) || 0;
+  }
+
+  function _tpRowCount() {
+    return _tpTableEl ? _tpTableEl.querySelectorAll('tr').length : 0;
+  }
+
+  function _tpMakeCell() {
+    const td = document.createElement('td');
+    td.appendChild(document.createElement('br'));
+    td.setAttribute('contenteditable', 'true');
+    return td;
+  }
+
+  // Repointe le contexte de la modale (et le focus natif du navigateur) sur
+  // une cellule précise -- utilisé après une suppression de ligne/colonne
+  // pour que le contexte reste utilisable (enchaîner plusieurs suppressions
+  // depuis la modale sans devoir re-cliquer dans le tableau à chaque fois),
+  // plutôt que de tout remettre à null comme le ferait une suppression
+  // "à l'aveugle". _tpQuill n'a pas besoin d'être retouché ici : il ne
+  // change jamais tant qu'on reste sur le même tableau.
+  function _tpFocusCell(cell) {
+    if (!cell) { _tpCellEl = null; _tpColIndex = -1; return; }
+    _tpCellEl = cell;
+    _tpRowEl = cell.closest('tr') || _tpRowEl;
+    _tpColIndex = _tpRowEl ? Array.prototype.indexOf.call(_tpRowEl.children, cell) : -1;
+    cell.focus();
+  }
+
+  function _tpInsertColumn(beforeIndex) {
+    if (!_tpTableEl) return;
+    _tpTableEl.querySelectorAll('tr').forEach(function (tr) {
+      const ref = tr.children[beforeIndex] || null;
+      tr.insertBefore(_tpMakeCell(), ref);
+    });
+  }
+
+  function _tpDeleteColumn() {
+    // Toujours garder au moins une colonne -- un tableau à 0 colonne n'a
+    // plus de sens et ne pourrait plus être réédité (plus aucune cellule à
+    // focus pour rouvrir la modale en mode "edit").
+    if (!_tpTableEl || _tpColIndex < 0 || _tpColCount() <= 1) return;
+    const removedIndex = _tpColIndex;
+    _tpTableEl.querySelectorAll('tr').forEach(function (tr) {
+      const cell = tr.children[removedIndex];
+      if (cell) cell.remove();
+    });
+    // Reporte le focus sur la colonne restante la plus proche (même index,
+    // ou la dernière colonne si on supprimait la dernière) plutôt que de
+    // perdre tout contexte -- voir _tpFocusCell ci-dessus.
+    const newColCount = _tpColCount();
+    const newIndex = Math.min(removedIndex, newColCount - 1);
+    _tpFocusCell(_tpRowEl ? _tpRowEl.children[newIndex] : null);
+  }
+
+  function _tpInsertRow(before) {
+    if (!_tpTableEl || !_tpRowEl) return;
+    const cols = _tpColCount() || 1;
+    const tr = document.createElement('tr');
+    for (let c = 0; c < cols; c += 1) tr.appendChild(_tpMakeCell());
+    _tpRowEl.parentNode.insertBefore(tr, before ? _tpRowEl : _tpRowEl.nextSibling);
+  }
+
+  function _tpDeleteRow() {
+    // Même garde-fou que pour les colonnes : au moins une ligne restante.
+    if (!_tpTableEl || !_tpRowEl || _tpRowCount() <= 1) return;
+    const col = _tpColIndex;
+    const fallbackRow = _tpRowEl.nextElementSibling || _tpRowEl.previousElementSibling;
+    _tpRowEl.remove();
+    // Reporte le focus sur la même colonne de la ligne suivante (ou
+    // précédente si on supprimait la dernière ligne) -- voir _tpFocusCell.
+    _tpRowEl = fallbackRow;
+    const cell = fallbackRow ? (fallbackRow.children[col] || fallbackRow.children[fallbackRow.children.length - 1]) : null;
+    _tpFocusCell(cell);
+  }
+
+  function _tpDeleteTable() {
+    if (!_tpTableEl) return;
+    // Le tableau occupe une position dans le Delta de Quill (blot embed) :
+    // on passe par deleteText plutôt qu'un simple .remove() DOM, sinon
+    // Quill garderait une entrée fantôme pointant vers un noeud disparu et
+    // se retrouverait en incohérence dès la prochaine frappe/sélection.
+    const blot = _tpQuill && Quill.find(_tpTableEl);
+    if (blot && _tpQuill) {
+      _tpQuill.deleteText(_tpQuill.getIndex(blot), 1, 'user');
+    } else {
+      _tpTableEl.remove();
+    }
+    _tpTableEl = null;
+    _tpRowEl = null;
+    _tpCellEl = null;
+    _tpColIndex = -1;
+  }
+
+  function _tpApplyTableWidth(px) {
+    if (!_tpTableEl) return;
+    _tpTableEl.style.width = (px > 0) ? (px + 'px') : '';
+  }
+
+  function _tpApplySpacing(px) {
+    if (!_tpTableEl || !(px >= 0)) return;
+    // border-collapse (posé par défaut côté page publique, voir
+    // bestof.html) empêche tout espacement visuel entre cellules -- il faut
+    // repasser en "separate" dès qu'un espacement est demandé, et revenir à
+    // "collapse" à 0 (comportement par défaut, bordures fusionnées).
+    _tpTableEl.style.borderCollapse = (px > 0) ? 'separate' : 'collapse';
+    _tpTableEl.style.borderSpacing = px + 'px';
   }
 
   function _tpApplyColumnWidth(px) {
@@ -616,7 +888,11 @@
     if (e.target.id === 'tp-insert-btn') {
       const cols = parseInt(document.getElementById('tp-insert-cols').value, 10) || 3;
       const rows = parseInt(document.getElementById('tp-insert-rows').value, 10) || 3;
-      _tpWithFreshSelection(function (table) { table.insertTable(rows, cols); });
+      if (_tpQuill) {
+        const range = _tpQuill.getSelection(true) || { index: _tpQuill.getLength() };
+        _tpQuill.insertEmbed(range.index, 'promo-table', { rows: rows, cols: cols }, 'user');
+        _tpQuill.setSelection(range.index + 1, 0, 'silent');
+      }
       _tpClose();
       return;
     }
@@ -625,14 +901,16 @@
     if (!action) return;
     const act = action.getAttribute('data-tp-action');
 
-    if (act === 'col-left') _tpWithFreshSelection(function (t) { t.insertColumnLeft(); });
-    else if (act === 'col-right') _tpWithFreshSelection(function (t) { t.insertColumnRight(); });
-    else if (act === 'col-delete') _tpWithFreshSelection(function (t) { t.deleteColumn(); });
-    else if (act === 'row-above') _tpWithFreshSelection(function (t) { t.insertRowAbove(); });
-    else if (act === 'row-below') _tpWithFreshSelection(function (t) { t.insertRowBelow(); });
-    else if (act === 'row-delete') _tpWithFreshSelection(function (t) { t.deleteRow(); });
+    if (act === 'col-left') _tpInsertColumn(_tpColIndex);
+    else if (act === 'col-right') _tpInsertColumn(_tpColIndex + 1);
+    else if (act === 'col-delete') _tpDeleteColumn();
+    else if (act === 'row-above') _tpInsertRow(true);
+    else if (act === 'row-below') _tpInsertRow(false);
+    else if (act === 'row-delete') _tpDeleteRow();
     else if (act === 'apply-col-width') _tpApplyColumnWidth(parseInt(document.getElementById('tp-col-width').value, 10));
     else if (act === 'apply-row-height') _tpApplyRowHeight(parseInt(document.getElementById('tp-row-height').value, 10));
+    else if (act === 'apply-table-width') _tpApplyTableWidth(parseInt(document.getElementById('tp-table-width').value, 10));
+    else if (act === 'apply-spacing') _tpApplySpacing(parseInt(document.getElementById('tp-cell-spacing').value, 10));
     else if (act === 'apply-border') _tpApplyBorder(
         document.getElementById('tp-border-color').value,
         parseInt(document.getElementById('tp-border-width').value, 10),
@@ -645,6 +923,6 @@
     else if (act === 'apply-bg-row') _tpApplyBackground('row', document.getElementById('tp-bg-color').value);
     else if (act === 'apply-bg-table') _tpApplyBackground('table', document.getElementById('tp-bg-color').value);
     else if (act === 'clear-bg-table') _tpClearBackground();
-    else if (act === 'delete-table') { _tpWithFreshSelection(function (t) { t.deleteTable(); }); _tpClose(); }
+    else if (act === 'delete-table') { _tpDeleteTable(); _tpClose(); }
   });
 })();

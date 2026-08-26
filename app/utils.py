@@ -276,6 +276,15 @@ _PROMO_HTML_TABLE_STYLE_PROPS = {
     'background-color': _PROMO_HTML_COLOR_VALUE_RE,
     'text-align':       re.compile(r'^(left|center|right|justify)$'),
     'vertical-align':   re.compile(r'^(top|middle|bottom)$'),
+    # v2.0.5 : espacement ENTRE les cellules (tableau, voir la modale
+    # « Propriétés du tableau » / static/promo-editor.js) -- border-collapse
+    # doit passer à "separate" pour que border-spacing ait un effet visuel
+    # (avec "collapse", la valeur par défaut posée par bestof.html/
+    # admin_slideshow.html, les bordures fusionnent et tout espacement est
+    # ignoré par le navigateur) : promo-editor.js pose toujours les deux
+    # ensemble, jamais l'un sans l'autre.
+    'border-collapse':  re.compile(r'^(collapse|separate)$'),
+    'border-spacing':   _PROMO_HTML_TABLE_SPACING_RE,
     'margin':           _PROMO_HTML_IMG_MARGIN_SHORTHAND_RE,
     'margin-top':       _PROMO_HTML_IMG_STYLE_PROPS['margin-top'],
     'margin-right':     _PROMO_HTML_IMG_STYLE_PROPS['margin-right'],

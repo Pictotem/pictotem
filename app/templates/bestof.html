@@ -72,9 +72,10 @@
     .promo-overlay { position: absolute; inset: 0; z-index: 1; background: rgba(0,0,0,.42); }
     /* Doit rester au-dessus de .promo-overlay (texte + QR toujours visibles,
        jamais recouverts par le voile d'assombrissement du fond). Le padding
-       (marge avec le bord de l'écran) n'est PAS fixé ici -- posé en style
-       inline par page (voir buildPromoContent() -> page.content_padding,
-       /admin/slideshow -> Pages promo), 60px par défaut si absent. */
+       (marges avec les bords de l'écran) n'est PAS fixé ici -- posé en style
+       inline par page, un côté à la fois (voir buildPromoContent() ->
+       page.content_padding_top/right/bottom/left, /admin/slideshow -> Pages
+       promo), 60px par défaut par côté si absent. */
     .promo-content {
       position: absolute; inset: 0; z-index: 3;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -100,7 +101,15 @@
        du tout). Un style en ligne posé par l'admin (bordure, padding,
        largeur...) l'emporte toujours sur ce défaut. */
     .promo-text table { border-collapse: collapse; margin: 0 auto 16px; }
-    .promo-text td, .promo-text th { padding: 6px 10px; }
+    /* white-space: pre-wrap -- un retour a la ligne tape DANS une
+       cellule (voir promo-editor.js, PromoTable) est enregistre comme un
+       simple caractere de retour a la ligne dans le texte (comportement
+       natif du navigateur en edition), qu'un <td> normal ignore par
+       defaut (white-space: normal fusionnerait les deux lignes) -- cette
+       regle republie ici le meme rendu que dans l'editeur (qui l'obtient
+       gratuitement via son propre contenteditable) sur la page publique,
+       ou aucune cellule n'est editable. */
+    .promo-text td, .promo-text th { padding: 6px 10px; white-space: pre-wrap; }
     /* Image alignée/redimensionnée depuis le WYSIWYG (voir
        static/promo-editor.js) : max-width en filet de sécurité si jamais la
        largeur enregistrée dépassait le conteneur ; clearfix pour que
@@ -244,10 +253,14 @@
     }
     const overlay = page.overlay_enabled !== false ? `<div class="promo-overlay"></div>` : '';
 
-    // Marge entre le bloc texte/QR et le bord de l'écran (voir /admin/slideshow
-    // -> Pages promo -> « Marge avec le bord de l'écran ») -- 60px par défaut,
-    // valeur de l'ancien padding fixe, si le réglage est absent ou invalide.
-    const contentPadding = Number.isFinite(page.content_padding) ? page.content_padding : 60;
+    // Marges entre le bloc texte/QR et chaque bord de l'écran (voir
+    // /admin/slideshow -> Pages promo -> « Marges avec les bords de l'écran »)
+    // -- 60px par défaut par côté, valeur de l'ancien padding fixe unique, si
+    // un réglage est absent ou invalide.
+    const padTop = Number.isFinite(page.content_padding_top) ? page.content_padding_top : 60;
+    const padRight = Number.isFinite(page.content_padding_right) ? page.content_padding_right : 60;
+    const padBottom = Number.isFinite(page.content_padding_bottom) ? page.content_padding_bottom : 60;
+    const padLeft = Number.isFinite(page.content_padding_left) ? page.content_padding_left : 60;
 
     // Le(s) QR code(s) éventuel(s) sont déjà résolus en <img class="promo-inline-qr">
     // à l'intérieur de page.html_content côté serveur (voir _resolve_inline_qrcodes,
@@ -256,7 +269,7 @@
     el.innerHTML = `
       ${bg}
       ${overlay}
-      <div class="promo-content" style="padding:${contentPadding}px">
+      <div class="promo-content" style="padding:${padTop}px ${padRight}px ${padBottom}px ${padLeft}px">
         <div class="promo-text">${page.html_content || ''}</div>
       </div>
     `;

@@ -331,6 +331,26 @@ def init_db():
             created_at TEXT NOT NULL
         )
         """)
+
+        # Images DÉDIÉES au texte des pages promo (v2.0.8, voir
+        # /admin/slideshow -> sélecteur d'image du WYSIWYG, onglet « Mes
+        # images ») -- bibliothèque distincte de promo_backgrounds ci-dessus
+        # (un SEUL fond plein écran par page, jamais inséré dans le texte) et
+        # de la Médiathèque (contenu partagé avec d'autres tuiles, en LECTURE
+        # SEULE ici, voir _promo_media_library dans app.py) : ici, l'admin
+        # ajoute/retire librement des images pensées pour être insérées, à
+        # volonté et dans n'importe quelle page promo, DANS le texte lui-même
+        # (logos, pictogrammes, visuels d'annonce...). CRUD complet dans
+        # app.py (list_promo_content_images, add_promo_content_image,
+        # delete_promo_content_image_db).
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS promo_content_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+        """)
         conn.execute("""
         CREATE TABLE IF NOT EXISTS promo_pages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -405,6 +425,53 @@ def init_db():
         # pas.
         try:
             conn.execute("ALTER TABLE promo_pages ADD COLUMN content_padding INTEGER NOT NULL DEFAULT 60")
+            conn.commit()
+        except Exception:
+            pass  # colonne déjà présente
+
+        # Marges HAUT/DROITE/BAS/GAUCHE indépendantes du bloc texte/QR par
+        # rapport au bord de l'écran (v2.0.6) -- remplace le padding UNIQUE
+        # `content_padding` ci-dessus (v2.0.5) par 4 réglages par côté (voir
+        # /admin/slideshow -> Pages promo). `content_padding` reste dans le
+        # schéma (jamais de DROP COLUMN sur une base SQLite en production --
+        # même principe que les colonnes qr_* plus bas, voir
+        # _PROMO_PAGE_COLUMNS) mais n'est plus lu ni écrit ; sa valeur est
+        # recopiée UNE SEULE FOIS dans les 4 nouvelles colonnes ci-dessous
+        # pour qu'une page ayant déjà personnalisé son padding ne change pas
+        # d'aspect au premier démarrage suivant cette mise à jour. Les 4 ADD
+        # COLUMN + le backfill restent dans le MÊME try (plutôt qu'un try par
+        # colonne comme pour kind/color1/color2/angle plus haut) : le premier
+        # ADD COLUMN échoue seul si la migration a déjà tourné, ce qui
+        # protège aussi le backfill de tourner une seconde fois et d'écraser
+        # un réglage déjà personnalisé par l'admin (aucun commit avant la fin
+        # du bloc -- un plantage en cours de route annule tout, rien n'est
+        # appliqué à moitié).
+        try:
+            conn.execute("ALTER TABLE promo_pages ADD COLUMN content_padding_top INTEGER NOT NULL DEFAULT 60")
+            conn.execute("ALTER TABLE promo_pages ADD COLUMN content_padding_right INTEGER NOT NULL DEFAULT 60")
+            conn.execute("ALTER TABLE promo_pages ADD COLUMN content_padding_bottom INTEGER NOT NULL DEFAULT 60")
+            conn.execute("ALTER TABLE promo_pages ADD COLUMN content_padding_left INTEGER NOT NULL DEFAULT 60")
+            conn.execute(
+                "UPDATE promo_pages SET content_padding_top = content_padding, "
+                "content_padding_right = content_padding, content_padding_bottom = content_padding, "
+                "content_padding_left = content_padding"
+            )
+            conn.commit()
+        except Exception:
+            pass  # colonnes déjà présentes
+
+        # Couleur de fond du champ texte WYSIWYG (v2.0.7) -- PUREMENT une aide
+        # visuelle à l'édition dans l'admin (voir /admin/slideshow -> Pages
+        # promo -> "Couleur de fond du champ (aide à l'édition)") : permet à
+        # l'admin de distinguer un texte de couleur claire (ex. blanc, pensé
+        # pour un fond de page sombre) qui serait sinon illisible sur le fond
+        # neutre de la zone d'édition -- SANS AUCUN effet sur la page publique
+        # /bestof, qui ignore totalement cette colonne (voir bestof.html,
+        # _promo_page_public() ne l'expose jamais à l'API JSON du kiosque).
+        # Défaut blanc ('#ffffff', page vierge classique) : aucun changement
+        # visuel gênant pour les pages déjà enregistrées.
+        try:
+            conn.execute("ALTER TABLE promo_pages ADD COLUMN editor_bg_color TEXT NOT NULL DEFAULT '#ffffff'")
             conn.commit()
         except Exception:
             pass  # colonne déjà présente
@@ -854,6 +921,45 @@ def delete_promo_background_db(bg_id):
     return bg
 
 
+# v2.0.8 : bibliothèque d'images dédiées au TEXTE des pages promo (voir
+# promo_content_images ci-dessus et /admin/slideshow -> sélecteur d'image du
+# WYSIWYG, onglet « Mes images ») -- contrairement à promo_backgrounds
+# ci-dessus, aucune colonne de promo_pages ne référence une image de contenu
+# par id : une fois insérée, elle est copiée en dur (balise <img src=...>)
+# dans html_content, comme n'importe quelle autre image du WYSIWYG (voir
+# sanitize_promo_html, utils.py). Rien à réassigner à la suppression, mais
+# une image déjà insérée dans un texte devient une image cassée si son
+# fichier disparaît -- voir la confirmation côté template.
+def list_promo_content_images():
+    with closing(db_conn()) as conn:
+        rows = conn.execute('SELECT * FROM promo_content_images ORDER BY created_at DESC').fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_promo_content_image(filename, label=''):
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            "INSERT INTO promo_content_images(filename, label, created_at) VALUES(?,?,?)",
+            (filename, label, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def delete_promo_content_image_db(image_id):
+    """Supprime de la DB et retourne le dict (l'appelant gère le fichier sur
+    disque)."""
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM promo_content_images WHERE id = ?', (image_id,)).fetchone()
+        if not row:
+            return None
+        img = dict(row)
+        conn.execute('DELETE FROM promo_content_images WHERE id = ?', (image_id,))
+        conn.commit()
+    return img
+
+
 # v2.0.2 : QR code par page remplacé par une balise {qrcode=...} inline
 # dans le texte WYSIWYG (voir _resolve_inline_qrcodes, app.py) -- les
 # colonnes qr_enabled/qr_text/qr_size/qr_position/qr_color restent dans le
@@ -864,7 +970,14 @@ def delete_promo_background_db(bg_id):
 _PROMO_PAGE_COLUMNS = (
     'active', 'sort_order', 'frequency', 'pause_seconds', 'html_content',
     'background_id', 'background_bg_color', 'overlay_enabled', 'text_font',
-    'text_size', 'text_color', 'effect', 'custom_css', 'content_padding',
+    'text_size', 'text_color', 'effect', 'custom_css',
+    # v2.0.6 : remplace l'ancienne colonne unique 'content_padding' (reste en
+    # base, voir la migration ci-dessus, mais plus jamais écrite ici).
+    'content_padding_top', 'content_padding_right',
+    'content_padding_bottom', 'content_padding_left',
+    # v2.0.7 : aide visuelle à l'édition uniquement (voir la migration
+    # ci-dessus) -- jamais lue par _promo_page_public()/bestof.html.
+    'editor_bg_color',
 )
 
 

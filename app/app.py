@@ -76,7 +76,8 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_custom_fonts, create_custom_font, delete_custom_font_db,
                 list_promo_backgrounds, add_promo_background, add_promo_gradient_background,
                 delete_promo_background_db, list_promo_pages, get_promo_page, create_promo_page,
-                update_promo_page, delete_promo_page_db, move_promo_page)
+                update_promo_page, delete_promo_page_db, move_promo_page,
+                list_promo_content_images, add_promo_content_image, delete_promo_content_image_db)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, generate_qr_png_custom,
                    get_network_info, is_autostart_enabled, make_thumb, message_text,
@@ -5070,6 +5071,11 @@ _SLIDESHOW_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp', '.gif'}
 
 PROMO_DIR = BASE_DIR / 'app' / 'static' / 'promo'
 _PROMO_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp'}
+# v2.0.8 : bibliothèque d'images dédiées au TEXTE des pages promo (voir
+# promo_content_images, db.py) -- dossier séparé de PROMO_DIR ci-dessus
+# (réservé aux fonds plein écran) pour ne jamais mélanger les deux
+# bibliothèques, bien que gérées par le même formulaire de page promo.
+PROMO_CONTENT_DIR = BASE_DIR / 'app' / 'static' / 'promo_content'
 _PROMO_FONTS = [
     ('system-ui, "Segoe UI", sans-serif', 'Par défaut (Segoe UI)'),
     ('Georgia, "Times New Roman", serif', 'Georgia (serif)'),
@@ -5161,7 +5167,12 @@ def _promo_page_public(page: dict) -> dict:
         'background_angle':  page.get('background_angle') or 135,
         'background_bg_color': page.get('background_bg_color') or '#14161a',
         'overlay_enabled': bool(page['overlay_enabled']),
-        'content_padding': page.get('content_padding', 60),
+        # v2.0.6 : 4 marges indépendantes (remplace l'ancien réglage unique
+        # content_padding, voir db.py) -- voir /admin/slideshow -> Pages promo.
+        'content_padding_top':    page.get('content_padding_top', 60),
+        'content_padding_right':  page.get('content_padding_right', 60),
+        'content_padding_bottom': page.get('content_padding_bottom', 60),
+        'content_padding_left':   page.get('content_padding_left', 60),
         # v2.0.4 : text_font/text_size/text_color ne sont plus exposés ici --
         # la mise en forme du texte vit désormais entièrement dans
         # html_content (styles en ligne posés par le WYSIWYG), voir
@@ -5382,6 +5393,10 @@ def admin_slideshow():
         page_label=_admin_page_label('slideshow', 'Slideshow Best Of'),
         promo_pages=list_promo_pages(),
         promo_backgrounds=list_promo_backgrounds(),
+        promo_content_images=[
+            {'id': i['id'], 'url': f"/static/promo_content/{i['filename']}", 'label': i.get('label') or i['filename']}
+            for i in list_promo_content_images()
+        ],
         promo_fonts=_all_fonts(),
         promo_text_sizes=_PROMO_TEXT_SIZES,
         promo_effects=_PROMO_EFFECTS,
@@ -5455,9 +5470,20 @@ def admin_promo_page_update(page_id):
     if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color_value):
         fields['background_bg_color'] = bg_color_value
 
-    raw_padding = (request.form.get('content_padding') or '').strip()
-    if raw_padding.isdigit() and 0 <= int(raw_padding) <= 300:
-        fields['content_padding'] = int(raw_padding)
+    # v2.0.7 : couleur de fond du champ texte WYSIWYG -- aide à l'édition
+    # uniquement (voir db.py), jamais exposée à _promo_page_public()/
+    # bestof.html ci-dessous : aucun effet sur la page publique.
+    editor_bg_value = request.form.get('editor_bg_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', editor_bg_value):
+        fields['editor_bg_color'] = editor_bg_value
+
+    # v2.0.6 : 4 marges indépendantes (haut/droite/bas/gauche) plutôt qu'un
+    # réglage unique -- voir /admin/slideshow -> Pages promo et db.py
+    # (content_padding_top/right/bottom/left).
+    for side in ('top', 'right', 'bottom', 'left'):
+        raw_side = (request.form.get(f'content_padding_{side}') or '').strip()
+        if raw_side.isdigit() and 0 <= int(raw_side) <= 300:
+            fields[f'content_padding_{side}'] = int(raw_side)
 
     effect_value = request.form.get('effect', '')
     if effect_value in dict(_PROMO_EFFECTS):
@@ -5546,6 +5572,42 @@ def admin_promo_bg_delete(bg_id):
         (PROMO_DIR / bg['filename']).unlink(missing_ok=True)
         return redirect(url_for('admin_slideshow', ok='Fond supprimé de la bibliothèque.'))
     return redirect(url_for('admin_slideshow', err='Fond introuvable.'))
+
+
+# v2.0.8 : bibliothèque d'images dédiées au texte des pages promo -- voir
+# promo_content_images (db.py) et le sélecteur d'image du WYSIWYG (onglet «
+# Mes images », admin_slideshow.html / static/promo-editor.js). Distincte de
+# la bibliothèque de fonds ci-dessus (PROMO_DIR/promo_backgrounds) : ces
+# images sont pensées pour être insérées dans le texte lui-même, pas comme
+# fond plein écran d'une page.
+
+@app.route('/admin/slideshow/promo/content_image/upload', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_promo_content_image_upload():
+    file = request.files.get('image')
+    if not file or not file.filename:
+        return redirect(url_for('admin_slideshow', err='Aucun fichier sélectionné.'))
+    ext = Path(file.filename).suffix.lower()
+    if ext not in _PROMO_ALLOWED_EXT:
+        return redirect(url_for('admin_slideshow', err='Format non supporté (PNG, JPG, WEBP).'))
+    PROMO_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
+    safe = f'promo-img-{int(datetime.now().timestamp())}{ext}'
+    file.save(str(PROMO_CONTENT_DIR / safe))
+    label = (request.form.get('label', '') or '').strip()[:80]
+    add_promo_content_image(safe, label)
+    return redirect(url_for('admin_slideshow', ok='Image ajoutée -- disponible dans le sélecteur du WYSIWYG (onglet « Mes images »).'))
+
+
+@app.route('/admin/slideshow/promo/content_image/<int:image_id>/delete', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_promo_content_image_delete(image_id):
+    img = delete_promo_content_image_db(image_id)
+    if img:
+        (PROMO_CONTENT_DIR / img['filename']).unlink(missing_ok=True)
+        return redirect(url_for('admin_slideshow', ok='Image supprimée de la bibliothèque.'))
+    return redirect(url_for('admin_slideshow', err='Image introuvable.'))
 
 
 # ── Écran de veille (interface principale) ──────────────────────────────────
