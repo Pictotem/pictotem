@@ -481,6 +481,16 @@
           </div>
 
           <div class="field">
+            <label>Marge avec le bord de l'écran (px)</label>
+            <input type="number" name="content_padding" min="0" max="300"
+                   value="{{ page.content_padding }}" style="max-width:140px">
+            <p class="upload-hint">
+              Espace entre le bloc texte/QR code et les bords de l'écran (le fond, lui, couvre
+              toujours l'écran en entier).
+            </p>
+          </div>
+
+          <div class="field">
             <label>Fond</label>
             <div class="img-grid promo-bg-picker">
               <label class="img-card promo-bg-choice{% if not page.background_id %} selected{% endif %}">

@@ -71,11 +71,14 @@
     }
     .promo-overlay { position: absolute; inset: 0; z-index: 1; background: rgba(0,0,0,.42); }
     /* Doit rester au-dessus de .promo-overlay (texte + QR toujours visibles,
-       jamais recouverts par le voile d'assombrissement du fond). */
+       jamais recouverts par le voile d'assombrissement du fond). Le padding
+       (marge avec le bord de l'écran) n'est PAS fixé ici -- posé en style
+       inline par page (voir buildPromoContent() -> page.content_padding,
+       /admin/slideshow -> Pages promo), 60px par défaut si absent. */
     .promo-content {
       position: absolute; inset: 0; z-index: 3;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 36px; text-align: center; padding: 60px; box-sizing: border-box;
+      gap: 36px; text-align: center; box-sizing: border-box;
     }
     /* QR en position "coin" (voir .promo-qr-pos-* plus bas) : le QR sort du
        flux de .promo-content, qui n'a alors plus que le texte à centrer. */
@@ -241,6 +244,11 @@
     }
     const overlay = page.overlay_enabled !== false ? `<div class="promo-overlay"></div>` : '';
 
+    // Marge entre le bloc texte/QR et le bord de l'écran (voir /admin/slideshow
+    // -> Pages promo -> « Marge avec le bord de l'écran ») -- 60px par défaut,
+    // valeur de l'ancien padding fixe, si le réglage est absent ou invalide.
+    const contentPadding = Number.isFinite(page.content_padding) ? page.content_padding : 60;
+
     // Le(s) QR code(s) éventuel(s) sont déjà résolus en <img class="promo-inline-qr">
     // à l'intérieur de page.html_content côté serveur (voir _resolve_inline_qrcodes,
     // app.py) -- plus de conteneur/positionnement dédié ici, ils suivent le
@@ -248,7 +256,7 @@
     el.innerHTML = `
       ${bg}
       ${overlay}
-      <div class="promo-content">
+      <div class="promo-content" style="padding:${contentPadding}px">
         <div class="promo-text">${page.html_content || ''}</div>
       </div>
     `;

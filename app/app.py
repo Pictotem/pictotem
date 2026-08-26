@@ -5161,6 +5161,7 @@ def _promo_page_public(page: dict) -> dict:
         'background_angle':  page.get('background_angle') or 135,
         'background_bg_color': page.get('background_bg_color') or '#14161a',
         'overlay_enabled': bool(page['overlay_enabled']),
+        'content_padding': page.get('content_padding', 60),
         # v2.0.4 : text_font/text_size/text_color ne sont plus exposés ici --
         # la mise en forme du texte vit désormais entièrement dans
         # html_content (styles en ligne posés par le WYSIWYG), voir
@@ -5453,6 +5454,10 @@ def admin_promo_page_update(page_id):
     bg_color_value = request.form.get('background_bg_color', '').strip()
     if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color_value):
         fields['background_bg_color'] = bg_color_value
+
+    raw_padding = (request.form.get('content_padding') or '').strip()
+    if raw_padding.isdigit() and 0 <= int(raw_padding) <= 300:
+        fields['content_padding'] = int(raw_padding)
 
     effect_value = request.form.get('effect', '')
     if effect_value in dict(_PROMO_EFFECTS):

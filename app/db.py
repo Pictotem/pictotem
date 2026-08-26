@@ -397,6 +397,18 @@ def init_db():
         except Exception:
             pass  # colonne déjà présente
 
+        # Marge entre le bloc texte/QR et le bord de l'écran (v2.0.5) --
+        # remplace l'ancien padding fixe (60px, en dur dans le CSS de
+        # bestof.html -> .promo-content) par un réglage par page promo (voir
+        # /admin/slideshow -> Pages promo). Défaut 60 : aucun changement
+        # visuel pour les pages déjà enregistrées tant que l'admin n'y touche
+        # pas.
+        try:
+            conn.execute("ALTER TABLE promo_pages ADD COLUMN content_padding INTEGER NOT NULL DEFAULT 60")
+            conn.commit()
+        except Exception:
+            pass  # colonne déjà présente
+
         # Migration v2.0.3 (éditeur -> Quill) : enveloppe les <img> "nues"
         # dans le html_content déjà enregistré -- voir _wrap_bare_images_for_quill
         # ci-dessus. Relit/réécrit chaque page une seule fois par démarrage ;
@@ -852,7 +864,7 @@ def delete_promo_background_db(bg_id):
 _PROMO_PAGE_COLUMNS = (
     'active', 'sort_order', 'frequency', 'pause_seconds', 'html_content',
     'background_id', 'background_bg_color', 'overlay_enabled', 'text_font',
-    'text_size', 'text_color', 'effect', 'custom_css',
+    'text_size', 'text_color', 'effect', 'custom_css', 'content_padding',
 )
 
 
