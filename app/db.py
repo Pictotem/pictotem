@@ -1483,6 +1483,20 @@ def get_guest_code_text(code):
     return row['texte'] if row else None
 
 
+def get_guest_code_by_code(code):
+    """Comme get_guest_code_by_id, mais recherche par `code` (le numéro)
+    plutôt que par id — ligne complète (id, code, texte, created_at) ou
+    None. Utilisée par l'API REST (voir guest_api.py), à la différence de
+    get_guest_code_text() ci-dessus qui ne renvoie que le texte, sans
+    id/date, pour le pipeline de détection QR-code."""
+    code = (code or '').strip()
+    if not code:
+        return None
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM guest_codes WHERE code = ?', (code,)).fetchone()
+    return dict(row) if row else None
+
+
 def generate_guest_code(length):
     """Génère un code numérique aléatoire unique (non déjà présent dans
     guest_codes) de `length` chiffres — même principe que

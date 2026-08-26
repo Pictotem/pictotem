@@ -84,6 +84,9 @@ from utils import (build_gallery_url, current_stamp, disable_autostart,
                    get_network_info, is_autostart_enabled, make_thumb, message_text,
                    print_photo, resolve_dynamic_placeholders, sanitize_promo_html,
                    set_windows_wallpaper, validate_printer)
+from guest_api import (guest_api_status, guest_api_autostart, set_guest_api_port,
+                       set_guest_api_login, set_guest_api_password, set_guest_api_autostart,
+                       set_guest_api_log_retention_days, start_guest_api_server, stop_guest_api_server)
 
 # ── Application Flask ─────────────────────────────────────────────────────────
 
@@ -2863,6 +2866,7 @@ _ADMIN_BLOCKS = {
     'guest_codes_purge_first_n':    {'title': "Purger les N premiers",                       'default_page': 'guest_codes', 'template': 'blocks/guest_codes_purge_first_n.html',    'context_fn': '_block_ctx_guest_codes_purge_first_n'},
     'guest_codes_qrcode_settings':  {'title': "Add-on — Détection de QR-codes",              'default_page': 'guest_codes', 'template': 'blocks/guest_codes_qrcode_settings.html',  'context_fn': '_block_ctx_guest_codes_qrcode_settings'},
     'guest_codes_qr_live':          {'title': "Apparence du QR-code affiché en direct",      'default_page': 'guest_codes', 'template': 'blocks/guest_codes_qr_live.html',          'context_fn': '_block_ctx_guest_codes_qr_live'},
+    'guest_codes_api':               {'title': "API REST — accès aux codes invités",          'default_page': 'guest_codes', 'template': 'blocks/guest_codes_api.html',              'context_fn': '_block_ctx_guest_codes_api'},
 }
 # (slug, libellé affiché dans le menu « Déplacer vers », endpoint Flask) —
 # seulement les tuiles qui exécutent déjà la boucle de rendu de blocs
@@ -3272,6 +3276,12 @@ def _block_ctx_guest_codes_qr_live() -> dict:
         'guest_codes_qrcode_live_shapes': _QR_LIVE_SHAPES,
         'guest_codes_fonts': _all_fonts(),
     }
+
+
+def _block_ctx_guest_codes_api() -> dict:
+    status = guest_api_status()
+    status['ip'] = get_network_info()['ip']
+    return {'guest_api': status}
 
 
 @app.route('/admin/ui/block_collapse', methods=['POST'])
@@ -4987,6 +4997,53 @@ def admin_guest_codes_set_qrcode_live_error_style():
     return _admin_block_redirect('guest_codes_qr_live', ok="Message d'erreur QR-code mis à jour.")
 
 
+@app.route('/admin/guest_codes/api/settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes_api_settings():
+    """Bloc « API REST — accès aux codes invités » : port, identifiant, mot
+    de passe (laissé vide = inchangé), démarrage auto/manuel et rétention du
+    journal (voir guest_api.py). Chaque champ valide est enregistré même si
+    un autre est invalide (même principe que les autres blocs de réglages,
+    ex. _admin_guest_codes_set_qr_export_settings) — pas de tout-ou-rien.
+    Une API déjà active n'est pas relancée automatiquement après un
+    changement de port/identifiants — utiliser le bouton Arrêter/Démarrer
+    ci-dessous pour appliquer un port modifié."""
+    errors = []
+    if not set_guest_api_port(request.form.get('api_port', '')):
+        errors.append('port invalide (doit être entre 1 et 65535)')
+    login = (request.form.get('api_login') or '').strip()
+    if login:
+        set_guest_api_login(login)
+    password = request.form.get('api_password') or ''
+    if password:
+        set_guest_api_password(password)
+    if not set_guest_api_log_retention_days(request.form.get('api_log_retention_days', '')):
+        errors.append('rétention invalide (doit être entre 1 et 3650 jours)')
+    set_guest_api_autostart(bool(request.form.get('api_autostart')))
+    if errors:
+        return _admin_block_redirect(
+            'guest_codes_api',
+            ok='Autres réglages enregistrés.',
+            err='Non enregistré : ' + ', '.join(errors) + '.',
+        )
+    return _admin_block_redirect('guest_codes_api', ok='Réglages API enregistrés.')
+
+
+@app.route('/admin/guest_codes/api/toggle', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes_api_toggle():
+    """Démarrage/arrêt manuel de l'API — voir guest_api.start_guest_api_server()
+    / stop_guest_api_server() (bascule immédiate, indépendante du réglage
+    « démarrage automatique »)."""
+    if request.form.get('action') == 'stop':
+        _ok, msg = stop_guest_api_server()
+    else:
+        _ok, msg = start_guest_api_server()
+    return _admin_block_redirect('guest_codes_api', ok=msg if _ok else None, err=None if _ok else msg)
+
+
 @app.route('/admin/guest_codes/export/csv')
 @require_admin_auth
 def admin_guest_codes_export_csv():
@@ -6443,6 +6500,15 @@ if __name__ == '__main__':
         _port = 8080
 
     logger.info('Démarrage pictotem sur %s:%s', _host, _port)
+
+    # API REST codes invités (voir guest_api.py) : démarrage automatique
+    # seulement si activé depuis le back office (/admin/guest_codes, bloc
+    # « API REST »). Sur un port dédié, indépendant de _port ci-dessus —
+    # un échec ici (port déjà pris...) est journalisé mais ne doit jamais
+    # empêcher le démarrage du reste de l'application.
+    if guest_api_autostart():
+        _api_ok, _api_msg = start_guest_api_server(_host)
+        logger.info('API codes invités : %s', _api_msg) if _api_ok else logger.warning('API codes invités : %s', _api_msg)
 
     # Flask tourne en arrière-plan (thread démon) ; la fenêtre native occupe
     # le thread principal — obligatoire pour l'event loop GUI sous Windows.

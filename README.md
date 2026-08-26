@@ -68,6 +68,17 @@ Depuis `/admin/tags` (activable, désactivé par défaut) : un bouton « Tags »
 
 `/admin/tags` affiche aussi un journal « Tags appliqués » : chaque tag posé depuis le kiosque, avec la miniature et l'ID du média concerné, retirable en un clic. La galerie propose un filtre **Tags** (liste déroulante des libellés effectivement utilisés) en plus des filtres genre/tri/source, et affiche les tags de chaque capture en petites puces cliquables sous la vignette (cliquer une puce filtre directement la galerie sur ce tag). L'affichage des tags sur le diaporama `/bestof` est activable séparément (option « Afficher les tags sur le diaporama /bestof »), avec un style entièrement personnalisable (police, taille, couleur de fond, couleur du texte) et un aperçu en direct dans l'admin.
 
+## API REST — codes invités
+Depuis `/admin/guest_codes`, bloc « API REST — accès aux codes invités » : un petit serveur HTTP indépendant (port dédié, réglable, distinct du port de l'application) expose en lecture seule la base des codes invités (numéro, texte, date) pour un usage externe (logiciel tiers, script...). Protégé par authentification HTTP Basic (identifiant + mot de passe réglables) — voir `app/guest_api.py`. Désactivé par défaut ; démarrage automatique avec l'application ou manuel (bouton dédié), au choix.
+
+Deux routes, toutes deux authentifiées :
+- `GET /api/guest_codes` → liste complète `[{"numero": "...", "texte": "...", "date": "..."}, ...]`
+- `GET /api/guest_codes/<code>` → un seul code, ou `404` s'il n'existe pas
+
+Exemple : `curl -u identifiant:motdepasse http://<IP_DU_PC>:<port_api>/api/guest_codes`
+
+Chaque requête (authentifiée ou non) est journalisée dans `logs/guest_api.log` (IP, date, méthode et chemin, données renvoyées — jamais le mot de passe), avec purge automatique des journaux plus anciens que la rétention réglée dans le back office (rotation quotidienne). Réglages également disponibles via `config.toml` (`[guest_api]`) et variables d'environnement `PICTOTEM_GUEST_API_LOGIN` / `PICTOTEM_GUEST_API_PASSWORD` (prioritaires sur le back office).
+
 ## Boutons (kiosque)
 Depuis `/admin/buttons` : réglages communs à tous les boutons du kiosque (forme — pilule/arrondi/carré, police, taille du texte, espacement) et réglages propres à chaque bouton (couleur de fond, texte gras) pour les rôles principal/secondaire/tertiaire/Recommencer/Tags, avec aperçu en direct. Corrige au passage l'incohérence visuelle des boutons « Recommencer » et « Tags », qui utilisaient auparavant un style « fantôme » sans taille ni graisse de texte alignées sur les autres boutons. La couleur du texte de chaque bouton est calculée automatiquement (clair/sombre) selon la luminosité de la couleur de fond choisie, pour rester lisible quel que soit le choix.
 
@@ -121,6 +132,7 @@ Flask sert toujours une vraie interface HTTP normale en arrière-plan (la fenêt
 - Galerie distante : `http://<IP_DU_PC>/gallery`
 - Export emails CSV : `/admin/exports/emails.csv`
 - Export emails JSON : `/admin/exports/emails.json`
+- API REST codes invités (si activée) : `http://<IP_DU_PC>:<port_api>/api/guest_codes`
 
 ## Remarques
 - L'application n'envoie pas d'emails ; elle ne fait que les collecter.

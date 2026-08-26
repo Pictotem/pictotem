@@ -108,6 +108,21 @@ include_in_gallery = false
 # invalide immédiatement l'ancien lien/QR).
 upload_token = "changeme-upload-token"
 
+# API REST (lecture seule) d'accès à la base des codes invités (table
+# guest_codes) : authentification HTTP Basic + port dédié, indépendant du
+# port de l'application principale (server.port ci-dessus). Réglable aussi
+# depuis le back office (/admin/guest_codes, bloc "API REST — accès aux
+# codes invités"), qui a priorité sur ces valeurs — voir app/guest_api.py.
+# CHANGEZ login/password avant toute exposition réseau réelle.
+[guest_api]
+autostart = false
+port = 8081
+login = "invite"
+password = "changeme-api-password"
+# Nombre de jours de journal de connexions conservés (logs/guest_api.log,
+# rotation quotidienne) avant purge automatique des fichiers les plus anciens.
+log_retention_days = 30
+
 [ui]
 app_title = "Pictotem"
 show_take_photo = true

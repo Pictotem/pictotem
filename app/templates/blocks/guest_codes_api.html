@@ -1,0 +1,71 @@
+<div class="form-card">
+
+  {% if guest_api.running %}
+  <span class="status-pill protected"><span class="dot"></span>API actuellement active — port {{ guest_api.port }}</span>
+  {% else %}
+  <span class="status-pill open"><span class="dot"></span>API actuellement inactive</span>
+  {% endif %}
+
+  {% if guest_api.last_error %}
+  <p style="margin:10px 0 0;font-size:13px;color:#e57373">
+    Dernier échec de démarrage : {{ guest_api.last_error }}
+  </p>
+  {% endif %}
+
+  <p class="section-hint" style="margin-top:10px">
+    Serveur HTTP indépendant, protégé par identifiant + mot de passe (authentification Basic),
+    qui expose en lecture seule la base des codes invités pour un usage externe (logiciel tiers,
+    script...) — port et identifiants distincts de l'application principale et du back office.
+    {% if guest_api.running %}
+    URL : <code>http://{{ guest_api.ip }}:{{ guest_api.port }}/api/guest_codes</code>
+    (et <code>/api/guest_codes/&lt;code&gt;</code> pour un seul code).
+    {% endif %}
+    Chaque requête (réussie ou non) est journalisée dans <code>logs/guest_api.log</code>
+    (IP, date, méthode et chemin, données renvoyées — jamais le mot de passe), avec purge
+    automatique des journaux plus anciens que la rétention réglée ci-dessous.
+    {% if guest_api.credentials_source == 'env' %}
+    Identifiants actuellement imposés par les variables d'environnement
+    <code>PICTOTEM_GUEST_API_LOGIN</code> / <code>PICTOTEM_GUEST_API_PASSWORD</code>, prioritaires
+    sur le formulaire ci-dessous.
+    {% endif %}
+  </p>
+
+  <form method="post" action="{{ url_for('admin_guest_codes_api_toggle') }}" style="display:inline-block;margin-bottom:22px">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="{{ 'stop' if guest_api.running else 'start' }}">
+    <button type="submit" class="action-btn{% if not guest_api.running %} primary{% endif %}">
+      {% if guest_api.running %}Arrêter l'API{% else %}Démarrer l'API{% endif %}
+    </button>
+  </form>
+
+  <form method="post" action="{{ url_for('admin_guest_codes_api_settings') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="field-row">
+      <div class="field">
+        <label>Port d'écoute</label>
+        <input type="number" name="api_port" min="1" max="65535" value="{{ guest_api.port }}">
+      </div>
+      <div class="field">
+        <label>Rétention du journal (jours)</label>
+        <input type="number" name="api_log_retention_days" min="1" max="3650" value="{{ guest_api.log_retention_days }}">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Identifiant</label>
+        <input type="text" name="api_login" autocomplete="off" value="{{ guest_api.login }}">
+      </div>
+      <div class="field">
+        <label>Mot de passe</label>
+        <input type="password" name="api_password" autocomplete="new-password" placeholder="Laisser vide pour ne pas changer"
+               style="background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:10px 14px;font-size:15px">
+      </div>
+    </div>
+    <label class="check-row" style="margin-bottom:18px">
+      <input type="checkbox" name="api_autostart" value="1" {% if guest_api.autostart %}checked{% endif %}>
+      <span>Démarrer automatiquement l'API au lancement de l'application (sinon, démarrage manuel via le bouton ci-dessus)</span>
+    </label>
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+
+</div>
