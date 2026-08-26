@@ -73,7 +73,7 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_guest_codes, get_guest_code_by_id, get_guest_code_text,
                 create_guest_code, update_guest_code_texte, regenerate_guest_code,
                 delete_guest_code_db, upsert_guest_code, purge_guest_codes_by_date,
-                purge_guest_codes_first_n, generate_guest_code,
+                purge_guest_codes_first_n, generate_guest_code, regenerate_guest_codes_by_filter,
                 list_custom_fonts, create_custom_font, delete_custom_font_db,
                 list_promo_backgrounds, add_promo_background, add_promo_gradient_background,
                 delete_promo_background_db, list_promo_pages, get_promo_page, create_promo_page,
@@ -2864,6 +2864,7 @@ _ADMIN_BLOCKS = {
     'guest_codes_qr_export':        {'title': "Génération de QR-codes imprimables",          'default_page': 'guest_codes', 'template': 'blocks/guest_codes_qr_export.html',        'context_fn': '_block_ctx_guest_codes_qr_export'},
     'guest_codes_purge_date':       {'title': "Purger par plage de dates",                   'default_page': 'guest_codes', 'template': 'blocks/guest_codes_purge_date.html',       'context_fn': None},
     'guest_codes_purge_first_n':    {'title': "Purger les N premiers",                       'default_page': 'guest_codes', 'template': 'blocks/guest_codes_purge_first_n.html',    'context_fn': '_block_ctx_guest_codes_purge_first_n'},
+    'guest_codes_regenerate':       {'title': "Régénérer par filtre",                        'default_page': 'guest_codes', 'template': 'blocks/guest_codes_regenerate.html',       'context_fn': None},
     'guest_codes_qrcode_settings':  {'title': "Add-on — Détection de QR-codes",              'default_page': 'guest_codes', 'template': 'blocks/guest_codes_qrcode_settings.html',  'context_fn': '_block_ctx_guest_codes_qrcode_settings'},
     'guest_codes_qr_live':          {'title': "Apparence du QR-code affiché en direct",      'default_page': 'guest_codes', 'template': 'blocks/guest_codes_qr_live.html',          'context_fn': '_block_ctx_guest_codes_qr_live'},
     'guest_codes_api':               {'title': "API REST — accès aux codes invités",          'default_page': 'guest_codes', 'template': 'blocks/guest_codes_api.html',              'context_fn': '_block_ctx_guest_codes_api'},
@@ -4873,6 +4874,34 @@ def admin_guest_codes_purge_first_n():
         return _admin_block_redirect('guest_codes_purge_first_n', sort=sort, q=q, err='Nombre invalide.')
     count = purge_guest_codes_first_n(int(raw_n), purge_sort)
     return _admin_block_redirect('guest_codes_purge_first_n', sort=sort, q=q, ok=f'{count} code(s) supprimé(s).')
+
+
+@app.route('/admin/guest_codes/regenerate_filter', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes_regenerate_filter():
+    """Régénère (nouveau numéro, texte et date de création inchangés) tous
+    les codes invités correspondant aux filtres combinés du formulaire —
+    voir db.guest_code_ids_by_filter pour leur sémantique (chacun optionnel ;
+    tous vides = « tous »). Même principe de filtres combinables que les
+    purges ci-dessus, mais action non destructive (le code est remplacé,
+    la ligne reste)."""
+    sort = request.form.get('sort', 'created_desc')
+    q = request.form.get('q', '')
+    date_from = (request.form.get('regen_date_from') or '').strip()
+    date_to = (request.form.get('regen_date_to') or '').strip()
+    raw_length_lt = (request.form.get('regen_length_lt') or '').strip()
+    length_lt = None
+    if raw_length_lt:
+        if not raw_length_lt.isdigit() or int(raw_length_lt) < 1:
+            return _admin_block_redirect('guest_codes_regenerate', sort=sort, q=q,
+                                          err='Longueur de numéro invalide.')
+        length_lt = int(raw_length_lt)
+    count = regenerate_guest_codes_by_filter(
+        _guest_codes_settings()['code_length'], date_from, date_to, length_lt
+    )
+    return _admin_block_redirect('guest_codes_regenerate', sort=sort, q=q,
+                                  ok=f'{count} code(s) régénéré(s).')
 
 
 @app.route('/admin/guest_codes/qrcode_settings', methods=['POST'])

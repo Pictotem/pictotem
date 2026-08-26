@@ -1629,6 +1629,49 @@ def purge_guest_codes_first_n(n, sort='created_asc'):
         return len(ids)
 
 
+def guest_code_ids_by_filter(date_from='', date_to='', code_length_lt=None):
+    """Renvoie les ids des codes invités correspondant aux filtres combinés
+    (ET logique, chacun optionnel) : plage de dates de création (mêmes
+    bornes que purge_guest_codes_by_date : date_to inclus jusqu'à 23:59:59)
+    et/ou longueur du NUMÉRO (le code, pas le texte associé) strictement
+    inférieure à `code_length_lt`. Sans aucun filtre renseigné : tous les
+    ids (« tous »). Utilisée par regenerate_guest_codes_by_filter ci-dessous
+    (bouton « Régénérer par filtre », /admin/guest_codes)."""
+    date_from = (date_from or '').strip()
+    date_to = (date_to or '').strip()
+    conditions, params = [], []
+    if date_from:
+        conditions.append('created_at >= ?')
+        params.append(date_from)
+    if date_to:
+        conditions.append('created_at <= ?')
+        params.append(date_to + 'T23:59:59')
+    if code_length_lt is not None:
+        conditions.append('LENGTH(code) < ?')
+        params.append(int(code_length_lt))
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+    with closing(db_conn()) as conn:
+        rows = conn.execute(f'SELECT id FROM guest_codes {where}', params).fetchall()
+    return [r['id'] for r in rows]
+
+
+def regenerate_guest_codes_by_filter(length, date_from='', date_to='', code_length_lt=None):
+    """Régénère (nouveau numéro aléatoire ; texte associé et date de
+    création inchangés — voir regenerate_guest_code) tous les codes invités
+    correspondant aux filtres combinés, voir guest_code_ids_by_filter pour
+    leur sémantique. Un id par id (comme l'ajout en masse, create_guest_code
+    en boucle) plutôt qu'en une seule requête, pour que generate_guest_code
+    voie bien chaque nouveau numéro déjà attribué avant de générer le
+    suivant (évite toute collision entre deux codes régénérés dans le même
+    lot). Retourne le nombre de codes effectivement régénérés."""
+    ids = guest_code_ids_by_filter(date_from, date_to, code_length_lt)
+    count = 0
+    for guest_code_id in ids:
+        if regenerate_guest_code(guest_code_id, length) is not None:
+            count += 1
+    return count
+
+
 # ── Tags ──────────────────────────────────────────────────────────────────────
 # Fonctionnalité activable via /admin/tags (settings tags.*). Tags prédéfinis
 # (table tags, CRUD admin) + tags "libres" saisis par l'invité via clavier

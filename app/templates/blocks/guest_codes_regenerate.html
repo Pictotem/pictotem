@@ -1,0 +1,37 @@
+<div class="form-card">
+  <p class="section-hint">
+    Génère un nouveau numéro aléatoire pour chaque code invité correspondant aux filtres
+    ci-dessous — le texte associé et la date de création restent inchangés. Les anciens
+    numéros (déjà imprimés ou partagés) cessent alors de fonctionner.
+  </p>
+
+  <form method="post" action="{{ url_for('admin_guest_codes_regenerate_filter') }}"
+        onsubmit="return confirm('Régénérer le numéro de tous les codes invités correspondant à ces filtres ? Les anciens numéros déjà imprimés ou partagés cesseront de fonctionner.')">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="sort" value="{{ guest_codes_sort }}">
+    <input type="hidden" name="q" value="{{ guest_codes_q }}">
+    <div class="field-row" style="align-items:end">
+      <div class="field">
+        <label>Créé le — du</label>
+        <input type="date" name="regen_date_from">
+      </div>
+      <div class="field">
+        <label>Au</label>
+        <input type="date" name="regen_date_to">
+      </div>
+      <div class="field">
+        <label>Longueur du numéro &lt;</label>
+        <input type="number" name="regen_length_lt" min="1" step="1" placeholder="ex. 4">
+      </div>
+      <div class="field">
+        <button class="btn-primary" type="submit">Régénérer</button>
+      </div>
+    </div>
+    <p class="field-hint">
+      Tous les champs vides = « tous » (régénère l'intégralité des codes invités). Les filtres
+      renseignés se combinent (ET) — ex. une plage de dates + une longueur de numéro régénère
+      seulement les codes créés dans cette plage ET dont le numéro actuel est plus court que
+      la valeur indiquée. La longueur porte sur le numéro (code), pas sur le texte associé.
+    </p>
+  </form>
+</div>
