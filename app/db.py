@@ -376,6 +376,34 @@ def init_db():
         """)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_promo_pages_sort_order ON promo_pages(sort_order)')
 
+        # Plages horaires par page promo (nouveau) : la page garde sa
+        # fréquence par défaut (promo_pages.frequency ci-dessus) mais peut en
+        # plus définir ici une ou plusieurs plages [heure début, heure fin[
+        # pendant lesquelles une fréquence DIFFÉRENTE s'applique -- ex.
+        # "toutes les 3 slides de 18h à 20h" pour un temps fort de soirée, le
+        # reste de la journée gardant la fréquence par défaut. Bornes en
+        # MINUTES depuis minuit (0-1439) : stockage/tri simples, comparaison
+        # directe avec l'heure courante (voir _promo_effective_frequency,
+        # app.py) et rendu direct sur la timeline visuelle 24h de
+        # /admin/slideshow (voir static/promo-timeline.js), en pourcentage de
+        # 1440 minutes. end_minutes peut être < start_minutes : la plage
+        # traverse alors minuit (ex. 22h -> 2h) -- gérée par
+        # _promo_effective_frequency, la timeline l'affiche en deux tronçons.
+        # Table neuve (jamais aucune colonne à ajouter à des lignes
+        # existantes) : un simple CREATE TABLE IF NOT EXISTS suffit, pas de
+        # bloc ALTER TABLE comme les migrations promo_pages ci-dessous.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS promo_page_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            page_id INTEGER NOT NULL,
+            start_minutes INTEGER NOT NULL,
+            end_minutes INTEGER NOT NULL,
+            frequency INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_promo_schedules_page ON promo_page_schedules(page_id)')
+
         # Fonds dégradés (v2.0.1) : promo_backgrounds accueille désormais deux
         # types de fond partagés par les pages promo — 'image' (fichier
         # uploadé, comportement d'origine) et 'gradient' (deux couleurs +
@@ -1058,6 +1086,11 @@ def delete_promo_page_db(page_id):
         if not row:
             return None
         page = dict(row)
+        # Emporte aussi les plages horaires de cette page (promo_page_schedules
+        # ci-dessus) : sans FK ON DELETE CASCADE (SQLite, désactivé par
+        # défaut), des lignes orphelines resteraient sinon en base, invisibles
+        # nulle part mais jamais nettoyées.
+        conn.execute('DELETE FROM promo_page_schedules WHERE page_id = ?', (page_id,))
         conn.execute('DELETE FROM promo_pages WHERE id = ?', (page_id,))
         conn.commit()
     return page
@@ -1080,6 +1113,72 @@ def move_promo_page(page_id, direction):
         conn.execute('UPDATE promo_pages SET sort_order = ? WHERE id = ?', (b['sort_order'], a['id']))
         conn.execute('UPDATE promo_pages SET sort_order = ? WHERE id = ?', (a['sort_order'], b['id']))
         conn.commit()
+
+
+# ── Plages horaires par page promo (nouveau) ─────────────────────────────────
+# CRUD des créneaux [heure début, heure fin[ + fréquence propre à chaque
+# créneau (voir promo_page_schedules, migration ci-dessus, et
+# _promo_effective_frequency/app.py qui choisit la fréquence à appliquer à
+# l'instant présent). Utilisé à la fois par les petits formulaires
+# ajout/édition/suppression sous chaque page promo et par la timeline
+# visuelle 24h (les deux dans /admin/slideshow, voir admin_slideshow.html et
+# static/promo-timeline.js) -- même CRUD, deux façons de le déclencher.
+
+def list_promo_schedules(page_id=None):
+    """Tous les créneaux (toutes pages confondues, pour la timeline) si
+    page_id est omis, sinon uniquement ceux d'une page (pour son propre
+    formulaire), triés par heure de début."""
+    with closing(db_conn()) as conn:
+        if page_id is None:
+            rows = conn.execute(
+                'SELECT * FROM promo_page_schedules ORDER BY page_id ASC, start_minutes ASC'
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                'SELECT * FROM promo_page_schedules WHERE page_id = ? ORDER BY start_minutes ASC',
+                (page_id,)
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_promo_schedule(page_id, start_minutes, end_minutes, frequency):
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            'INSERT INTO promo_page_schedules(page_id, start_minutes, end_minutes, frequency, created_at) '
+            'VALUES (?,?,?,?,?)',
+            (page_id, start_minutes, end_minutes, frequency, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+_PROMO_SCHEDULE_COLUMNS = ('start_minutes', 'end_minutes', 'frequency')
+
+
+def update_promo_schedule(schedule_id, **fields):
+    """Met à jour uniquement les colonnes fournies parmi _PROMO_SCHEDULE_COLUMNS
+    -- utilisé aussi bien par le formulaire d'édition (les 3 champs) que par le
+    glisser sur la timeline (start_minutes et/ou end_minutes seuls, la
+    fréquence du créneau restant inchangée)."""
+    cols = [k for k in fields if k in _PROMO_SCHEDULE_COLUMNS]
+    if not cols:
+        return
+    set_clause = ', '.join(f'{c} = ?' for c in cols)
+    values = [fields[c] for c in cols] + [schedule_id]
+    with closing(db_conn()) as conn:
+        conn.execute(f'UPDATE promo_page_schedules SET {set_clause} WHERE id = ?', values)
+        conn.commit()
+
+
+def delete_promo_schedule(schedule_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM promo_page_schedules WHERE id = ?', (schedule_id,)).fetchone()
+        if not row:
+            return None
+        conn.execute('DELETE FROM promo_page_schedules WHERE id = ?', (schedule_id,))
+        conn.commit()
+    return dict(row)
 
 
 # ── Écran de veille (images dédiées) ─────────────────────────────────────────

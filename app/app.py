@@ -78,7 +78,9 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_promo_backgrounds, add_promo_background, add_promo_gradient_background,
                 delete_promo_background_db, list_promo_pages, get_promo_page, create_promo_page,
                 update_promo_page, delete_promo_page_db, move_promo_page,
-                list_promo_content_images, add_promo_content_image, delete_promo_content_image_db)
+                list_promo_content_images, add_promo_content_image, delete_promo_content_image_db,
+                list_promo_schedules, create_promo_schedule, update_promo_schedule,
+                delete_promo_schedule)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, generate_qr_png_custom,
                    get_network_info, is_autostart_enabled, make_thumb, message_text,
@@ -5241,15 +5243,58 @@ def _promo_capture_library(limit: int = 60) -> list:
     ]
 
 
-def _promo_page_public(page: dict) -> dict:
+def _parse_hhmm(value: str):
+    """Parse une heure 'HH:MM' (valeur d'un <input type=time>, ou 'HH:MM'
+    calculé côté JS pour la timeline, voir static/promo-timeline.js) en
+    minutes depuis minuit (0-1439) ; None si absent/invalide -- laisse
+    l'appelant décider (ignorer le champ, ou rejeter toute la requête)."""
+    m = re.fullmatch(r'([01]?\d|2[0-3]):([0-5]\d)', (value or '').strip())
+    if not m:
+        return None
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+
+def _minutes_in_range(now_minutes: int, start_minutes: int, end_minutes: int) -> bool:
+    """now_minutes tombe-t-il dans [start_minutes, end_minutes[ ? Gère les
+    plages qui traversent minuit (end < start, ex. 22h -> 2h) -- voir
+    promo_page_schedules, db.py. Une plage dégénérée (start == end) ne
+    correspond jamais : elle ne veut rien dire (ni "0 minute", ni "24h",
+    l'admin l'a probablement créée par erreur en tâtonnant sur la timeline)."""
+    if start_minutes == end_minutes:
+        return False
+    if start_minutes < end_minutes:
+        return start_minutes <= now_minutes < end_minutes
+    return now_minutes >= start_minutes or now_minutes < end_minutes
+
+
+def _promo_effective_frequency(page: dict, schedules: list, now_minutes: int) -> int:
+    """Fréquence à appliquer À CET INSTANT pour une page promo : celle d'une
+    plage horaire (voir promo_page_schedules, db.py) si l'heure courante
+    (heure du serveur) tombe dedans, sinon la fréquence par défaut de la
+    page. Si plusieurs plages se chevauchent (l'admin n'est pas empêché
+    d'en créer, y compris par glisser sur la timeline), le créneau le PLUS
+    RÉCEMMENT CRÉÉ l'emporte -- règle simple et prévisible ("le dernier
+    ajouté gagne"), pas de priorité supplémentaire à configurer."""
+    matching = [s for s in schedules if _minutes_in_range(now_minutes, s['start_minutes'], s['end_minutes'])]
+    if not matching:
+        return max(1, page['frequency'])
+    chosen = max(matching, key=lambda s: s['id'])
+    return max(1, chosen['frequency'])
+
+
+def _promo_page_public(page: dict, effective_frequency: int = None) -> dict:
     """Représentation JSON d'une page promo, partagée par /api/bestof/slides
     (rafraîchissement complet, cadencé par slideshow.refresh_interval) et
     /api/bestof/promo-pages (interrogée à cadence fixe et rapide par le
     kiosque déjà ouvert, pour appliquer les changements du back office sans
-    attendre — voir bestof.html)."""
+    attendre — voir bestof.html). `effective_frequency`, quand fourni,
+    remplace la fréquence par défaut de la page : c'est celle calculée par
+    _promo_effective_frequency ci-dessus selon l'heure courante et les
+    plages horaires de la page (voir _active_promo_pages_public)."""
+    freq = page['frequency'] if effective_frequency is None else effective_frequency
     return {
         'id':              page['id'],
-        'frequency':       max(1, page['frequency']),
+        'frequency':       max(1, freq),
         'pause_seconds':   max(1, page['pause_seconds']),
         'background_kind':   page.get('background_kind') or '',
         'background_url':  (url_for('static', filename=f'promo/{page["background_filename"]}')
@@ -5352,6 +5397,25 @@ def _resolve_inline_qrcodes(html: str) -> str:
     return _INLINE_QR_RE.sub(_replace, html)
 
 
+def _active_promo_pages_public() -> list:
+    """Pages promo actives, chacune avec sa fréquence EFFECTIVE à l'instant
+    présent (réglage par défaut, ou celui d'une plage horaire en cours --
+    voir _promo_effective_frequency ci-dessus) : partagé par
+    /api/bestof/slides et /api/bestof/promo-pages ci-dessous, la 2e
+    interrogée à cadence rapide (15s, voir bestof.html) pour que le
+    slideshow applique un changement de fréquence dès que l'heure de début
+    ou de fin d'un créneau est franchie, sans attendre le rafraîchissement
+    complet ni un rechargement de page."""
+    now_minutes = datetime.now().hour * 60 + datetime.now().minute
+    schedules_by_page = {}
+    for s in list_promo_schedules():
+        schedules_by_page.setdefault(s['page_id'], []).append(s)
+    return [
+        _promo_page_public(p, _promo_effective_frequency(p, schedules_by_page.get(p['id'], []), now_minutes))
+        for p in list_promo_pages() if p['active']
+    ]
+
+
 def _slideshow_settings():
     return {
         'type':            get_setting('slideshow.type',           'both'),
@@ -5446,7 +5510,7 @@ def api_bestof_slides():
         'delay':            s['delay'],
         'order':            s['order'],
         'refresh_interval': s['refresh_interval'],
-        'promo_pages':       [_promo_page_public(p) for p in list_promo_pages() if p['active']],
+        'promo_pages':       _active_promo_pages_public(),
         'show_media_id':    _media_id_settings()['show_on_bestof'],
         'show_tags':        tags_cfg['show_on_bestof'],
         'tags_style':       {
@@ -5466,7 +5530,7 @@ def api_bestof_promo_pages():
     intermédiaires) et peut être réglé sur une valeur lente, voire désactivé,
     sans que ça ralentisse l'application des changements faits dans
     /admin/slideshow → Pages promo."""
-    return jsonify({'pages': [_promo_page_public(p) for p in list_promo_pages() if p['active']]})
+    return jsonify({'pages': _active_promo_pages_public()})
 
 
 @app.route('/admin/slideshow')
@@ -5479,11 +5543,33 @@ def admin_slideshow():
     sont pas des réglages mais la gestion de contenu lui-même (CRUD à
     plusieurs entrées, comme admin_captures/admin_frames)."""
     blocks, block_context = _admin_render_blocks('slideshow')
+    promo_pages_list = list_promo_pages()
+    promo_schedules_all = list_promo_schedules()
+    # Groupées par page pour les petits formulaires ajout/édition/suppression
+    # sous chaque page promo (voir admin_slideshow.html -> promo_schedules).
+    promo_schedules_by_page = {}
+    for s in promo_schedules_all:
+        promo_schedules_by_page.setdefault(s['page_id'], []).append(s)
+    # Version allégée (pas de html_content/custom_css...) pour la timeline
+    # visuelle 24h -- voir static/promo-timeline.js, qui lit ce JSON via
+    # #promo-timeline-data plutôt que de parcourir le HTML déjà rendu.
+    timeline_pages = [
+        {'id': p['id'], 'frequency': p['frequency'], 'active': bool(p['active']), 'sort_order': p['sort_order']}
+        for p in promo_pages_list
+    ]
+    timeline_schedules = [
+        {'id': s['id'], 'page_id': s['page_id'], 'start_minutes': s['start_minutes'],
+         'end_minutes': s['end_minutes'], 'frequency': s['frequency']}
+        for s in promo_schedules_all
+    ]
     return render_template(
         'admin_slideshow.html', config=CONFIG,
         blocks=blocks, current_page='slideshow', admin_pages=_admin_all_pages(),
         page_label=_admin_page_label('slideshow', 'Slideshow Best Of'),
-        promo_pages=list_promo_pages(),
+        promo_pages=promo_pages_list,
+        promo_schedules=promo_schedules_by_page,
+        timeline_pages=timeline_pages,
+        timeline_schedules=timeline_schedules,
         promo_backgrounds=list_promo_backgrounds(),
         promo_content_images=[
             {'id': i['id'], 'url': f"/static/promo_content/{i['filename']}", 'label': i.get('label') or i['filename']}
@@ -5616,6 +5702,67 @@ def admin_promo_page_move(page_id):
     if direction in ('up', 'down'):
         move_promo_page(page_id, direction)
     return redirect(url_for('admin_slideshow', ok='Ordre mis à jour.'))
+
+
+# ── Pages promo — plages horaires (fréquence variable) ──────────────────────
+# CRUD des créneaux [heure début, heure fin[ + fréquence propre de chaque
+# page promo (voir promo_page_schedules, db.py, et _promo_effective_frequency
+# ci-dessus) -- déclenché soit par les petits formulaires sous chaque page
+# (admin_slideshow.html -> promo_schedules), soit par glisser sur la
+# timeline visuelle 24h (static/promo-timeline.js, requête 'ajax=1' : pas de
+# redirection, juste un 204 pour rester sur place). Toutes les redirections
+# classiques renvoient vers l'ancre de la page concernée (#promo-page-N) --
+# sans ça, valider un créneau ramènerait l'admin en haut de la liste des
+# pages promo à chaque fois.
+
+@app.route('/admin/slideshow/promo/<int:page_id>/schedule/create', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_promo_schedule_create(page_id):
+    if not get_promo_page(page_id):
+        abort(404)
+    anchor = f"#promo-page-{page_id}"
+    start = _parse_hhmm(request.form.get('start', ''))
+    end = _parse_hhmm(request.form.get('end', ''))
+    raw_freq = (request.form.get('frequency') or '').strip()
+    if start is None or end is None or start == end or not raw_freq.isdigit() or int(raw_freq) <= 0:
+        return redirect(url_for('admin_slideshow', err='Plage horaire invalide.') + anchor)
+    create_promo_schedule(page_id, start, end, int(raw_freq))
+    return redirect(url_for('admin_slideshow', ok='Plage horaire ajoutée.') + anchor)
+
+
+@app.route('/admin/slideshow/promo/<int:page_id>/schedule/<int:schedule_id>/update', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_promo_schedule_update(page_id, schedule_id):
+    if not get_promo_page(page_id):
+        abort(404)
+    fields = {}
+    start = _parse_hhmm(request.form.get('start', ''))
+    end = _parse_hhmm(request.form.get('end', ''))
+    if start is not None:
+        fields['start_minutes'] = start
+    if end is not None:
+        fields['end_minutes'] = end
+    raw_freq = (request.form.get('frequency') or '').strip()
+    if raw_freq.isdigit() and int(raw_freq) > 0:
+        fields['frequency'] = int(raw_freq)
+    if fields:
+        update_promo_schedule(schedule_id, **fields)
+    # Glisser sur la timeline (voir static/promo-timeline.js) : requête de
+    # fond, la page reste déjà à jour côté client (mise à jour optimiste) --
+    # pas besoin d'une redirection complète, juste un statut de succès.
+    if request.form.get('ajax') == '1':
+        return ('', 204)
+    return redirect(url_for('admin_slideshow', ok='Plage horaire mise à jour.') + f"#promo-page-{page_id}")
+
+
+@app.route('/admin/slideshow/promo/<int:page_id>/schedule/<int:schedule_id>/delete', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_promo_schedule_delete(page_id, schedule_id):
+    delete_promo_schedule(schedule_id)
+    return redirect(url_for('admin_slideshow', ok='Plage horaire supprimée.') + f"#promo-page-{page_id}")
 
 
 @app.route('/admin/slideshow/promo/bg_upload', methods=['POST'])

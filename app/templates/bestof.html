@@ -66,6 +66,25 @@
       border: 1px solid rgba(255,255,255,.15);
     }
 
+    /* Bouton pause : fige le diaporama sur la slide en cours (voir
+       pauseSlideshow/resumeSlideshow ci-dessous) -- coin haut-droit, seul
+       coin encore libre (bas-gauche = #slideBadge, bas-droit = #slideMediaId,
+       haut-gauche = #slideTags). Masqué par défaut (opacity), réapparaît au
+       moindre mouvement de souris/tactile (voir showControls()) et reste
+       affiché tant que le diaporama est en pause -- sinon impossible de le
+       retrouver pour reprendre la lecture. */
+    #pauseBtn {
+      position: absolute; top: 24px; right: 24px; z-index: 10;
+      width: 44px; height: 44px; border-radius: 50%;
+      background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.2);
+      color: #fff; font-size: 17px; line-height: 1; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      backdrop-filter: blur(4px); opacity: 0; transition: opacity .25s ease;
+    }
+    #pauseBtn.visible { opacity: 1; }
+    #pauseBtn:hover { background: rgba(0,0,0,.75); }
+    #pauseBtn.is-paused { border-color: rgba(255,255,255,.4); }
+
     /* Pages promo (fond + QR + texte WYSIWYG) — voir /admin/slideshow →
        Pages promo. Plusieurs pages actives tournent en rotation, chacune
        avec sa propre fréquence, son temps de pause et son effet visuel
@@ -161,6 +180,7 @@
   <div id="slideBadge" class="hidden">Invité</div>
   <div id="slideMediaId" class="hidden"></div>
   <div id="slideTags" class="hidden"></div>
+  <button id="pauseBtn" type="button" aria-label="Mettre en pause" title="Pause (espace)">❚❚</button>
   <div id="empty" style="display:none">Aucun média à afficher.</div>
 </div>
 
@@ -175,6 +195,18 @@
   let showTags = false;
   let tagsStyle = { font: 'system-ui, sans-serif', bg_color: '#0d8b8f', text_color: '#ffffff', font_size: 14 };
   let cleanup = null;
+
+  // Pause (voir #pauseBtn ci-dessous) : fige le diaporama sur la slide en
+  // cours plutôt que d'essayer de calculer un temps restant précis --
+  // pauseSlideshow() annule simplement le minuteur/la vidéo de la slide
+  // affichée (via `cleanup`, déjà prévu pour ça), resumeSlideshow()
+  // reprogramme un minuteur COMPLET (ou relance la vidéo) pour cette même
+  // slide. pauseVideoEl/pauseAdvanceFn/pauseDurationMs sont posés par
+  // showNext() ci-dessous, une fois par slide affichée, à côté de `cleanup`.
+  let paused = false;
+  let pauseVideoEl = null;    // <video> de la slide affichée, si c'en est une
+  let pauseAdvanceFn = null;  // callback "passer à la slide suivante" de la slide affichée
+  let pauseDurationMs = null; // durée totale (photo/promo) à reprogrammer à la reprise
 
   function shuffle(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
@@ -325,8 +357,12 @@
 
     if (slide.type === 'promo') {
       buildPromoContent(nextEl, slide.page);
-      const t = setTimeout(advance, (slide.page.pause_seconds || 8) * 1000);
+      const duration = (slide.page.pause_seconds || 8) * 1000;
+      const t = setTimeout(advance, duration);
       cleanup = () => clearTimeout(t);
+      pauseVideoEl = null;
+      pauseAdvanceFn = advance;
+      pauseDurationMs = duration;
     } else if (slide.type === 'video') {
       nextEl.innerHTML = '';
       const v = document.createElement('video');
@@ -340,6 +376,9 @@
       const guard = setTimeout(advance, 120_000); // sécurité 2 min max
       cleanup = () => { clearTimeout(guard); v.pause(); };
       nextEl.appendChild(v);
+      pauseVideoEl = v;
+      pauseAdvanceFn = advance;
+      pauseDurationMs = null;
     } else {
       nextEl.innerHTML = '';
       const el = document.createElement('img');
@@ -347,8 +386,12 @@
       el.src = slide.url;
       el.onerror = advance;
       nextEl.appendChild(el);
-      const t = setTimeout(advance, settings.delay * 1000);
+      const duration = settings.delay * 1000;
+      const t = setTimeout(advance, duration);
       cleanup = () => clearTimeout(t);
+      pauseVideoEl = null;
+      pauseAdvanceFn = advance;
+      pauseDurationMs = duration;
     }
 
     // Crossfade
@@ -386,6 +429,68 @@
       }
     }
   }
+
+  // ── Pause (voir #pauseBtn) ────────────────────────────────────────────
+  const pauseBtn = document.getElementById('pauseBtn');
+
+  function updatePauseUI() {
+    if (!pauseBtn) return;
+    pauseBtn.textContent = paused ? '►' : '❚❚';
+    pauseBtn.classList.toggle('is-paused', paused);
+    pauseBtn.setAttribute('aria-label', paused ? 'Reprendre le diaporama' : 'Mettre en pause');
+    pauseBtn.title = paused ? 'Reprendre (espace)' : 'Pause (espace)';
+    if (paused) pauseBtn.classList.add('visible'); // rester visible tant qu'en pause, sinon impossible à retrouver
+  }
+
+  function pauseSlideshow() {
+    if (paused || !cleanup) return; // rien à figer avant l'affichage de la 1re slide
+    paused = true;
+    cleanup(); // annule le minuteur en cours -- pour une vidéo, met aussi en pause sa lecture (voir showNext())
+    cleanup = null;
+    updatePauseUI();
+  }
+
+  function resumeSlideshow() {
+    if (!paused) return;
+    paused = false;
+    if (pauseVideoEl) {
+      pauseVideoEl.play().catch(() => {}); // 'ended'/'error' déjà écoutés depuis showNext(), pas à reposer
+      const guard = setTimeout(pauseAdvanceFn, 120_000);
+      const v = pauseVideoEl;
+      cleanup = () => { clearTimeout(guard); v.pause(); };
+    } else if (pauseAdvanceFn) {
+      const t = setTimeout(pauseAdvanceFn, pauseDurationMs || 5000);
+      cleanup = () => clearTimeout(t);
+    }
+    updatePauseUI();
+  }
+
+  function togglePause() { paused ? resumeSlideshow() : pauseSlideshow(); }
+
+  if (pauseBtn) pauseBtn.addEventListener('click', togglePause);
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.key === ' ') {
+      e.preventDefault();
+      togglePause();
+    }
+  });
+
+  // Bouton masqué par défaut (voir #pauseBtn, CSS) : réapparaît au moindre
+  // geste (souris déplacée, écran tactile touché) puis se refond après
+  // quelques secondes d'inactivité -- sauf en pause, où il doit rester
+  // trouvable pour reprendre la lecture (voir updatePauseUI() ci-dessus).
+  let hideControlsTimer = null;
+  function showControls() {
+    if (!pauseBtn) return;
+    pauseBtn.classList.add('visible');
+    clearTimeout(hideControlsTimer);
+    hideControlsTimer = setTimeout(() => {
+      if (!paused) pauseBtn.classList.remove('visible');
+    }, 3000);
+  }
+  window.addEventListener('mousemove', showControls, { passive: true });
+  window.addEventListener('touchstart', showControls, { passive: true });
+  showControls();
 
   let lastData = null; // dernières captures/images reçues, réutilisées pour reconstruire
                         // la liste sans re-fetch quand seules les pages promo sont rafraîchies

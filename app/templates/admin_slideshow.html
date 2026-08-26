@@ -13,6 +13,7 @@
   <script src="{{ url_for('static', filename='ckeditor5/ckeditor5.umd.js') }}" defer></script>
   <script src="{{ url_for('static', filename='ckeditor5/translations/fr.umd.js') }}" defer></script>
   <script src="{{ url_for('static', filename='promo-editor.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='promo-timeline.js') }}" defer></script>
   <style>
     .admin-wrap  { max-width: 900px; margin: 0 auto; padding: 40px 20px 60px; }
     .back-link   { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
@@ -222,6 +223,76 @@
                      background: #14161a;
                      color: #fff; font-size: 12px; text-align: center; padding: 8px; }
     .bg-gradient-swatch { aspect-ratio: 16/9; width: 100%; display: block; }
+
+    /* Plages horaires par page promo (fréquence variable) — petits
+       formulaires sous chaque page (voir la boucle promo_schedules
+       ci-dessous) : une ligne = un créneau, édition + suppression côte à
+       côte (deux <form> distincts, un seul <form> ne peut pas imbriquer un
+       bouton "supprimer" avec confirmation séparée du bouton "enregistrer"
+       du créneau). */
+    .promo-schedule-block { margin-top: 4px; }
+    .promo-schedule-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+    .promo-schedule-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+                           background: var(--surface-2); border: 1px solid var(--border);
+                           border-radius: 10px; padding: 8px 10px; }
+    .promo-schedule-row form { display: flex; align-items: center; gap: 8px; margin: 0; flex-wrap: wrap; }
+    .promo-schedule-sep { font-size: 13px; color: var(--muted); white-space: nowrap; }
+    .promo-schedule-row input[type=time] {
+      background: var(--surface); border: 1px solid var(--border); color: var(--text);
+      border-radius: 8px; padding: 6px 8px; font-size: 13px;
+    }
+    .promo-schedule-row input[type=number] {
+      background: var(--surface); border: 1px solid var(--border); color: var(--text);
+      border-radius: 8px; padding: 6px 8px; font-size: 13px;
+    }
+    .promo-schedule-row .btn-danger { padding: 6px 10px; font-size: 12px; }
+    .promo-schedule-add { background: transparent; border-style: dashed; }
+    .promo-schedule-hint { font-size: 12px; color: var(--muted); margin: 6px 0 14px; }
+
+    /* Timeline visuelle 24h (toutes les pages promo, tous leurs créneaux) —
+       voir static/promo-timeline.js, qui construit .promo-timeline-rows à
+       partir de #promo-timeline-data. Bâtie en pourcentages (0-100% = 0h-24h)
+       plutôt qu'en SVG : plus simple à styliser (thème sombre existant) et à
+       manipuler au glisser (calcul de position = simple règle de trois sur
+       la largeur du conteneur). */
+    .promo-timeline-section { margin-bottom: 32px; }
+    .promo-timeline-wrap { background: var(--surface); border: 1px solid var(--border);
+                            border-radius: 16px; padding: 20px 24px 16px; }
+    .promo-timeline-ruler { position: relative; height: 18px; margin-left: 160px;
+                             border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+    .promo-timeline-tick { position: absolute; top: 0; transform: translateX(-50%);
+                            font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .promo-timeline-rows { display: flex; flex-direction: column; gap: 8px; }
+    .promo-timeline-row { display: flex; align-items: center; gap: 0; min-height: 34px; }
+    .promo-timeline-row-inactive { opacity: .45; }
+    .promo-timeline-row-label { width: 160px; flex: 0 0 160px; font-size: 12px; color: var(--text);
+                                 padding-right: 12px; overflow: hidden; text-overflow: ellipsis;
+                                 white-space: nowrap; }
+    .promo-timeline-track { position: relative; flex: 1; height: 30px; background: var(--surface-2);
+                             border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .promo-timeline-track::before,
+    .promo-timeline-track::after,
+    .promo-timeline-track .promo-timeline-gridline { position: absolute; top: 0; bottom: 0; width: 1px;
+                             background: rgba(255,255,255,.06); }
+    .promo-timeline-segment { position: absolute; top: 2px; bottom: 2px; border-radius: 5px;
+                               display: flex; align-items: center; justify-content: center;
+                               font-size: 10px; font-weight: 700; color: #fff; overflow: hidden;
+                               cursor: grab; user-select: none; box-shadow: 0 0 0 1px rgba(0,0,0,.25) inset; }
+    .promo-timeline-segment:active { cursor: grabbing; }
+    .promo-timeline-segment.is-dragging { z-index: 5; filter: brightness(1.15); }
+    .promo-timeline-segment.is-wrap { cursor: default; }
+    .promo-timeline-handle { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+    .promo-timeline-handle-left  { left: 0; }
+    .promo-timeline-handle-right { right: 0; }
+    .promo-timeline-handle::after { content: ''; position: absolute; top: 50%; left: 50%;
+                                     width: 2px; height: 60%; background: rgba(255,255,255,.6);
+                                     transform: translate(-50%, -50%); border-radius: 2px; }
+    .promo-timeline-now { position: absolute; top: -4px; bottom: -4px; width: 2px;
+                           background: #e57373; z-index: 6; pointer-events: none; }
+    .promo-timeline-now::before { content: ''; position: absolute; top: -4px; left: 50%;
+                                   width: 7px; height: 7px; border-radius: 50%; background: #e57373;
+                                   transform: translateX(-50%); }
+    .promo-timeline-empty { color: var(--muted); font-size: 13px; }
   </style>
 </head>
 <body class="gallery-body" data-admin-page="slideshow">
@@ -358,6 +429,33 @@
 
     <script id="promo-editor-config" type="application/json">
       {"fonts": {{ promo_fonts | tojson }}, "sizes": {{ promo_text_sizes | tojson }}}
+    </script>
+
+    <!-- Timeline visuelle 24h : vue d'ensemble des fréquences de TOUTES les
+         pages promo selon leurs plages horaires (voir promo_schedules
+         ci-dessous et static/promo-timeline.js). Chaque créneau peut être
+         redimensionné (poignées gauche/droite) ou déplacé (glisser le bloc)
+         directement ici -- un aller-retour AJAX met à jour la base et les
+         petits formulaires de la page concernée à chaque relâchement.
+         Les créneaux traversant minuit (fin < début) sont affichés en deux
+         tronçons mais restent modifiables seulement via leur formulaire
+         (pas de glisser fiable pour une plage coupée en deux visuellement). -->
+    <div class="promo-timeline-section">
+      <p class="section-title" style="font-size:15px;border:none;margin-bottom:10px">
+        Timeline des fréquences (0h → 24h)
+        <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
+          Glissez le bord ou le centre d'un créneau pour changer ses heures
+        </span>
+      </p>
+      <div class="promo-timeline-wrap">
+        <div class="promo-timeline-ruler" id="promo-timeline-ruler"></div>
+        <div class="promo-timeline-rows" id="promo-timeline-rows">
+          <p class="promo-timeline-empty">Chargement…</p>
+        </div>
+      </div>
+    </div>
+    <script id="promo-timeline-data" type="application/json">
+      {"pages": {{ timeline_pages | tojson }}, "schedules": {{ timeline_schedules | tojson }}}
     </script>
 
     {% if promo_pages %}
@@ -524,6 +622,62 @@
           <button class="btn-primary" type="submit">Enregistrer la page</button>
           <a class="preview-link" href="{{ url_for('bestof') }}" target="_blank">↗ Voir le slideshow</a>
         </form>
+
+        <!-- Plages horaires à fréquence différente : formulaires séparés du
+             formulaire d'édition ci-dessus (chaque créneau a son propre
+             submit, indépendant du reste de la page) -- voir promo_schedules
+             (app.py, groupé par page) et les routes admin_promo_schedule_*.
+             La timeline visuelle tout en haut de la section permet aussi de
+             glisser ces mêmes créneaux directement (voir data-schedule-id
+             ci-dessous, ciblé par static/promo-timeline.js pour tenir ces
+             champs à jour après un glisser). -->
+        <div class="field promo-schedule-block" style="margin-top:20px">
+          <label>Plages horaires à fréquence différente
+            <span style="font-weight:400;color:var(--muted)">(optionnel)</span>
+          </label>
+          <p class="promo-schedule-hint">
+            En dehors de ces plages, la fréquence par défaut ci-dessus reste utilisée.
+            En cas de chevauchement entre deux plages, la plus récemment créée l'emporte.
+          </p>
+
+          {% set page_schedules = promo_schedules.get(page.id, []) %}
+          {% if page_schedules %}
+          <div class="promo-schedule-list">
+            {% for sch in page_schedules %}
+            <div class="promo-schedule-row" id="promo-schedule-row-{{ sch.id }}" data-schedule-id="{{ sch.id }}">
+              <form method="post" action="{{ url_for('admin_promo_schedule_update', page_id=page.id, schedule_id=sch.id) }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="time" name="start" class="promo-schedule-start-input"
+                       value="{{ '%02d:%02d' | format(sch.start_minutes // 60, sch.start_minutes % 60) }}">
+                <span class="promo-schedule-sep">→</span>
+                <input type="time" name="end" class="promo-schedule-end-input"
+                       value="{{ '%02d:%02d' | format(sch.end_minutes // 60, sch.end_minutes % 60) }}">
+                <span class="promo-schedule-sep">1 fois /</span>
+                <input type="number" name="frequency" min="1" max="200" value="{{ sch.frequency }}" style="max-width:80px">
+                <button type="submit" class="btn-primary" style="padding:6px 14px;font-size:12px">Enregistrer</button>
+              </form>
+              <form method="post" action="{{ url_for('admin_promo_schedule_delete', page_id=page.id, schedule_id=sch.id) }}"
+                    onsubmit="return confirm('Supprimer cette plage horaire ?')">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button class="btn-danger" type="submit" title="Supprimer cette plage">✕</button>
+              </form>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <div class="promo-schedule-row promo-schedule-add">
+            <form method="post" action="{{ url_for('admin_promo_schedule_create', page_id=page.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="time" name="start" value="18:00">
+              <span class="promo-schedule-sep">→</span>
+              <input type="time" name="end" value="20:00">
+              <span class="promo-schedule-sep">1 fois /</span>
+              <input type="number" name="frequency" min="1" max="200" value="3" style="max-width:80px">
+              <button type="submit" class="btn-primary" style="padding:6px 14px;font-size:12px">+ Ajouter une plage</button>
+            </form>
+          </div>
+        </div>
 
         <form method="post" action="{{ url_for('admin_promo_page_delete', page_id=page.id) }}"
               onsubmit="return confirm('Supprimer définitivement cette page promo ?')" style="margin-top:14px">
