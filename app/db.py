@@ -476,6 +476,16 @@ def init_db():
         except Exception:
             pass  # colonne déjà présente
 
+        # Actif/inactif par image d'écran de veille (v2.0.8) -- permet de
+        # mettre en pause une image dans la rotation de l'écran de veille
+        # sans la supprimer de la bibliothèque (elle reste disponible pour
+        # une insertion via le sélecteur média du WYSIWYG des pages promo).
+        try:
+            conn.execute("ALTER TABLE screensaver_images ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+            conn.commit()
+        except Exception:
+            pass  # colonne déjà présente
+
         # Migration v2.0.3 (éditeur -> Quill) : enveloppe les <img> "nues"
         # dans le html_content déjà enregistré -- voir _wrap_bare_images_for_quill
         # ci-dessus. Relit/réécrit chaque page une seule fois par démarrage ;
@@ -1074,11 +1084,13 @@ def move_promo_page(page_id, direction):
 
 # ── Écran de veille (images dédiées) ─────────────────────────────────────────
 
-def list_screensaver_images():
+def list_screensaver_images(active_only=False):
+    query = 'SELECT * FROM screensaver_images'
+    if active_only:
+        query += ' WHERE active = 1'
+    query += ' ORDER BY created_at DESC'
     with closing(db_conn()) as conn:
-        rows = conn.execute(
-            'SELECT * FROM screensaver_images ORDER BY created_at DESC'
-        ).fetchall()
+        rows = conn.execute(query).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -1102,6 +1114,15 @@ def delete_screensaver_image_db(image_id):
         conn.execute('DELETE FROM screensaver_images WHERE id = ?', (image_id,))
         conn.commit()
     return img
+
+
+def set_screensaver_image_active(image_id, active):
+    with closing(db_conn()) as conn:
+        conn.execute(
+            'UPDATE screensaver_images SET active = ? WHERE id = ?',
+            (1 if active else 0, image_id)
+        )
+        conn.commit()
 
 
 # ── Fond d'écran Windows (images disponibles) ────────────────────────────────

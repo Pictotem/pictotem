@@ -59,6 +59,7 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 upsert_frame,
                 list_slideshow_images, add_slideshow_image, delete_slideshow_image_db,
                 list_screensaver_images, add_screensaver_image, delete_screensaver_image_db,
+                set_screensaver_image_active,
                 cast_vote, admin_adjust_vote, get_voter_votes,
                 add_guest_upload, list_guest_uploads, list_approved_guest_uploads,
                 count_guest_uploads_by_token, set_guest_upload_status, delete_guest_upload_db,
@@ -3535,6 +3536,11 @@ def admin_media():
                 return redirect(url_for('admin_media', ok='Image supprimée.'))
             return redirect(url_for('admin_media', err='Image introuvable.'))
 
+        if action == 'toggle_screensaver_active':
+            image_id = int(request.form.get('image_id', 0))
+            set_screensaver_image_active(image_id, bool(request.form.get('active')))
+            return redirect(url_for('admin_media'))
+
         abort(404)
 
     blocks, block_context = _admin_render_blocks('media')
@@ -5660,7 +5666,7 @@ def api_screensaver_slides():
         ]
     screensaver_imgs = [
         {'type': 'image', 'url': f'/static/screensaver/{img["filename"]}'}
-        for img in list_screensaver_images()
+        for img in list_screensaver_images(active_only=True)
     ]
     return jsonify({
         'captures':           captures,
