@@ -125,8 +125,17 @@ _PROMO_HTML_ALLOWED_TAGS = {
     # utilisé par le module table de Quill pour retrouver quelles cellules
     # appartiennent à la même ligne -- doit survivre pour rester éditable
     # après réenregistrement, voir _PROMO_HTML_DATA_ROW_RE).
-    'p': {'style'}, 'br': set(), 'b': set(), 'strong': set(), 'i': set(), 'em': set(),
-    'u': set(), 'ul': set(), 'ol': set(), 'li': {'style', 'data-list', 'class'},
+    # v2.0.4 (correctif) : 'b'/'strong'/'i'/'em'/'u' gagnent aussi 'style' --
+    # quand plusieurs formats de texte se superposent sur le même passage
+    # (gras + couleur, italique + taille...), Quill fusionne le style
+    # (police/taille/couleur) sur la balise de mise en forme la plus
+    # extérieure plutôt que d'ouvrir un <span> dédié (ex. <strong
+    # style="color:...">) -- sans 'style' ici, sanitize_promo_html retirait
+    # silencieusement la couleur/police/taille de tout texte en gras/
+    # italique/souligné à l'enregistrement (elle redevenait blanche par
+    # défaut au rechargement).
+    'p': {'style'}, 'br': set(), 'b': {'style'}, 'strong': {'style'}, 'i': {'style'}, 'em': {'style'},
+    'u': {'style'}, 'ul': set(), 'ol': set(), 'li': {'style', 'data-list', 'class'},
     'div': {'style'}, 'span': {'style', 'class'},
     # v2.0.1 : image (sélecteur médiathèque/captures du WYSIWYG -- voir
     # static/promo-editor.js) et tableaux basiques.
@@ -305,7 +314,7 @@ class _PromoHtmlSanitizer(HTMLParser):
         allowed_attrs = _PROMO_HTML_ALLOWED_TAGS[tag]
         kept = []
         for name, value in attrs:
-            if name == 'style' and tag in ('div', 'span', 'p', 'li') and 'style' in allowed_attrs and value:
+            if name == 'style' and tag in ('div', 'span', 'p', 'li', 'b', 'strong', 'i', 'em', 'u') and 'style' in allowed_attrs and value:
                 cleaned = _sanitize_style_by_props(value, _PROMO_HTML_TEXT_STYLE_PROPS)
                 if cleaned:
                     kept.append(f'style="{escape(cleaned, quote=True)}"')
