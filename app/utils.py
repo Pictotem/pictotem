@@ -114,113 +114,73 @@ def generate_qr_png_custom(data: str, fill_color: str = '#000000',
 # rester prudent (défense en profondeur, coût quasi nul).
 
 _PROMO_HTML_ALLOWED_TAGS = {
-    # v2.0.3 : éditeur WYSIWYG migré vers Quill (voir static/promo-editor.js)
-    # -- 'p'/'li' gagnent 'style' (alignement, voir _PROMO_HTML_STYLE_RE plus
-    # bas -- Quill est configuré pour émettre l'alignement en style inline
-    # plutôt qu'en classe CSS, justement pour rester validable ici), 'li'
-    # gagne 'data-list'/'class' (type de liste + niveau d'indentation, voir
-    # _PROMO_HTML_LI_DATA_LIST_RE/_PROMO_HTML_LI_CLASS_RE), 'span' gagne
-    # 'class' (marqueur UI ".ql-ui" -- pastille de puce/numéro générée par
-    # Quill, voir bestof.html), 'td' gagne 'data-row' (identifiant de ligne
-    # utilisé par le module table de Quill pour retrouver quelles cellules
-    # appartiennent à la même ligne -- doit survivre pour rester éditable
-    # après réenregistrement, voir _PROMO_HTML_DATA_ROW_RE).
-    # v2.0.4 (correctif) : 'b'/'strong'/'i'/'em'/'u' gagnent aussi 'style' --
-    # quand plusieurs formats de texte se superposent sur le même passage
-    # (gras + couleur, italique + taille...), Quill fusionne le style
-    # (police/taille/couleur) sur la balise de mise en forme la plus
-    # extérieure plutôt que d'ouvrir un <span> dédié (ex. <strong
-    # style="color:...">) -- sans 'style' ici, sanitize_promo_html retirait
-    # silencieusement la couleur/police/taille de tout texte en gras/
-    # italique/souligné à l'enregistrement (elle redevenait blanche par
-    # défaut au rechargement).
-    'p': {'style'}, 'br': set(), 'b': {'style'}, 'strong': {'style'}, 'i': {'style'}, 'em': {'style'},
-    'u': {'style'}, 'ul': set(), 'ol': set(), 'li': {'style', 'data-list', 'class'},
-    'div': {'style'}, 'span': {'style', 'class'},
-    # v2.0.1 : image (sélecteur médiathèque/captures du WYSIWYG -- voir
-    # static/promo-editor.js) et tableaux basiques.
-    'img': {'src', 'alt', 'style'},
-    # v2.0.4 : mise en forme des tableaux (bordure/marge/padding/couleur/
-    # largeur/hauteur), pilotée depuis la modale « Propriétés du tableau »
-    # du WYSIWYG (voir static/promo-editor.js) -- 'style' validé par
-    # _PROMO_HTML_TABLE_STYLE_PROPS ci-dessous, comme pour l'image.
-    'table': {'style'}, 'thead': set(), 'tbody': set(), 'tr': {'style'},
-    'td': {'colspan', 'rowspan', 'data-row', 'style'}, 'th': {'colspan', 'rowspan', 'style'},
+    # v2.0.9 : éditeur WYSIWYG migré vers CKEditor 5 (auto-hébergé, licence
+    # GPL -- voir static/ckeditor5/ : PAS de CDN ni de clé API, l'app tourne
+    # en kiosque, potentiellement sans accès internet). CKEditor gère
+    # nativement tableaux/images/listes (plus aucun bricolage
+    # contenteditable/blot Quill à valider ici) -- cette liste blanche
+    # correspond exactement aux balises/attributs que ses plugins
+    # (Table/TableProperties/TableCellProperties/TableColumnResize,
+    # Image/ImageStyle/ImageResize/ImageCaption, Alignment, FontFamily/
+    # FontSize/FontColor/FontBackgroundColor, List) peuvent produire -- voir
+    # static/promo-editor.js pour la config exacte des plugins.
+    'p': {'style'}, 'br': set(),
+    'b': {'style'}, 'strong': {'style'}, 'i': {'style'}, 'em': {'style'}, 'u': {'style'},
+    'ul': set(), 'ol': set(), 'li': set(),
+    'div': {'style'}, 'span': {'style'},
+    # Tableaux ET images CKEditor sont enveloppés dans un <figure> (voir
+    # _PROMO_HTML_FIGURE_CLASS_RE ci-dessous pour les classes tolérées :
+    # "table"/"image" + variantes d'alignement/redimensionnement) --
+    # <figcaption> uniquement pour la légende d'image (ImageCaption).
+    'figure': {'class', 'style'}, 'figcaption': set(),
+    # 'class' sur <img> : une image alignée à gauche/droite/centrée et/ou
+    # redimensionnée EN LIGNE (au fil du texte, pas dans un <figure> bloc)
+    # porte ses classes directement (voir _PROMO_HTML_IMG_CLASS_RE).
+    'img': {'src', 'alt', 'style', 'class'},
+    # <table class="ck-table-resized"> : marqueur posé par
+    # TableColumnResize dès qu'une colonne a été redimensionnée à la
+    # souris -- <colgroup>/<col style="width:…"> portent alors la largeur
+    # de chaque colonne (remplace l'ancien réglage unique "largeur de
+    # colonne" de la modale maison).
+    'table': {'style', 'class'}, 'colgroup': set(), 'col': {'style'},
+    'thead': set(), 'tbody': set(), 'tr': {'style'},
+    'td': {'colspan', 'rowspan', 'style'}, 'th': {'colspan', 'rowspan', 'style'},
 }
-# v2.0.4 : polices/tailles/couleurs de texte (boutons WYSIWYG) et mise en
-# forme des tableaux -- remplace la ancienne regex `_PROMO_HTML_STYLE_RE`
-# (une seule déclaration "text-align: X;", correspondance exacte de toute
-# la valeur) par une validation déclaration-par-déclaration (comme
-# _PROMO_HTML_IMG_STYLE_PROPS ci-dessous) : un span peut désormais combiner
-# police + taille + couleur + alignement sur la même balise.
-#
-# Couleur : Quill applique `color`/`background-color`/`border-color` via
-# `element.style.xxx = "#rrggbb"` -- le navigateur RECOMPOSE alors la valeur
-# de l'attribut `style` en relisant le CSSOM, qui sérialise les couleurs en
-# `rgb(r, g, b)` (constaté en pratique, pas seulement en théorie -- une
-# couleur posée en hexa ne survit donc JAMAIS telle quelle jusqu'à
-# `quill.root.innerHTML`) : la regex couleur ci-dessous accepte donc hexa
-# ET rgb()/rgba(), sous peine de voir toute couleur silencieusement retirée
-# à l'enregistrement.
+# Couleur : hexa ET rgb()/rgba() -- un navigateur qui recompose un style
+# depuis le CSSOM sérialise parfois une couleur posée en hexa vers rgb(),
+# constaté à l'usage avec Quill et gardé par prudence avec CKEditor.
 _PROMO_HTML_COLOR_VALUE_RE = re.compile(
     r'^(?:#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})'
     r'|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$'
 )
 _PROMO_HTML_FONT_FAMILY_RE = re.compile(r'^[A-Za-z0-9 ,\'"\-]{1,200}$')
 _PROMO_HTML_FONT_SIZE_RE = re.compile(r'^[1-9][0-9]{0,3}(?:\.[0-9]+)?(?:px|pt|em|rem|%)$')
+# v2.0.9 : + background-color (surlignage de texte, plugin
+# FontBackgroundColor -- nouveau, n'existait pas avec Quill).
 _PROMO_HTML_TEXT_STYLE_PROPS = {
-    'text-align':  re.compile(r'^(left|center|right|justify)$'),
-    'font-family': _PROMO_HTML_FONT_FAMILY_RE,
-    'font-size':   _PROMO_HTML_FONT_SIZE_RE,
-    'color':       _PROMO_HTML_COLOR_VALUE_RE,
+    'text-align':       re.compile(r'^(left|center|right|justify)$'),
+    'font-family':      _PROMO_HTML_FONT_FAMILY_RE,
+    'font-size':        _PROMO_HTML_FONT_SIZE_RE,
+    'color':            _PROMO_HTML_COLOR_VALUE_RE,
+    'background-color': _PROMO_HTML_COLOR_VALUE_RE,
 }
-# v2.0.3 : listes/tableaux Quill (voir static/promo-editor.js). data-list ne
-# peut valoir que ce que le WYSIWYG propose réellement (bouton liste
-# numérotée/à puces) ; class sur <li> ne sert qu'à l'indentation (Tab dans
-# l'éditeur, jamais exposé par un bouton dédié) -- une seule classe
-# ql-indent-N (N de 1 à 9), jamais combinée à autre chose. data-row identifie
-# la ligne d'une cellule de tableau pour le module table de Quill (valeur
-# opaque générée par Quill, jamais interprétée -- juste bornée en forme).
-_PROMO_HTML_LI_DATA_LIST_RE = re.compile(r'^(ordered|bullet)$')
-_PROMO_HTML_LI_CLASS_RE = re.compile(r'^ql-indent-[1-9]$')
-_PROMO_HTML_DATA_ROW_RE = re.compile(r'^[A-Za-z0-9_-]{1,40}$')
-# v2.0.2 : redimensionnement/alignement d'image (voir static/promo-editor.js
-# -- poignée de redimensionnement + boutons gauche/centre/droite/normal).
-# Contrairement à _PROMO_HTML_STYLE_RE ci-dessus (une seule déclaration,
-# correspondance exacte de toute la valeur), le style d'une image peut
-# combiner plusieurs déclarations : chacune est validée indépendamment.
-# Le style qui arrive ici est TOUJOURS généré par promo-editor.js (jamais
-# tapé à la main par l'admin), mais on valide quand même strictement, au
-# cas où le HTML aurait été modifié hors de l'éditeur (collé depuis
-# ailleurs, etc.).
-# v2.0.3 : le navigateur RECOMPOSE de lui-même 4 propriétés margin-* posées
-# individuellement (img.style.marginTop = ..., etc. -- voir
-# static/promo-editor.js) en un unique raccourci `margin: … … … …` dès que
-# le HTML est relu depuis le DOM (innerHTML) -- un comportement du CSSOM,
-# constaté avec Quill mais qui existait déjà à l'identique avec l'ancien
-# éditeur (execCommand), simplement jamais couvert par un test avant
-# l'ajout des vérifications de bout en bout en navigateur réel de cette
-# migration. Sans cette entrée, le raccourci n'était reconnu par aucune des
-# quatre propriétés margin-* ci-dessous et disparaissait entièrement à
-# l'enregistrement -- l'alignement (marges) d'une image ne survivait donc
-# jamais un enregistrement, silencieusement.
-#
-# v2.0.3 (correctif) : le CSSOM du navigateur normalise aussi une valeur zéro
-# SANS unité (posée en JS via `img.style.marginTop = '0'`) en `0px` dès qu'il
-# recompose le raccourci `margin` -- une valeur que le premier jet de cette
-# regex (n'acceptant que `0` nu) rejetait, ce qui faisait disparaître le
-# raccourci margin en entier dès qu'UNE seule des 4 valeurs valait zéro
-# (systématique ici : marge du haut/droite toujours à 0 selon le sens
-# d'alignement). Constaté via le test de bout en bout en navigateur réel
-# (round-trip enregistrement + rechargement), pas via les tests unitaires du
-# sanitizer (qui ne testaient qu'avec des chaînes construites à la main).
 _PROMO_HTML_IMG_MARGIN_VALUE_RE = r'(?:0|0px|[1-9][0-9]{0,2}px|auto)'
 _PROMO_HTML_IMG_MARGIN_SHORTHAND_RE = re.compile(
     r'^' + _PROMO_HTML_IMG_MARGIN_VALUE_RE + r'(?:\s+' + _PROMO_HTML_IMG_MARGIN_VALUE_RE + r'){0,3}$'
 )
+# v2.0.9 : largeur/hauteur en px OU % (redimensionnement CKEditor -- une
+# largeur posée par glisser d'un coin, voir ImageResize, est presque
+# toujours une valeur en px ; une largeur de colonne/tableau redimensionnée
+# par glisser, voir TableColumnResize plus bas, est presque toujours un
+# pourcentage AVEC décimales -- ex. "37.56%"). float/display/margin*
+# restent tolérés pour la RELECTURE d'anciennes pages enregistrées avec
+# l'ancien éditeur (Quill) -- CKEditor ne les émet plus lui-même (le
+# positionnement passe désormais par les classes image-style-* de
+# _PROMO_HTML_IMG_CLASS_RE, voir static/promo-editor.js/ckeditor5-content.css).
+_PROMO_HTML_LENGTH_PX_PCT_RE = re.compile(r'^(?:0|[1-9][0-9]{0,4}(?:\.[0-9]{1,4})?)(?:px|%)$')
 _PROMO_HTML_IMG_STYLE_PROPS = {
-    'width':         re.compile(r'^[1-9][0-9]{0,3}px$'),
-    'height':        re.compile(r'^(auto|[1-9][0-9]{0,3}px)$'),
+    'width':         _PROMO_HTML_LENGTH_PX_PCT_RE,
+    'height':        re.compile(r'^(auto|[1-9][0-9]{0,3}(?:\.[0-9]{1,4})?(?:px|%))$'),
     'float':         re.compile(r'^(left|right)$'),
     'display':       re.compile(r'^(block|inline-block)$'),
     'margin':        _PROMO_HTML_IMG_MARGIN_SHORTHAND_RE,
@@ -229,6 +189,39 @@ _PROMO_HTML_IMG_STYLE_PROPS = {
     'margin-bottom': re.compile(r'^(0|0px|auto|[1-9][0-9]{0,2}px)$'),
     'margin-left':   re.compile(r'^(0|0px|auto|[1-9][0-9]{0,2}px)$'),
 }
+# v2.0.9 : classes CKEditor tolérées sur <figure>/<img>/<table> -- posées
+# UNIQUEMENT par les plugins ImageStyle/ImageResize/TableProperties/
+# TableColumnResize eux-mêmes (jamais un champ libre), mais validées quand
+# même (le mode source, voir promo-editor.js -> SourceEditing, permet à
+# l'admin de taper/coller du HTML arbitraire).
+_PROMO_HTML_FIGURE_CLASS_TOKENS = {
+    'image', 'image_resized',
+    'image-style-align-left', 'image-style-align-right', 'image-style-align-center',
+    'image-style-side',
+    'image-style-block-align-left', 'image-style-block-align-right',
+    'table',
+    'table-style-align-left', 'table-style-align-right', 'table-style-align-center',
+    'table-style-block-align-left', 'table-style-block-align-right',
+}
+_PROMO_HTML_IMG_CLASS_TOKENS = {
+    'image_resized',
+    'image-style-align-left', 'image-style-align-right', 'image-style-align-center',
+    'image-style-side',
+}
+_PROMO_HTML_TABLE_CLASS_TOKENS = {'ck-table-resized'}
+
+
+def _sanitize_class_list(raw_class: str, allowed_tokens: set) -> str:
+    """Ne garde, parmi les classes séparées par espace de `raw_class`, que
+    celles présentes dans `allowed_tokens` -- même principe que
+    _sanitize_style_by_props ci-dessous mais pour l'attribut `class`."""
+    kept = [tok for tok in raw_class.split() if tok in allowed_tokens]
+    return ' '.join(kept)
+
+
+_PROMO_HTML_LI_DATA_LIST_RE = re.compile(r'^(ordered|bullet)$')
+_PROMO_HTML_LI_CLASS_RE = re.compile(r'^ql-indent-[1-9]$')
+_PROMO_HTML_DATA_ROW_RE = re.compile(r'^[A-Za-z0-9_-]{1,40}$')
 
 
 def _sanitize_style_by_props(raw_style: str, props: dict) -> str:
@@ -237,8 +230,7 @@ def _sanitize_style_by_props(raw_style: str, props: dict) -> str:
     plusieurs propriétés valides (ex. un <span> avec police + taille +
     couleur), chacune vérifiée séparément plutôt qu'une correspondance
     exacte de toute la valeur du style. Factorisé pour être réutilisé par
-    l'image (v2.0.2), le texte (v2.0.4 : police/taille/couleur/alignement)
-    et les tableaux (v2.0.4 : largeur/hauteur/bordure/marge/padding/couleur)."""
+    l'image, le texte et les tableaux."""
     kept = []
     for decl in raw_style.split(';'):
         if ':' not in decl:
@@ -256,33 +248,32 @@ def _sanitize_img_style(raw_style: str) -> str:
     return _sanitize_style_by_props(raw_style, _PROMO_HTML_IMG_STYLE_PROPS)
 
 
-# v2.0.4 : mise en forme des tableaux, pilotée par la modale « Propriétés du
-# tableau » du WYSIWYG (voir static/promo-editor.js) -- comme pour l'image,
-# le style qui arrive ici est TOUJOURS généré par du JS qui mutate le DOM
-# directement (jamais tapé à la main dans le mode WYSIWYG normal), mais reste
-# validé strictement car le mode source (voir promo-editor.js) permet à
-# l'admin de taper du HTML/CSS arbitraire. Bordure/padding/marge toujours
-# posés en propriétés longhand (border-width/-style/-color plutôt que le
-# raccourci `border`) -- plus simple à valider qu'un raccourci CSS, et c'est
-# déjà ce que promo-editor.js écrit.
-_PROMO_HTML_TABLE_LENGTH_RE = re.compile(r'^(?:0|[1-9][0-9]{0,4})(?:px|%)$')
+# v2.0.9 : mise en forme des tableaux (TableProperties/TableCellProperties,
+# voir static/promo-editor.js) -- `border` est désormais TOUJOURS un
+# raccourci CSS unique ("2px solid #ff0000", jamais les 3 propriétés
+# longhand séparées : constaté, CKEditor combine systématiquement
+# largeur/style/couleur de bordure en une seule déclaration au moment de
+# sérialiser le HTML, quelle que soit la façon dont l'admin les a réglées
+# dans le panneau "Propriétés"). Les propriétés longhand
+# (border-width/-style/-color) restent tolérées pour la RELECTURE de pages
+# enregistrées avec l'ancien éditeur (Quill) -- jamais réémises par
+# CKEditor lui-même.
 _PROMO_HTML_TABLE_SPACING_RE = re.compile(r'^(?:0|0px|[1-9][0-9]{0,2}px)$')
+_PROMO_HTML_BORDER_SHORTHAND_RE = re.compile(
+    r'^(?:none|[0-9]{1,2}px (?:solid|dashed|dotted|double) '
+    r'(?:#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})'
+    r'|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\)))$'
+)
 _PROMO_HTML_TABLE_STYLE_PROPS = {
-    'width':            _PROMO_HTML_TABLE_LENGTH_RE,
-    'height':           _PROMO_HTML_TABLE_LENGTH_RE,
+    'width':            _PROMO_HTML_LENGTH_PX_PCT_RE,
+    'height':           _PROMO_HTML_LENGTH_PX_PCT_RE,
+    'border':           _PROMO_HTML_BORDER_SHORTHAND_RE,
     'border-width':     re.compile(r'^(?:0|[1-9][0-9]?)px$'),
     'border-style':     re.compile(r'^(none|solid|dashed|dotted|double)$'),
     'border-color':     _PROMO_HTML_COLOR_VALUE_RE,
     'background-color': _PROMO_HTML_COLOR_VALUE_RE,
     'text-align':       re.compile(r'^(left|center|right|justify)$'),
     'vertical-align':   re.compile(r'^(top|middle|bottom)$'),
-    # v2.0.5 : espacement ENTRE les cellules (tableau, voir la modale
-    # « Propriétés du tableau » / static/promo-editor.js) -- border-collapse
-    # doit passer à "separate" pour que border-spacing ait un effet visuel
-    # (avec "collapse", la valeur par défaut posée par bestof.html/
-    # admin_slideshow.html, les bordures fusionnent et tout espacement est
-    # ignoré par le navigateur) : promo-editor.js pose toujours les deux
-    # ensemble, jamais l'un sans l'autre.
     'border-collapse':  re.compile(r'^(collapse|separate)$'),
     'border-spacing':   _PROMO_HTML_TABLE_SPACING_RE,
     'margin':           _PROMO_HTML_IMG_MARGIN_SHORTHAND_RE,
@@ -298,6 +289,11 @@ _PROMO_HTML_TABLE_STYLE_PROPS = {
     'padding-bottom':   _PROMO_HTML_TABLE_SPACING_RE,
     'padding-left':     _PROMO_HTML_TABLE_SPACING_RE,
 }
+# <figure style="width:…"> (taille du tableau/de l'image posée par
+# TableProperties ou ImageResize) et <col style="width:…"> (largeur de
+# colonne individuelle, voir TableColumnResize) : uniquement une largeur.
+_PROMO_HTML_FIGURE_STYLE_PROPS = {'width': _PROMO_HTML_LENGTH_PX_PCT_RE}
+_PROMO_HTML_COL_STYLE_PROPS = {'width': _PROMO_HTML_LENGTH_PX_PCT_RE}
 # src d'image : uniquement un chemin relatif au même site -- jamais de
 # protocole (javascript:, data:...), jamais "//hôte-externe/..." qui serait
 # interprété comme une URL protocole-relative vers un autre domaine.
@@ -335,6 +331,14 @@ class _PromoHtmlSanitizer(HTMLParser):
                 cleaned = _sanitize_style_by_props(value, _PROMO_HTML_TABLE_STYLE_PROPS)
                 if cleaned:
                     kept.append(f'style="{escape(cleaned, quote=True)}"')
+            elif name == 'style' and tag == 'figure' and 'style' in allowed_attrs and value:
+                cleaned = _sanitize_style_by_props(value, _PROMO_HTML_FIGURE_STYLE_PROPS)
+                if cleaned:
+                    kept.append(f'style="{escape(cleaned, quote=True)}"')
+            elif name == 'style' and tag == 'col' and 'style' in allowed_attrs and value:
+                cleaned = _sanitize_style_by_props(value, _PROMO_HTML_COL_STYLE_PROPS)
+                if cleaned:
+                    kept.append(f'style="{escape(cleaned, quote=True)}"')
             elif (name == 'src' and 'src' in allowed_attrs and value
                     and _PROMO_HTML_IMG_SRC_RE.match(value.strip())):
                 kept.append(f'src="{escape(value.strip(), quote=True)}"')
@@ -343,18 +347,18 @@ class _PromoHtmlSanitizer(HTMLParser):
             elif (name in ('colspan', 'rowspan') and name in allowed_attrs and value
                     and _PROMO_HTML_SPAN_RE.match(value.strip())):
                 kept.append(f'{name}="{value.strip()}"')
-            elif (name == 'data-row' and tag == 'td' and 'data-row' in allowed_attrs and value
-                    and _PROMO_HTML_DATA_ROW_RE.match(value.strip())):
-                kept.append(f'data-row="{escape(value.strip(), quote=True)}"')
-            elif (name == 'data-list' and tag == 'li' and 'data-list' in allowed_attrs and value
-                    and _PROMO_HTML_LI_DATA_LIST_RE.match(value.strip())):
-                kept.append(f'data-list="{value.strip()}"')
-            elif (name == 'class' and tag == 'li' and 'class' in allowed_attrs and value
-                    and _PROMO_HTML_LI_CLASS_RE.match(value.strip())):
-                kept.append(f'class="{value.strip()}"')
-            elif (name == 'class' and tag == 'span' and 'class' in allowed_attrs
-                    and value and value.strip() == 'ql-ui'):
-                kept.append('class="ql-ui"')
+            elif name == 'class' and tag == 'figure' and 'class' in allowed_attrs and value:
+                cleaned = _sanitize_class_list(value, _PROMO_HTML_FIGURE_CLASS_TOKENS)
+                if cleaned:
+                    kept.append(f'class="{cleaned}"')
+            elif name == 'class' and tag == 'img' and 'class' in allowed_attrs and value:
+                cleaned = _sanitize_class_list(value, _PROMO_HTML_IMG_CLASS_TOKENS)
+                if cleaned:
+                    kept.append(f'class="{cleaned}"')
+            elif name == 'class' and tag == 'table' and 'class' in allowed_attrs and value:
+                cleaned = _sanitize_class_list(value, _PROMO_HTML_TABLE_CLASS_TOKENS)
+                if cleaned:
+                    kept.append(f'class="{cleaned}"')
         attr_str = (' ' + ' '.join(kept)) if kept else ''
         self.out.append(f'<{tag}{attr_str}>')
 
@@ -370,7 +374,7 @@ class _PromoHtmlSanitizer(HTMLParser):
 
     def handle_endtag(self, tag):
         if tag in _PROMO_HTML_ALLOWED_TAGS:
-            if tag not in ('br', 'img'):
+            if tag not in ('br', 'img', 'col'):
                 self.out.append(f'</{tag}>')
         elif self._skip_depth > 0:
             self._skip_depth -= 1
@@ -378,6 +382,7 @@ class _PromoHtmlSanitizer(HTMLParser):
     def handle_data(self, data):
         if self._skip_depth == 0:
             self.out.append(escape(data))
+
 
 
 def sanitize_promo_html(raw_html: str) -> str:
