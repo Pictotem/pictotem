@@ -136,6 +136,15 @@
       ],
       fontFamily: { options: fontFamilyOptions, supportAllValues: true },
       fontSize: { options: fontSizeOptions, supportAllValues: true },
+      // v2.0.10 (correctif) : le sélecteur personnalisé (pipette) de
+      // couleur de police/surlignage sérialise en HSL par défaut -- forcé
+      // en hex ici, cohérent avec tous les autres sélecteurs de couleur de
+      // cette page (tous des <input type=color>). Les pastilles de la
+      // palette prédéfinie restent en HSL malgré ce réglage (non couvert
+      // par colorPicker.format) -- voir sanitize_promo_html (utils.py),
+      // qui accepte désormais aussi ce format en secours.
+      fontColor: { colorPicker: { format: 'hex' } },
+      fontBackgroundColor: { colorPicker: { format: 'hex' } },
       table: {
         contentToolbar: [
           'tableColumn', 'tableRow', 'mergeTableCells',

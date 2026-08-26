@@ -149,9 +149,19 @@ _PROMO_HTML_ALLOWED_TAGS = {
 # Couleur : hexa ET rgb()/rgba() -- un navigateur qui recompose un style
 # depuis le CSSOM sérialise parfois une couleur posée en hexa vers rgb(),
 # constaté à l'usage avec Quill et gardé par prudence avec CKEditor.
+# v2.0.10 (correctif) : le sélecteur de couleur de police/surlignage de
+# CKEditor (voir static/promo-editor.js -- FontColor/FontBackgroundColor)
+# sérialise TOUJOURS ses pastilles de couleur prédéfinies en HSL
+# ("hsl(220, 60%, 50%)"), quelle que soit la config colorPicker.format
+# (qui ne s'applique qu'au sélecteur personnalisé/pipette, jamais aux
+# pastilles de la palette). Sans hsl()/hsla() ici, une couleur choisie
+# depuis la palette prédéfinie disparaissait silencieusement à
+# l'enregistrement (constaté : le champ style="color:…" entier était
+# retiré, faute de correspondre à un des deux formats précédents).
 _PROMO_HTML_COLOR_VALUE_RE = re.compile(
     r'^(?:#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})'
-    r'|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$'
+    r'|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\)'
+    r'|hsla?\(\s*\d{1,3}\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$'
 )
 _PROMO_HTML_FONT_FAMILY_RE = re.compile(r'^[A-Za-z0-9 ,\'"\-]{1,200}$')
 _PROMO_HTML_FONT_SIZE_RE = re.compile(r'^[1-9][0-9]{0,3}(?:\.[0-9]+)?(?:px|pt|em|rem|%)$')
