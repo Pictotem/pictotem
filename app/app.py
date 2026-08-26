@@ -5078,6 +5078,12 @@ _PROMO_FONTS = [
     ('"Courier New", monospace',          'Courier New'),
     ('"Comic Sans MS", cursive',          'Comic Sans MS'),
 ]
+# Tailles proposées par le sélecteur "Taille" de la barre d'outils WYSIWYG
+# (voir static/promo-editor.js -- attributor `size` enregistré SANS liste
+# blanche, donc n'importe quelle valeur reste utilisable en mode source ;
+# cette liste ne sert qu'à peupler le <select> de raccourcis). Remplace
+# l'ancien champ indépendant "Taille du texte (px)" (min 10, max 120).
+_PROMO_TEXT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36, 42, 48, 56, 64, 80, 96, 120]
 # Effets visuels disponibles à l'apparition d'une page promo (voir bestof.html
 # → .slide-promo.effect-* pour les animations CSS correspondantes). 'fade' ne
 # rajoute rien : le fondu-enchaîné entre slides existe déjà globalement.
@@ -5155,10 +5161,11 @@ def _promo_page_public(page: dict) -> dict:
         'background_angle':  page.get('background_angle') or 135,
         'background_bg_color': page.get('background_bg_color') or '#14161a',
         'overlay_enabled': bool(page['overlay_enabled']),
+        # v2.0.4 : text_font/text_size/text_color ne sont plus exposés ici --
+        # la mise en forme du texte vit désormais entièrement dans
+        # html_content (styles en ligne posés par le WYSIWYG), voir
+        # admin_promo_page_update ci-dessus.
         'html_content':    _resolve_inline_qrcodes(resolve_dynamic_placeholders(page['html_content'] or '')),
-        'text_font':       page['text_font'],
-        'text_size':       page['text_size'],
-        'text_color':      page['text_color'],
         'effect':          page['effect'],
         'custom_css':      page.get('custom_css') or '',
     }
@@ -5375,6 +5382,7 @@ def admin_slideshow():
         promo_pages=list_promo_pages(),
         promo_backgrounds=list_promo_backgrounds(),
         promo_fonts=_all_fonts(),
+        promo_text_sizes=_PROMO_TEXT_SIZES,
         promo_effects=_PROMO_EFFECTS,
         media_library=_promo_media_library(),
         capture_library=_promo_capture_library(),
@@ -5434,18 +5442,14 @@ def admin_promo_page_update(page_id):
     if raw_pause.isdigit() and int(raw_pause) > 0:
         fields['pause_seconds'] = int(raw_pause)
 
-    raw_tsize = (request.form.get('text_size') or '').strip()
-    if raw_tsize.isdigit() and int(raw_tsize) >= 10:
-        fields['text_size'] = int(raw_tsize)
-
-    font_value = request.form.get('text_font', '')
-    if font_value in dict(_all_fonts()):
-        fields['text_font'] = font_value
-
-    color_value = request.form.get('text_color', '').strip()
-    if re.fullmatch(r'#[0-9a-fA-F]{6}', color_value):
-        fields['text_color'] = color_value
-
+    # v2.0.4 : "Taille du texte"/"Police"/"Couleur du texte" (champs
+    # indépendants) supprimés -- toute la mise en forme du texte passe
+    # désormais par la barre d'outils WYSIWYG elle-même (voir
+    # static/promo-editor.js et admin_slideshow.html), enregistrée comme
+    # n'importe quel autre style dans html_content (sanitize_promo_html,
+    # utils.py). Les colonnes text_size/text_font/text_color restent en
+    # base (valeurs historiques, plus lues nulle part) -- pas de migration
+    # nécessaire pour les supprimer.
     bg_color_value = request.form.get('background_bg_color', '').strip()
     if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color_value):
         fields['background_bg_color'] = bg_color_value

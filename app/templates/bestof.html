@@ -79,10 +79,25 @@
     }
     /* QR en position "coin" (voir .promo-qr-pos-* plus bas) : le QR sort du
        flux de .promo-content, qui n'a alors plus que le texte à centrer. */
-    .promo-text { max-width: 900px; }
+    /* v2.0.4 : plus de champs "Taille du texte"/"Police"/"Couleur du texte"
+       indépendants (voir /admin/slideshow) -- ces valeurs par défaut ne
+       s'appliquent que là où le WYSIWYG n'a rien précisé pour un passage de
+       texte donné (un span avec sa propre police/taille/couleur, posée
+       depuis la barre d'outils, l'emporte naturellement via la cascade
+       CSS). Mêmes valeurs que l'ancien défaut ('Par défaut (Segoe UI)',
+       28px, blanc) -- aucun changement visuel pour les pages existantes. */
+    .promo-text { max-width: 900px; font-family: system-ui, "Segoe UI", sans-serif; font-size: 28px; color: #ffffff; }
     .promo-text p { margin: 0 0 16px; line-height: 1.4; }
     .promo-text p:last-child { margin-bottom: 0; }
     .promo-text ul, .promo-text ol { text-align: left; display: inline-block; margin: 0 0 16px; }
+    /* Tableau inséré depuis le WYSIWYG (voir static/promo-editor.js) :
+       défaut discret (pas de bordure visible) tant que l'admin n'en a pas
+       ajouté une explicitement depuis la modale « Propriétés du tableau »
+       -- cohérent avec le comportement précédent (aucun style de tableau
+       du tout). Un style en ligne posé par l'admin (bordure, padding,
+       largeur...) l'emporte toujours sur ce défaut. */
+    .promo-text table { border-collapse: collapse; margin: 0 auto 16px; }
+    .promo-text td, .promo-text th { padding: 6px 10px; }
     /* Image alignée/redimensionnée depuis le WYSIWYG (voir
        static/promo-editor.js) : max-width en filet de sécurité si jamais la
        largeur enregistrée dépassait le conteneur ; clearfix pour que
@@ -224,8 +239,6 @@
     } else if (page.background_url) {
       bg = `<img class="promo-bg" src="${escapeHtml(page.background_url)}" alt="">`;
     }
-    const textStyle = `font-family:${page.text_font || 'system-ui, sans-serif'};`
-      + `font-size:${page.text_size || 28}px;color:${page.text_color || '#ffffff'};`;
     const overlay = page.overlay_enabled !== false ? `<div class="promo-overlay"></div>` : '';
 
     // Le(s) QR code(s) éventuel(s) sont déjà résolus en <img class="promo-inline-qr">
@@ -236,7 +249,7 @@
       ${bg}
       ${overlay}
       <div class="promo-content">
-        <div class="promo-text" style='${textStyle}'>${page.html_content || ''}</div>
+        <div class="promo-text">${page.html_content || ''}</div>
       </div>
     `;
 

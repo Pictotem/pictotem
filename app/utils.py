@@ -131,10 +131,40 @@ _PROMO_HTML_ALLOWED_TAGS = {
     # v2.0.1 : image (sélecteur médiathèque/captures du WYSIWYG -- voir
     # static/promo-editor.js) et tableaux basiques.
     'img': {'src', 'alt', 'style'},
-    'table': set(), 'thead': set(), 'tbody': set(), 'tr': set(),
-    'td': {'colspan', 'rowspan', 'data-row'}, 'th': {'colspan', 'rowspan'},
+    # v2.0.4 : mise en forme des tableaux (bordure/marge/padding/couleur/
+    # largeur/hauteur), pilotée depuis la modale « Propriétés du tableau »
+    # du WYSIWYG (voir static/promo-editor.js) -- 'style' validé par
+    # _PROMO_HTML_TABLE_STYLE_PROPS ci-dessous, comme pour l'image.
+    'table': {'style'}, 'thead': set(), 'tbody': set(), 'tr': {'style'},
+    'td': {'colspan', 'rowspan', 'data-row', 'style'}, 'th': {'colspan', 'rowspan', 'style'},
 }
-_PROMO_HTML_STYLE_RE = re.compile(r'^text-align\s*:\s*(left|center|right|justify)\s*;?$')
+# v2.0.4 : polices/tailles/couleurs de texte (boutons WYSIWYG) et mise en
+# forme des tableaux -- remplace la ancienne regex `_PROMO_HTML_STYLE_RE`
+# (une seule déclaration "text-align: X;", correspondance exacte de toute
+# la valeur) par une validation déclaration-par-déclaration (comme
+# _PROMO_HTML_IMG_STYLE_PROPS ci-dessous) : un span peut désormais combiner
+# police + taille + couleur + alignement sur la même balise.
+#
+# Couleur : Quill applique `color`/`background-color`/`border-color` via
+# `element.style.xxx = "#rrggbb"` -- le navigateur RECOMPOSE alors la valeur
+# de l'attribut `style` en relisant le CSSOM, qui sérialise les couleurs en
+# `rgb(r, g, b)` (constaté en pratique, pas seulement en théorie -- une
+# couleur posée en hexa ne survit donc JAMAIS telle quelle jusqu'à
+# `quill.root.innerHTML`) : la regex couleur ci-dessous accepte donc hexa
+# ET rgb()/rgba(), sous peine de voir toute couleur silencieusement retirée
+# à l'enregistrement.
+_PROMO_HTML_COLOR_VALUE_RE = re.compile(
+    r'^(?:#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})'
+    r'|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$'
+)
+_PROMO_HTML_FONT_FAMILY_RE = re.compile(r'^[A-Za-z0-9 ,\'"\-]{1,200}$')
+_PROMO_HTML_FONT_SIZE_RE = re.compile(r'^[1-9][0-9]{0,3}(?:\.[0-9]+)?(?:px|pt|em|rem|%)$')
+_PROMO_HTML_TEXT_STYLE_PROPS = {
+    'text-align':  re.compile(r'^(left|center|right|justify)$'),
+    'font-family': _PROMO_HTML_FONT_FAMILY_RE,
+    'font-size':   _PROMO_HTML_FONT_SIZE_RE,
+    'color':       _PROMO_HTML_COLOR_VALUE_RE,
+}
 # v2.0.3 : listes/tableaux Quill (voir static/promo-editor.js). data-list ne
 # peut valoir que ce que le WYSIWYG propose réellement (bouton liste
 # numérotée/à puces) ; class sur <li> ne sert qu'à l'indentation (Tab dans
@@ -192,7 +222,14 @@ _PROMO_HTML_IMG_STYLE_PROPS = {
 }
 
 
-def _sanitize_img_style(raw_style: str) -> str:
+def _sanitize_style_by_props(raw_style: str, props: dict) -> str:
+    """Valide chaque déclaration `prop:valeur` de `raw_style` indépendamment
+    contre `props` (dict prop -> regex) -- une même balise peut combiner
+    plusieurs propriétés valides (ex. un <span> avec police + taille +
+    couleur), chacune vérifiée séparément plutôt qu'une correspondance
+    exacte de toute la valeur du style. Factorisé pour être réutilisé par
+    l'image (v2.0.2), le texte (v2.0.4 : police/taille/couleur/alignement)
+    et les tableaux (v2.0.4 : largeur/hauteur/bordure/marge/padding/couleur)."""
     kept = []
     for decl in raw_style.split(';'):
         if ':' not in decl:
@@ -200,10 +237,49 @@ def _sanitize_img_style(raw_style: str) -> str:
         prop, _, val = decl.partition(':')
         prop = prop.strip().lower()
         val = val.strip()
-        rx = _PROMO_HTML_IMG_STYLE_PROPS.get(prop)
+        rx = props.get(prop)
         if rx and rx.match(val):
             kept.append(f'{prop}:{val}')
     return ';'.join(kept)
+
+
+def _sanitize_img_style(raw_style: str) -> str:
+    return _sanitize_style_by_props(raw_style, _PROMO_HTML_IMG_STYLE_PROPS)
+
+
+# v2.0.4 : mise en forme des tableaux, pilotée par la modale « Propriétés du
+# tableau » du WYSIWYG (voir static/promo-editor.js) -- comme pour l'image,
+# le style qui arrive ici est TOUJOURS généré par du JS qui mutate le DOM
+# directement (jamais tapé à la main dans le mode WYSIWYG normal), mais reste
+# validé strictement car le mode source (voir promo-editor.js) permet à
+# l'admin de taper du HTML/CSS arbitraire. Bordure/padding/marge toujours
+# posés en propriétés longhand (border-width/-style/-color plutôt que le
+# raccourci `border`) -- plus simple à valider qu'un raccourci CSS, et c'est
+# déjà ce que promo-editor.js écrit.
+_PROMO_HTML_TABLE_LENGTH_RE = re.compile(r'^(?:0|[1-9][0-9]{0,4})(?:px|%)$')
+_PROMO_HTML_TABLE_SPACING_RE = re.compile(r'^(?:0|0px|[1-9][0-9]{0,2}px)$')
+_PROMO_HTML_TABLE_STYLE_PROPS = {
+    'width':            _PROMO_HTML_TABLE_LENGTH_RE,
+    'height':           _PROMO_HTML_TABLE_LENGTH_RE,
+    'border-width':     re.compile(r'^(?:0|[1-9][0-9]?)px$'),
+    'border-style':     re.compile(r'^(none|solid|dashed|dotted|double)$'),
+    'border-color':     _PROMO_HTML_COLOR_VALUE_RE,
+    'background-color': _PROMO_HTML_COLOR_VALUE_RE,
+    'text-align':       re.compile(r'^(left|center|right|justify)$'),
+    'vertical-align':   re.compile(r'^(top|middle|bottom)$'),
+    'margin':           _PROMO_HTML_IMG_MARGIN_SHORTHAND_RE,
+    'margin-top':       _PROMO_HTML_IMG_STYLE_PROPS['margin-top'],
+    'margin-right':     _PROMO_HTML_IMG_STYLE_PROPS['margin-right'],
+    'margin-bottom':    _PROMO_HTML_IMG_STYLE_PROPS['margin-bottom'],
+    'margin-left':      _PROMO_HTML_IMG_STYLE_PROPS['margin-left'],
+    'padding':          re.compile(
+        r'^' + _PROMO_HTML_TABLE_SPACING_RE.pattern[1:-1] + r'(?:\s+' + _PROMO_HTML_TABLE_SPACING_RE.pattern[1:-1] + r'){0,3}$'
+    ),
+    'padding-top':      _PROMO_HTML_TABLE_SPACING_RE,
+    'padding-right':    _PROMO_HTML_TABLE_SPACING_RE,
+    'padding-bottom':   _PROMO_HTML_TABLE_SPACING_RE,
+    'padding-left':     _PROMO_HTML_TABLE_SPACING_RE,
+}
 # src d'image : uniquement un chemin relatif au même site -- jamais de
 # protocole (javascript:, data:...), jamais "//hôte-externe/..." qui serait
 # interprété comme une URL protocole-relative vers un autre domaine.
@@ -229,11 +305,16 @@ class _PromoHtmlSanitizer(HTMLParser):
         allowed_attrs = _PROMO_HTML_ALLOWED_TAGS[tag]
         kept = []
         for name, value in attrs:
-            if (name == 'style' and tag in ('div', 'span', 'p', 'li') and 'style' in allowed_attrs and value
-                    and _PROMO_HTML_STYLE_RE.match(value.strip())):
-                kept.append(f'style="{escape(value.strip(), quote=True)}"')
+            if name == 'style' and tag in ('div', 'span', 'p', 'li') and 'style' in allowed_attrs and value:
+                cleaned = _sanitize_style_by_props(value, _PROMO_HTML_TEXT_STYLE_PROPS)
+                if cleaned:
+                    kept.append(f'style="{escape(cleaned, quote=True)}"')
             elif name == 'style' and tag == 'img' and 'style' in allowed_attrs and value:
                 cleaned = _sanitize_img_style(value)
+                if cleaned:
+                    kept.append(f'style="{escape(cleaned, quote=True)}"')
+            elif name == 'style' and tag in ('table', 'tr', 'td', 'th') and 'style' in allowed_attrs and value:
+                cleaned = _sanitize_style_by_props(value, _PROMO_HTML_TABLE_STYLE_PROPS)
                 if cleaned:
                     kept.append(f'style="{escape(cleaned, quote=True)}"')
             elif (name == 'src' and 'src' in allowed_attrs and value

@@ -31,6 +31,27 @@
   const AlignStyle = Quill.import('attributors/style/align');
   Quill.register(AlignStyle, true);
 
+  // v2.0.4 : police / taille de texte (boutons WYSIWYG, remplacent les
+  // anciens champs indépendants "Police"/"Taille du texte") -- les
+  // attributors 'formats/font' et 'formats/size' par défaut de Quill sont
+  // des variantes CLASS avec liste blanche (ql-font-serif/-monospace,
+  // ql-size-small/-large/-huge uniquement) : on les remplace ici par des
+  // StyleAttributor tout neufs, SANS liste blanche (contrairement à
+  // `Quill.import('attributors/style/font'|'style/size')`, qui reprend la
+  // même liste blanche que la variante class) -- même principe que
+  // AlignStyle ci-dessus, qui lui n'avait pas ce problème (l'attributor
+  // style d'alignement n'a jamais eu de liste blanche). Résultat : n'importe
+  // quelle police (y compris les polices personnalisées, voir _all_fonts()
+  // côté serveur) et n'importe quelle taille en px restent utilisables,
+  // aussi bien depuis les <select> de la barre d'outils que depuis le mode
+  // source (voir la modale de tableau plus bas pour le même principe
+  // appliqué aux styles de tableau).
+  const Parchment = Quill.import('parchment');
+  const FontStyle = new Parchment.StyleAttributor('font', 'font-family', { scope: Parchment.Scope.INLINE });
+  Quill.register(FontStyle, true);
+  const SizeStyle = new Parchment.StyleAttributor('size', 'font-size', { scope: Parchment.Scope.INLINE });
+  Quill.register(SizeStyle, true);
+
   const ImageFormat = Quill.import('formats/image');
   class StyledImage extends ImageFormat {
     static formats(domNode) {
@@ -79,13 +100,14 @@
     });
     quillInstances.set(editorEl.id, quill);
 
+    // v2.0.4 : le bouton tableau ouvre désormais la modale « Propriétés du
+    // tableau » (voir #table-props-modal, admin_slideshow.html, et la
+    // section dédiée plus bas) -- insertion 3×3 immédiate ou édition d'un
+    // tableau existant selon la position du curseur, plutôt qu'un raccourci
+    // figé à 3×3.
     const tableBtn = toolbarEl.querySelector('.promo-ql-table-btn');
     if (tableBtn) {
-      tableBtn.addEventListener('click', function () {
-        const range = quill.getSelection(true);
-        quill.setSelection(range.index, 0, 'user');
-        quill.getModule('table').insertTable(3, 3);
-      });
+      tableBtn.addEventListener('click', function () { openTableProps(quill); });
     }
 
     const qrBtn = toolbarEl.querySelector('.promo-ql-qr-btn');
@@ -94,6 +116,77 @@
         const range = quill.getSelection(true);
         quill.insertText(range.index,
           '{qrcode="" taille="150" color="#000000" bgcolor="#ffffff"}', 'user');
+      });
+    }
+
+    // ── Couleur du texte (input color natif -- voir commentaire plus haut
+    // sur FontStyle/SizeStyle : contrairement au select ql-align déjà géré
+    // nativement par Quill, un <input type=color> donne accès à toute la
+    // palette plutôt qu'à une poignée de nuances prédéfinies, cohérent avec
+    // les autres couleurs de ce formulaire (fonds, dégradés...), toutes des
+    // <input type=color>). La sélection Quill active est sauvegardée au
+    // mousedown (avant que le natif ne vole le focus pour son propre
+    // sélecteur de couleur) -- même principe que _mediaPickerRange plus
+    // bas pour le sélecteur d'image.
+    const colorInput = toolbarEl.querySelector('.promo-ql-color-input');
+    const colorClearBtn = toolbarEl.querySelector('.promo-ql-color-clear');
+    let colorRange = null;
+    if (colorInput) {
+      colorInput.addEventListener('mousedown', function () {
+        colorRange = quill.getSelection(true);
+      });
+      colorInput.addEventListener('input', function () {
+        const range = colorRange || quill.getSelection(true);
+        if (!range) return;
+        if (range.length > 0) {
+          quill.formatText(range.index, range.length, 'color', colorInput.value, 'user');
+        } else {
+          quill.setSelection(range.index, 0, 'silent');
+          quill.format('color', colorInput.value, 'user');
+        }
+      });
+    }
+    if (colorClearBtn) {
+      colorClearBtn.addEventListener('click', function () {
+        const range = quill.getSelection(true);
+        if (!range) return;
+        if (range.length > 0) quill.formatText(range.index, range.length, 'color', false, 'user');
+        else quill.format('color', false, 'user');
+      });
+    }
+
+    // ── Mode source (voir #source-wrap-<id>, admin_slideshow.html) : bascule
+    // entre l'éditeur visuel et un <textarea> affichant le HTML brut (balises
+    // + styles en ligne), avec aperçu en direct dans un second panneau. Le
+    // retour au mode visuel repasse par quill.clipboard.dangerouslyPasteHTML
+    // (plutôt qu'une simple assignation à quill.root.innerHTML) pour que le
+    // Delta interne de Quill reste cohérent avec le DOM affiché -- une
+    // affectation directe laisserait Quill croire que son ancien contenu est
+    // toujours d'actualité et provoquerait des incohérences à la prochaine
+    // frappe.
+    const pageSuffix = editorEl.id.replace(/^wysiwyg-/, '');
+    const sourceBtn = toolbarEl.querySelector('.promo-ql-source-btn');
+    const sourceWrap = document.getElementById('source-wrap-' + pageSuffix);
+    const sourceCode = document.getElementById('source-code-' + pageSuffix);
+    const sourcePreview = document.getElementById('source-preview-' + pageSuffix);
+    if (sourceBtn && sourceWrap && sourceCode && sourcePreview) {
+      sourceBtn.addEventListener('click', function () {
+        const inSource = !sourceWrap.classList.contains('hidden');
+        if (!inSource) {
+          sourceCode.value = quill.root.innerHTML;
+          sourcePreview.innerHTML = sourceCode.value;
+          editorEl.classList.add('hidden');
+          sourceWrap.classList.remove('hidden');
+          toolbarEl.classList.add('promo-source-active');
+        } else {
+          quill.clipboard.dangerouslyPasteHTML(sourceCode.value, 'user');
+          editorEl.classList.remove('hidden');
+          sourceWrap.classList.add('hidden');
+          toolbarEl.classList.remove('promo-source-active');
+        }
+      });
+      sourceCode.addEventListener('input', function () {
+        sourcePreview.innerHTML = sourceCode.value;
       });
     }
   });
@@ -349,8 +442,19 @@
     if (_selectedImg && form.contains(_selectedImg)) _deselectImg();
     const editorEl = form.querySelector('.promo-quill-editor');
     const hidden = form.querySelector('input[type=hidden][name=html_content]');
+    if (!hidden) return;
+    // Mode source actif (voir plus haut) : le <textarea> est la source de
+    // vérité, on l'utilise directement plutôt que quill.root.innerHTML (qui
+    // n'a plus été mis à jour depuis le passage en mode source).
+    const pageSuffix = editorEl ? editorEl.id.replace(/^wysiwyg-/, '') : '';
+    const sourceWrap = document.getElementById('source-wrap-' + pageSuffix);
+    const sourceCode = document.getElementById('source-code-' + pageSuffix);
+    if (sourceWrap && sourceCode && !sourceWrap.classList.contains('hidden')) {
+      hidden.value = sourceCode.value;
+      return;
+    }
     const quill = editorEl && quillInstances.get(editorEl.id);
-    if (quill && hidden) hidden.value = quill.root.innerHTML;
+    if (quill) hidden.value = quill.root.innerHTML;
   }, true);
 
   // Met en évidence le fond actuellement sélectionné dans le sélecteur radio
@@ -374,5 +478,173 @@
     if (!toggle) return;
     const card = toggle.closest('.promo-page-card');
     if (card) card.classList.toggle('promo-page-collapsed');
+  });
+
+  // ── Modale « Propriétés du tableau » (voir #table-props-modal, template)
+  // ────────────────────────────────────────────────────────────────────
+  // Un seul jeu de contrôles partagé par toutes les pages promo (comme le
+  // sélecteur média ci-dessus). Deux registres bien séparés :
+  //  - structure (insérer/supprimer ligne/colonne/tableau) : passe TOUJOURS
+  //    par this.quill.getModule('table') pour garder le Delta interne de
+  //    Quill cohérent avec le DOM -- jamais de manipulation DOM directe ici ;
+  //  - mise en forme (largeur/hauteur/bordure/marge/padding/couleur) :
+  //    mutation DIRECTE du style des éléments <table>/<tr>/<td> concernés,
+  //    comme pour le redimensionnement d'image plus haut -- pas de format
+  //    Quill dédié pour ces réglages, mais innerHTML lu à l'envoi du
+  //    formulaire (voir plus haut) capture bien le style ainsi posé.
+  //
+  // getTable() du module table (this.quill.getModule('table').getTable())
+  // s'appuie sur la sélection Quill COURANTE (this.quill.getSelection(),
+  // sans forcer le focus) -- avant chaque action structurelle, on rappelle
+  // donc explicitement quill.getSelection(true) pour restaurer le focus et
+  // la dernière sélection connue (perdue dès qu'on clique dans la modale,
+  // hors de l'éditeur), exactement comme le fait déjà le bouton d'insertion
+  // de tableau ou le sélecteur média ci-dessus.
+  let _tpQuill = null;
+  let _tpTableEl = null;
+  let _tpRowEl = null;
+  let _tpCellEl = null;
+  let _tpColIndex = -1;
+
+  function _tpModal() { return document.getElementById('table-props-modal'); }
+
+  function _tpRefreshFromSelection(quill) {
+    const table = quill.getModule('table');
+    const [tableBlot, rowBlot, cellBlot] = table.getTable();
+    if (!tableBlot || !rowBlot || !cellBlot) {
+      _tpTableEl = null; _tpRowEl = null; _tpCellEl = null; _tpColIndex = -1;
+      return false;
+    }
+    _tpTableEl = tableBlot.domNode;
+    _tpRowEl = rowBlot.domNode;
+    _tpCellEl = cellBlot.domNode;
+    _tpColIndex = (typeof cellBlot.cellOffset === 'function') ? cellBlot.cellOffset() : -1;
+    return true;
+  }
+
+  function openTableProps(quill) {
+    _tpQuill = quill;
+    const inTable = _tpRefreshFromSelection(quill);
+    const modal = _tpModal();
+    if (!modal) return;
+    modal.setAttribute('data-mode', inTable ? 'edit' : 'insert');
+    const wInput = document.getElementById('tp-col-width');
+    const hInput = document.getElementById('tp-row-height');
+    if (wInput) wInput.value = (inTable && _tpCellEl) ? Math.round(_tpCellEl.getBoundingClientRect().width) : '';
+    if (hInput) hInput.value = (inTable && _tpRowEl) ? Math.round(_tpRowEl.getBoundingClientRect().height) : '';
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+
+  function _tpClose() {
+    const modal = _tpModal();
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  function _tpWithFreshSelection(fn) {
+    if (!_tpQuill) return;
+    _tpQuill.getSelection(true);
+    fn(_tpQuill.getModule('table'));
+    _tpRefreshFromSelection(_tpQuill);
+  }
+
+  function _tpApplyColumnWidth(px) {
+    if (!_tpTableEl || _tpColIndex < 0 || !(px > 0)) return;
+    _tpTableEl.querySelectorAll('tr').forEach(function (tr) {
+      const cell = tr.children[_tpColIndex];
+      if (cell) cell.style.width = px + 'px';
+    });
+  }
+
+  function _tpApplyRowHeight(px) {
+    if (!_tpRowEl || !(px > 0)) return;
+    _tpRowEl.style.height = px + 'px';
+  }
+
+  function _tpApplyBorder(color, widthPx, style) {
+    if (!_tpTableEl) return;
+    _tpTableEl.querySelectorAll('td, th').forEach(function (cell) {
+      if (style === 'none') {
+        cell.style.borderStyle = 'none';
+      } else {
+        cell.style.borderWidth = Math.max(0, widthPx || 0) + 'px';
+        cell.style.borderStyle = style || 'solid';
+        cell.style.borderColor = color;
+      }
+    });
+  }
+
+  function _tpApplyPadding(px) {
+    if (!_tpTableEl || !(px >= 0)) return;
+    _tpTableEl.querySelectorAll('td, th').forEach(function (cell) {
+      cell.style.padding = px + 'px';
+    });
+  }
+
+  function _tpApplyMargin(px, centered) {
+    if (!_tpTableEl || !(px >= 0)) return;
+    _tpTableEl.style.margin = centered ? (px + 'px auto') : (px + 'px');
+  }
+
+  function _tpApplyBackground(scope, color) {
+    if (!_tpTableEl) return;
+    if (scope === 'cell' && _tpCellEl) {
+      _tpCellEl.style.backgroundColor = color;
+    } else if (scope === 'row' && _tpRowEl) {
+      _tpRowEl.querySelectorAll('td, th').forEach(function (c) { c.style.backgroundColor = color; });
+    } else if (scope === 'table') {
+      _tpTableEl.querySelectorAll('td, th').forEach(function (c) { c.style.backgroundColor = color; });
+    }
+  }
+
+  function _tpClearBackground() {
+    if (!_tpTableEl) return;
+    _tpTableEl.querySelectorAll('td, th').forEach(function (c) { c.style.backgroundColor = ''; });
+  }
+
+  document.addEventListener('click', function (e) {
+    const modal = _tpModal();
+    if (!modal || modal.classList.contains('hidden')) return;
+
+    if (e.target === modal || e.target.closest('.table-props-close')) {
+      _tpClose();
+      return;
+    }
+
+    if (e.target.id === 'tp-insert-btn') {
+      const cols = parseInt(document.getElementById('tp-insert-cols').value, 10) || 3;
+      const rows = parseInt(document.getElementById('tp-insert-rows').value, 10) || 3;
+      _tpWithFreshSelection(function (table) { table.insertTable(rows, cols); });
+      _tpClose();
+      return;
+    }
+
+    const action = e.target.closest('[data-tp-action]');
+    if (!action) return;
+    const act = action.getAttribute('data-tp-action');
+
+    if (act === 'col-left') _tpWithFreshSelection(function (t) { t.insertColumnLeft(); });
+    else if (act === 'col-right') _tpWithFreshSelection(function (t) { t.insertColumnRight(); });
+    else if (act === 'col-delete') _tpWithFreshSelection(function (t) { t.deleteColumn(); });
+    else if (act === 'row-above') _tpWithFreshSelection(function (t) { t.insertRowAbove(); });
+    else if (act === 'row-below') _tpWithFreshSelection(function (t) { t.insertRowBelow(); });
+    else if (act === 'row-delete') _tpWithFreshSelection(function (t) { t.deleteRow(); });
+    else if (act === 'apply-col-width') _tpApplyColumnWidth(parseInt(document.getElementById('tp-col-width').value, 10));
+    else if (act === 'apply-row-height') _tpApplyRowHeight(parseInt(document.getElementById('tp-row-height').value, 10));
+    else if (act === 'apply-border') _tpApplyBorder(
+        document.getElementById('tp-border-color').value,
+        parseInt(document.getElementById('tp-border-width').value, 10),
+        document.getElementById('tp-border-style').value);
+    else if (act === 'apply-padding') _tpApplyPadding(parseInt(document.getElementById('tp-padding').value, 10));
+    else if (act === 'apply-margin') _tpApplyMargin(
+        parseInt(document.getElementById('tp-margin').value, 10) || 0,
+        !!document.getElementById('tp-margin-center').checked);
+    else if (act === 'apply-bg-cell') _tpApplyBackground('cell', document.getElementById('tp-bg-color').value);
+    else if (act === 'apply-bg-row') _tpApplyBackground('row', document.getElementById('tp-bg-color').value);
+    else if (act === 'apply-bg-table') _tpApplyBackground('table', document.getElementById('tp-bg-color').value);
+    else if (act === 'clear-bg-table') _tpClearBackground();
+    else if (act === 'delete-table') { _tpWithFreshSelection(function (t) { t.deleteTable(); }); _tpClose(); }
   });
 })();

@@ -160,6 +160,71 @@
     }
     .promo-quill-editor .ql-editor table { border-collapse: collapse; }
     .promo-quill-editor .ql-editor td { border: 1px solid var(--border); padding: 4px 8px; }
+
+    /* Police / taille / couleur de texte (WYSIWYG) + mode source + modale
+       tableau (voir static/promo-editor.js) -- remplacent les anciens
+       champs indépendants "Taille du texte" / "Police" / "Couleur du
+       texte", supprimés du formulaire (v2.0.4). */
+    .promo-ql-color-group { display: inline-flex; align-items: center; gap: 2px; vertical-align: middle; }
+    .promo-ql-color-input { width: 26px; height: 24px; padding: 1px; border: 1px solid var(--border);
+                             border-radius: 4px; background: var(--surface-2); cursor: pointer; }
+    .promo-ql-color-clear { width: auto; padding: 0 4px; font-size: 11px; color: var(--text);
+                             background: none; border: none; cursor: pointer; }
+    .promo-ql-color-clear:hover { color: var(--accent); }
+    .promo-ql-source-btn { width: auto; padding: 0 8px; font-size: 12px; font-family: "Courier New", monospace;
+                            color: var(--text); background: none; border: none; cursor: pointer; }
+    .promo-ql-source-btn:hover { color: var(--accent); }
+    .promo-quill-toolbar.promo-source-active button:not(.promo-ql-source-btn),
+    .promo-quill-toolbar.promo-source-active select,
+    .promo-quill-toolbar.promo-source-active input { opacity: .35; pointer-events: none; }
+
+    .promo-quill-editor.hidden { display: none; }
+    .promo-source-wrap { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
+    .promo-source-wrap.hidden { display: none; }
+    .promo-source-col { flex: 1 1 260px; min-width: 240px; display: flex; flex-direction: column; }
+    .promo-source-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+    .promo-source-code { width: 100%; box-sizing: border-box; min-height: 180px; resize: vertical;
+                          background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+                          border-radius: 10px; padding: 12px 14px; font-size: 12px;
+                          font-family: "Courier New", monospace; }
+    .promo-source-code:focus { outline: none; border-color: var(--accent); }
+    .promo-source-preview { min-height: 180px; background: var(--surface-2); border: 1px solid var(--border);
+                             border-radius: 10px; padding: 12px 14px; overflow: auto; color: var(--text); }
+
+    /* Modale « Propriétés du tableau » (voir static/promo-editor.js) --
+       même squelette visuel que #media-picker-modal plus bas. */
+    .table-props-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.6);
+                          display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .table-props-modal.hidden { display: none; }
+    .table-props-modal[data-mode="insert"] .table-props-group[data-mode="edit"] { display: none; }
+    .table-props-modal[data-mode="edit"] .table-props-group[data-mode="insert"] { display: none; }
+    .table-props-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+                           width: 100%; max-width: 460px; max-height: 85vh; display: flex; flex-direction: column;
+                           overflow: hidden; }
+    .table-props-head { display: flex; align-items: center; justify-content: space-between;
+                         padding: 14px 18px; border-bottom: 1px solid var(--border); }
+    .table-props-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
+    .table-props-close { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+    .table-props-close:hover { color: var(--text); }
+    .table-props-body { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
+    .table-props-group { border-top: 1px solid var(--border); padding-top: 14px; }
+    .table-props-group:first-child { border-top: none; padding-top: 0; }
+    .table-props-group h4 { margin: 0 0 10px; font-size: 12px; font-weight: 700; text-transform: uppercase;
+                             letter-spacing: .03em; color: var(--muted); }
+    .table-props-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .table-props-row:last-child { margin-bottom: 0; }
+    .table-props-row label { font-size: 13px; color: var(--text); white-space: nowrap; }
+    .table-props-row input[type=number] { width: 72px; background: var(--surface-2); border: 1px solid var(--border);
+                                           color: var(--text); border-radius: 8px; padding: 6px 8px; font-size: 13px; }
+    .table-props-row input[type=color] { width: 40px; height: 30px; padding: 2px; background: var(--surface-2);
+                                          border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+    .table-props-row select { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+                               border-radius: 8px; padding: 6px 8px; font-size: 13px; }
+    .table-props-row button { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+                               border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
+    .table-props-row button:hover { border-color: var(--accent); color: var(--accent); }
+    .table-props-row button.table-props-danger { color: #e57373; }
+    .table-props-hint { font-size: 12px; color: var(--muted); margin: 0; }
     .wysiwyg-img-toolbar { position: fixed; z-index: 999; display: flex; align-items: center; gap: 2px;
                             background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
                             padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
@@ -450,9 +515,25 @@
           <div class="field">
             <label>Texte</label>
             <div id="toolbar-{{ page.id }}" class="promo-quill-toolbar">
+              <select class="ql-font" title="Police">
+                <option value="" selected>Police…</option>
+                {% for value, label in promo_fonts %}
+                <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+              <select class="ql-size" title="Taille du texte">
+                <option value="" selected>Taille…</option>
+                {% for px in promo_text_sizes %}
+                <option value="{{ px }}px">{{ px }} px</option>
+                {% endfor %}
+              </select>
               <button type="button" class="ql-bold" title="Gras"></button>
               <button type="button" class="ql-italic" title="Italique"></button>
               <button type="button" class="ql-underline" title="Souligné"></button>
+              <span class="promo-ql-color-group">
+                <input type="color" class="promo-ql-color-input" value="#ffffff" title="Couleur du texte">
+                <button type="button" class="promo-ql-color-clear" title="Effacer la couleur du texte">✕</button>
+              </span>
               <button type="button" class="ql-list" value="ordered" title="Liste numérotée"></button>
               <button type="button" class="ql-list" value="bullet" title="Liste à puces"></button>
               <select class="ql-align" title="Alignement">
@@ -461,40 +542,35 @@
                 <option value="right"></option>
               </select>
               <button type="button" class="ql-image" title="Insérer une image (médiathèque ou capture)"></button>
-              <button type="button" class="promo-ql-table-btn" title="Insérer un tableau 3×3">▦</button>
+              <button type="button" class="promo-ql-table-btn" title="Insérer / modifier un tableau">▦</button>
               <button type="button" class="promo-ql-qr-btn" title="Insérer un QR code">▤QR</button>
               <button type="button" class="ql-clean" title="Effacer la mise en forme"></button>
+              <button type="button" class="promo-ql-source-btn" title="Voir / éditer le code source (HTML + CSS)">&lt;/&gt;</button>
             </div>
             <div id="wysiwyg-{{ page.id }}" class="promo-quill-editor"
                  data-placeholder="Un photobox est à votre disposition !">{{ page.html_content | safe }}</div>
+            <div id="source-wrap-{{ page.id }}" class="promo-source-wrap hidden">
+              <div class="promo-source-col">
+                <label class="promo-source-label">Code source (balises HTML + styles CSS en ligne)</label>
+                <textarea id="source-code-{{ page.id }}" class="promo-source-code" spellcheck="false"></textarea>
+              </div>
+              <div class="promo-source-col">
+                <label class="promo-source-label">Aperçu en direct</label>
+                <div id="source-preview-{{ page.id }}" class="promo-source-preview ql-editor"></div>
+              </div>
+            </div>
             <input type="hidden" name="html_content">
             <p class="upload-hint">
               Emplacements dynamiques disponibles, résolus à l'affichage : <code>{ip}</code>, <code>{port}</code>.
               QR code : placez <code>{qrcode="texte ou URL", taille="150", color="#000000", bgcolor="#ffffff"}</code>
               où vous voulez dans le texte (texte vide = lien vers la galerie ;
               taille en px, couleurs en hexa) — utilisez le bouton ▤QR ci-dessus
-              pour l'insérer.
+              pour l'insérer. Le bouton <code>&lt;/&gt;</code> affiche le code source
+              (HTML + styles) avec aperçu en direct — au retour en mode visuel, le
+              contenu est réinterprété par l'éditeur (une balise ou un style non
+              autorisé peut être simplifié, et sera de toute façon retiré à
+              l'enregistrement si non conforme).
             </p>
-          </div>
-
-          <div class="field-row">
-            <div class="field field-half">
-              <label>Taille du texte (px)</label>
-              <input type="number" name="text_size" min="10" max="120" value="{{ page.text_size }}" style="max-width:140px">
-            </div>
-            <div class="field field-half">
-              <label>Police</label>
-              <select name="text_font">
-                {% for value, label in promo_fonts %}
-                <option value="{{ value }}" {% if page.text_font == value %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-            </div>
-          </div>
-
-          <div class="field">
-            <label>Couleur du texte</label>
-            <input type="color" name="text_color" value="{{ page.text_color }}">
           </div>
 
           <div class="field">
@@ -555,6 +631,111 @@
   </div>
   <div id="wysiwyg-img-resize-handle" class="wysiwyg-img-resize-handle hidden"
        title="Glisser pour redimensionner"></div>
+
+  <!-- Modale « Propriétés du tableau » du WYSIWYG (partagée par toutes les
+       pages promo, comme #media-picker-modal ci-dessous) — voir
+       static/promo-editor.js. -->
+  <div id="table-props-modal" class="table-props-modal hidden" aria-hidden="true">
+    <div class="table-props-dialog">
+      <div class="table-props-head">
+        <h3>Tableau</h3>
+        <button type="button" class="table-props-close" aria-label="Fermer">✕</button>
+      </div>
+      <div class="table-props-body">
+
+        <div class="table-props-group" data-mode="insert">
+          <h4>Insérer un tableau</h4>
+          <div class="table-props-row">
+            <label>Colonnes</label>
+            <input type="number" id="tp-insert-cols" min="1" max="10" value="3">
+            <label>Lignes</label>
+            <input type="number" id="tp-insert-rows" min="1" max="20" value="3">
+            <button type="button" id="tp-insert-btn">Insérer</button>
+          </div>
+          <p class="table-props-hint">Placez d'abord le curseur là où le tableau doit être inséré.</p>
+        </div>
+
+        <div class="table-props-group" data-mode="edit">
+          <h4>Lignes / colonnes</h4>
+          <div class="table-props-row">
+            <span>Colonne</span>
+            <button type="button" data-tp-action="col-left">+ à gauche</button>
+            <button type="button" data-tp-action="col-right">+ à droite</button>
+            <button type="button" data-tp-action="col-delete" class="table-props-danger">Supprimer</button>
+          </div>
+          <div class="table-props-row">
+            <span>Ligne</span>
+            <button type="button" data-tp-action="row-above">+ au-dessus</button>
+            <button type="button" data-tp-action="row-below">+ en dessous</button>
+            <button type="button" data-tp-action="row-delete" class="table-props-danger">Supprimer</button>
+          </div>
+        </div>
+
+        <div class="table-props-group" data-mode="edit">
+          <h4>Dimensions</h4>
+          <div class="table-props-row">
+            <label>Largeur colonne (px)</label>
+            <input type="number" id="tp-col-width" min="10" max="2000">
+            <button type="button" data-tp-action="apply-col-width">Appliquer</button>
+          </div>
+          <div class="table-props-row">
+            <label>Hauteur ligne (px)</label>
+            <input type="number" id="tp-row-height" min="10" max="2000">
+            <button type="button" data-tp-action="apply-row-height">Appliquer</button>
+          </div>
+        </div>
+
+        <div class="table-props-group" data-mode="edit">
+          <h4>Bordure</h4>
+          <div class="table-props-row">
+            <label>Couleur</label>
+            <input type="color" id="tp-border-color" value="#3a3f47">
+            <label>Épaisseur (px)</label>
+            <input type="number" id="tp-border-width" min="0" max="20" value="1">
+            <select id="tp-border-style">
+              <option value="solid">Trait plein</option>
+              <option value="dashed">Tirets</option>
+              <option value="dotted">Pointillés</option>
+              <option value="double">Double</option>
+              <option value="none">Aucune</option>
+            </select>
+            <button type="button" data-tp-action="apply-border">Appliquer au tableau</button>
+          </div>
+        </div>
+
+        <div class="table-props-group" data-mode="edit">
+          <h4>Espacement</h4>
+          <div class="table-props-row">
+            <label>Padding des cellules (px)</label>
+            <input type="number" id="tp-padding" min="0" max="100">
+            <button type="button" data-tp-action="apply-padding">Appliquer au tableau</button>
+          </div>
+          <div class="table-props-row">
+            <label>Marge autour du tableau (px)</label>
+            <input type="number" id="tp-margin" min="0" max="200">
+            <label><input type="checkbox" id="tp-margin-center"> Centrer</label>
+            <button type="button" data-tp-action="apply-margin">Appliquer</button>
+          </div>
+        </div>
+
+        <div class="table-props-group" data-mode="edit">
+          <h4>Couleur de fond</h4>
+          <div class="table-props-row">
+            <input type="color" id="tp-bg-color" value="#ffffff">
+            <button type="button" data-tp-action="apply-bg-cell">Cellule</button>
+            <button type="button" data-tp-action="apply-bg-row">Ligne</button>
+            <button type="button" data-tp-action="apply-bg-table">Tout le tableau</button>
+            <button type="button" data-tp-action="clear-bg-table">Effacer</button>
+          </div>
+        </div>
+
+        <div class="table-props-group" data-mode="edit">
+          <button type="button" data-tp-action="delete-table" class="table-props-danger">Supprimer le tableau</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
 
   <div id="media-picker-modal" class="media-picker-modal hidden" aria-hidden="true">
     <div class="media-picker-dialog">
