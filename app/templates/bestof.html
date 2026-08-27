@@ -218,6 +218,21 @@
   let forcedPromoActive = false;
   let forcedPromoPageId = null; // id de la page forcée actuellement affichée (ou en cours de reprise), null sinon
 
+  // Minuteurs de fondu sortant en cours (voir showNext()/showForcedPromo()
+  // ci-dessous, section « Crossfade ») -- un par slide (#slideA/#slideB),
+  // gardés ICI (partagés entre les deux fonctions) pour pouvoir en annuler
+  // un déjà programmé quand le MÊME élément redevient la slide active moins
+  // de 800ms plus tard. Sans ça, un minuteur périmé retire .active de
+  // l'élément qu'on vient tout juste de réafficher (silencieusement --
+  // l'écran passe au noir), ce qui arrive dès qu'une transition survient à
+  // un moment non prévisible par rapport à la précédente : c'est justement
+  // le cas de l'affichage forcé hors cycle (démarre ou se termine à tout
+  // instant, sans attendre la fin naturelle de la slide en cours), alors
+  // qu'en cycle normal deux transitions consécutives sont toujours séparées
+  // d'au moins plusieurs secondes (délai photo / pause_seconds promo) et ne
+  // se chevauchent donc jamais.
+  const fadeOutTimers = { A: null, B: null };
+
   function shuffle(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -357,6 +372,7 @@
     }
 
     const next = current === 'A' ? 'B' : 'A';
+    const curKey = current; // capturé avant réaffectation de `current` plus bas (voir Crossfade)
     const curEl  = document.getElementById('slide' + current);
     const nextEl = document.getElementById('slide' + next);
 
@@ -404,10 +420,17 @@
       pauseDurationMs = duration;
     }
 
-    // Crossfade
+    // Crossfade -- annule d'abord un éventuel retrait d'opacité déjà
+    // programmé pour `nextEl` (voir fadeOutTimers ci-dessus) : sinon, si cet
+    // élément redevient actif moins de 800ms après en être sorti, ce
+    // minuteur périmé l'efface juste après l'avoir montré.
     requestAnimationFrame(() => {
+      if (fadeOutTimers[next]) { clearTimeout(fadeOutTimers[next]); fadeOutTimers[next] = null; }
       nextEl.classList.add('active');
-      setTimeout(() => curEl.classList.remove('active'), 800);
+      fadeOutTimers[curKey] = setTimeout(() => {
+        curEl.classList.remove('active');
+        fadeOutTimers[curKey] = null;
+      }, 800);
     });
     current = next;
 
@@ -453,6 +476,7 @@
     forcedPromoPageId = page.id;
 
     const next = current === 'A' ? 'B' : 'A';
+    const curKey = current; // capturé avant réaffectation de `current` plus bas (voir Crossfade)
     const curEl  = document.getElementById('slide' + current);
     const nextEl = document.getElementById('slide' + next);
     nextEl.className = `slide slide-promo effect-${page.effect || 'fade'}`;
@@ -467,8 +491,12 @@
     pauseDurationMs = Math.max(0, remainingMs);
 
     requestAnimationFrame(() => {
+      if (fadeOutTimers[next]) { clearTimeout(fadeOutTimers[next]); fadeOutTimers[next] = null; }
       nextEl.classList.add('active');
-      setTimeout(() => curEl.classList.remove('active'), 800);
+      fadeOutTimers[curKey] = setTimeout(() => {
+        curEl.classList.remove('active');
+        fadeOutTimers[curKey] = null;
+      }, 800);
     });
     current = next;
 
