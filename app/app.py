@@ -89,6 +89,9 @@ from utils import (build_gallery_url, current_stamp, disable_autostart,
 from guest_api import (guest_api_status, guest_api_autostart, set_guest_api_port,
                        set_guest_api_login, set_guest_api_password, set_guest_api_autostart,
                        set_guest_api_log_retention_days, start_guest_api_server, stop_guest_api_server)
+from media_api import (media_api_status, media_api_autostart, set_media_api_port,
+                       set_media_api_login, set_media_api_password, set_media_api_autostart,
+                       set_media_api_log_retention_days, start_media_api_server, stop_media_api_server)
 
 # ── Application Flask ─────────────────────────────────────────────────────────
 
@@ -2858,6 +2861,7 @@ _ADMIN_BLOCKS = {
     'tags_settings':       {'title': "Activation & règles du tag libre",        'default_page': 'tags',        'template': 'blocks/tags_settings.html',       'context_fn': '_block_ctx_tags_settings'},
     'tags_media_id':       {'title': "ID unique par média",                     'default_page': 'tags',        'template': 'blocks/tags_media_id.html',       'context_fn': '_block_ctx_tags_media_id'},
     'tags_display':        {'title': "Affichage sur /bestof",                   'default_page': 'tags',        'template': 'blocks/tags_display.html',        'context_fn': '_block_ctx_tags_display'},
+    'tags_media_api':      {'title': "API REST — accès aux ID média & tags",     'default_page': 'tags',        'template': 'blocks/tags_media_api.html',      'context_fn': '_block_ctx_tags_media_api'},
     'slideshow_settings':      {'title': "Paramètres",                          'default_page': 'slideshow',   'template': 'blocks/slideshow_settings.html',      'context_fn': '_block_ctx_slideshow_settings'},
     'screensaver_settings':    {'title': "Paramètres",                          'default_page': 'screensaver', 'template': 'blocks/screensaver_settings.html',    'context_fn': '_block_ctx_screensaver_settings'},
     'guest_uploads_settings':   {'title': "Paramètres",                         'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_settings.html',   'context_fn': '_block_ctx_guest_uploads_settings'},
@@ -3208,6 +3212,12 @@ def _block_ctx_tags_display() -> dict:
     # une même page) ; 'tags_fonts' plutôt que 'fonts' pour ne pas entrer en
     # collision avec la clé 'buttons_fonts' d'un bloc buttons_style déplacé ici.
     return {'tags_settings': _tags_settings(), 'tags_fonts': _all_fonts()}
+
+
+def _block_ctx_tags_media_api() -> dict:
+    status = media_api_status()
+    status['ip'] = get_network_info()['ip']
+    return {'media_api': status}
 
 
 def _block_ctx_slideshow_settings() -> dict:
@@ -4234,6 +4244,52 @@ def admin_tags_set_display():
     if raw_fs.isdigit() and int(raw_fs) >= 8:
         set_setting('tags.style_font_size', raw_fs)
     return _admin_block_redirect('tags_display', ok="Réglages d'affichage mis à jour.")
+
+
+@app.route('/admin/tags/api/settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tags_media_api_settings():
+    """Bloc « API REST — accès aux ID média & tags » : port, identifiant,
+    mot de passe (laissé vide = inchangé), démarrage auto/manuel et
+    rétention du journal (voir media_api.py). Même principe que
+    admin_guest_codes_api_settings (aucun champ invalide ne bloque
+    l'enregistrement des autres). Une API déjà active n'est pas relancée
+    automatiquement après un changement de port/identifiants — utiliser le
+    bouton Arrêter/Démarrer ci-dessous pour appliquer un port modifié."""
+    errors = []
+    if not set_media_api_port(request.form.get('api_port', '')):
+        errors.append('port invalide (doit être entre 1 et 65535)')
+    login = (request.form.get('api_login') or '').strip()
+    if login:
+        set_media_api_login(login)
+    password = request.form.get('api_password') or ''
+    if password:
+        set_media_api_password(password)
+    if not set_media_api_log_retention_days(request.form.get('api_log_retention_days', '')):
+        errors.append('rétention invalide (doit être entre 1 et 3650 jours)')
+    set_media_api_autostart(bool(request.form.get('api_autostart')))
+    if errors:
+        return _admin_block_redirect(
+            'tags_media_api',
+            ok='Autres réglages enregistrés.',
+            err='Non enregistré : ' + ', '.join(errors) + '.',
+        )
+    return _admin_block_redirect('tags_media_api', ok='Réglages API enregistrés.')
+
+
+@app.route('/admin/tags/api/toggle', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tags_media_api_toggle():
+    """Démarrage/arrêt manuel de l'API — voir media_api.start_media_api_server()
+    / stop_media_api_server() (bascule immédiate, indépendante du réglage
+    « démarrage automatique »)."""
+    if request.form.get('action') == 'stop':
+        _ok, msg = stop_media_api_server()
+    else:
+        _ok, msg = start_media_api_server()
+    return _admin_block_redirect('tags_media_api', ok=msg if _ok else None, err=None if _ok else msg)
 
 
 # ── Admin — codes invités ──────────────────────────────────────────────────────
@@ -6818,6 +6874,10 @@ if __name__ == '__main__':
     if guest_api_autostart():
         _api_ok, _api_msg = start_guest_api_server(_host)
         logger.info('API codes invités : %s', _api_msg) if _api_ok else logger.warning('API codes invités : %s', _api_msg)
+
+    if media_api_autostart():
+        _media_api_ok, _media_api_msg = start_media_api_server(_host)
+        logger.info('API média & tags : %s', _media_api_msg) if _media_api_ok else logger.warning('API média & tags : %s', _media_api_msg)
 
     # Flask tourne en arrière-plan (thread démon) ; la fenêtre native occupe
     # le thread principal — obligatoire pour l'event loop GUI sous Windows.

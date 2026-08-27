@@ -1911,3 +1911,66 @@ def list_capture_tags_with_media(limit=300):
             LIMIT ?
         """, (limit,)).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── API média (lecture seule) ───────────────────────────────────────────────
+# Alimente l'API REST dédiée exposée depuis le back office (/admin/tags,
+# bloc "API REST — accès aux ID média & tags", voir app/media_api.py et
+# app.py : _block_ctx_tags_media_api). Portée aux captures officielles
+# uniquement, comme le système de tags lui-même ci-dessus (pas aux uploads
+# invités).
+
+def _capture_media_type(kind, filename):
+    """Dérive le type exposé par l'API à partir de kind ('photo'|'video',
+    voir captures.kind) et du préfixe du nom de fichier : la base ne
+    distingue pas aujourd'hui une photo simple d'un photo strip (les deux
+    sont enregistrées avec kind='photo', voir record_capture() dans app.py),
+    seul le nom de fichier le fait ('photo-...' vs 'strip-...', voir
+    capture_photo() et capture_photostrip_finish() dans app.py)."""
+    if kind == 'video':
+        return 'video'
+    if (filename or '').startswith('strip-'):
+        return 'photo_strip'
+    return 'photo'
+
+
+def _media_api_payload(row: dict, tags: list) -> dict:
+    return {
+        'id': row['media_uid'] or None,
+        'capture_id': row['id'],
+        'type': _capture_media_type(row['kind'], row['filename']),
+        'tags': tags,
+        'date': row['created_at'],
+        'votes': row['vote_score'],
+    }
+
+
+def list_media_with_tags():
+    """Toutes les captures officielles, avec type dérivé, tags et score de
+    votes — alimente GET /api/media (media_api.py)."""
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            'SELECT id, kind, filename, media_uid, created_at, vote_score '
+            'FROM captures ORDER BY id DESC'
+        ).fetchall()
+    captures = [dict(r) for r in rows]
+    tags_by_capture = get_tags_for_captures([c['id'] for c in captures])
+    return [_media_api_payload(c, tags_by_capture.get(c['id'], [])) for c in captures]
+
+
+def get_media_with_tags_by_uid(media_uid):
+    """Une seule capture officielle par son ID média (media_uid) — None si
+    absente. Même format que list_media_with_tags() ci-dessus."""
+    media_uid = (media_uid or '').strip()
+    if not media_uid:
+        return None
+    with closing(db_conn()) as conn:
+        row = conn.execute(
+            'SELECT id, kind, filename, media_uid, created_at, vote_score '
+            'FROM captures WHERE media_uid = ?', (media_uid,)
+        ).fetchone()
+    if not row:
+        return None
+    capture = dict(row)
+    tags = [t['label'] for t in list_capture_tags(capture['id'])]
+    return _media_api_payload(capture, tags)

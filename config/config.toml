@@ -123,6 +123,20 @@ password = "changeme-api-password"
 # rotation quotidienne) avant purge automatique des fichiers les plus anciens.
 log_retention_days = 30
 
+# API REST (lecture seule) des ID captures et de leurs tags associés — voir
+# app/media_api.py. Pilotable aussi depuis le back office (/admin/tags,
+# bloc "API REST — accès aux ID média & tags"), qui a priorité sur ces
+# valeurs — voir app/media_api.py.
+# CHANGEZ login/password avant toute exposition réseau réelle.
+[media_api]
+autostart = false
+port = 8082
+login = "lecture"
+password = "changeme-media-api-password"
+# Nombre de jours de journal de connexions conservés (logs/media_api.log,
+# rotation quotidienne) avant purge automatique des fichiers les plus anciens.
+log_retention_days = 30
+
 [ui]
 app_title = "Pictotem"
 show_take_photo = true
