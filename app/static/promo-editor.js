@@ -51,6 +51,16 @@
   );
   const fontSizeOptions = ['default'].concat(_cfg.sizes);
 
+  // ── Palette de couleurs de la charte graphique (voir /admin/charte, CRUD
+  // illimité) -- alimente la palette prédéfinie du sélecteur de couleur
+  // fontColor/fontBackgroundColor ci-dessous, en plus du sélecteur "pipette"
+  // libre (colorPicker) déjà configuré. Vide (aucune couleur créée) : le
+  // paramètre `colors` n'est pas transmis, CKEditor retombe alors sur sa
+  // palette par défaut.
+  const charteColorOptions = (_cfg.colors || []).map(function (c) {
+    return { color: c[0], label: c[1] };
+  });
+
   // ── Icônes des boutons maison (SVG minimal, cohérent avec le jeu
   // d'icônes CKEditor -- viewBox 0 0 20 20, trait plein). ─────────────────
   const ICON_IMAGE = '<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M2 4a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4zm2 1v9.6L8.5 10l3 3 3.5-4L16 11.5V5H4zM7 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>';
@@ -143,8 +153,14 @@
       // palette prédéfinie restent en HSL malgré ce réglage (non couvert
       // par colorPicker.format) -- voir sanitize_promo_html (utils.py),
       // qui accepte désormais aussi ce format en secours.
-      fontColor: { colorPicker: { format: 'hex' } },
-      fontBackgroundColor: { colorPicker: { format: 'hex' } },
+      fontColor: Object.assign(
+        { colorPicker: { format: 'hex' } },
+        charteColorOptions.length ? { colors: charteColorOptions } : {}
+      ),
+      fontBackgroundColor: Object.assign(
+        { colorPicker: { format: 'hex' } },
+        charteColorOptions.length ? { colors: charteColorOptions } : {}
+      ),
       table: {
         contentToolbar: [
           'tableColumn', 'tableRow', 'mergeTableCells',

@@ -66,6 +66,8 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_guest_uploads_in_range,
                 list_gallery_combined,
                 list_tags, get_tag_by_id, create_tag, update_tag, delete_tag_db,
+                list_charte_colors, get_charte_color_by_id, create_charte_color,
+                update_charte_color, delete_charte_color_db,
                 list_capture_tags, count_capture_tags, add_capture_tag, delete_capture_tag,
                 get_media_by_uid, get_tags_for_captures, list_distinct_tag_labels,
                 list_capture_tags_with_media,
@@ -1192,6 +1194,16 @@ def _all_fonts() -> list:
     elles-mêmes (résolution de fichier Windows, valeur par défaut...)."""
     return _PROMO_FONTS + [(_custom_font_value(row), f"{row['label']} (police perso)")
                             for row in list_custom_fonts()]
+
+
+def _charte_colors_for_ckeditor() -> list:
+    """[(hex, libellé), ...] -- même forme que _all_fonts() (valeur, libellé)
+    -- pour alimenter la palette prédéfinie du sélecteur de couleur CKEditor
+    (fontColor/fontBackgroundColor) via #promo-editor-config
+    (admin_slideshow.html) et static/promo-editor.js. Couleurs gérées en
+    CRUD illimité depuis la tuile « Charte graphique » (admin_charte,
+    table charte_colors — voir db.py)."""
+    return [(row['hex_color'], row['label']) for row in list_charte_colors()]
 
 
 def _slugify_font_family(label: str) -> str:
@@ -3025,6 +3037,7 @@ _ADMIN_PAGES = [
     ('frames',      'Cadres',               'admin_frames'),
     ('votes',       'Votes',                'admin_votes'),
     ('buttons',     'Boutons',              'admin_buttons'),
+    ('charte',      'Charte graphique',     'admin_charte'),
     ('tags',        'Tags & ID média',      'admin_tags'),
     ('media',       'Médiathèque',          'admin_media'),
     ('slideshow',   'Slideshow Best Of',    'admin_slideshow'),
@@ -3048,6 +3061,7 @@ _ADMIN_PAGE_DESCRIPTIONS = {
     'frames':         "Cadres de capture, cadre d'accueil, cadre par défaut",
     'votes':          "Activer les votes sur la galerie, couleurs et seuils du gradient",
     'buttons':        "Forme, police et taille communes ; couleur et graisse propres à chaque bouton",
+    'charte':         "Palette de couleurs nommées, proposée dans les éditeurs de texte (ex. pages promo)",
     'tags':           "Tags prédéfinis/libre sur les captures, ID unique recherchable et affichable",
     'media':          "Fond d'écran Windows, images intermédiaires du diaporama, images de l'écran de veille",
     'slideshow':      "Diaporama public /bestof — type, délai, ordre, dates, pages promo",
@@ -3066,7 +3080,7 @@ _ADMIN_PAGE_DESCRIPTIONS = {
 # comme pour le reste de la migration blocs.
 _ADMIN_NATIVE_ALWAYS_NONEMPTY = {
     'texts', 'frames', 'tags', 'slideshow', 'media',
-    'guest_uploads', 'guest_codes',
+    'guest_uploads', 'guest_codes', 'charte',
 }
 
 
@@ -4285,6 +4299,69 @@ def admin_votes_set_thresholds_colors():
         if val.startswith('#') and len(val) == 7:
             set_setting(f'vote.{key}', val)
     return _admin_block_redirect('votes_thresholds_colors', ok='Paramètres mis à jour.')
+
+
+# ── Admin — charte graphique ───────────────────────────────────────────────────
+
+@app.route('/admin/charte', methods=['GET', 'POST'])
+@require_admin_auth
+@csrf_protect
+def admin_charte():
+    """Tuile « Charte graphique » : CRUD (nombre illimité) de couleurs
+    nommées. Reprises ensuite comme palette prédéfinie du sélecteur de
+    couleur de CKEditor (fontColor/fontBackgroundColor) -- voir
+    _charte_colors_for_ckeditor(), #promo-editor-config
+    (admin_slideshow.html) et static/promo-editor.js -- par exemple dans
+    l'éditeur des pages promo du Slideshow Best Of. Aucun bloc n'y est
+    assigné par défaut mais, comme toute tuile, elle peut en recevoir via
+    « Déplacer vers » depuis une autre page (voir _admin_render_blocks)."""
+    if request.method == 'POST':
+        action = request.form.get('action', '')
+
+        if action == 'color_new':
+            label = (request.form.get('label') or '').strip()
+            hex_color = (request.form.get('hex_color') or '').strip().lower()
+            sort_order = int(request.form.get('sort_order') or 0)
+            if not label:
+                return redirect(url_for('admin_charte', err='Le libellé est obligatoire.'))
+            if not re.fullmatch(r'#[0-9a-f]{6}', hex_color):
+                return redirect(url_for('admin_charte', err='Couleur invalide (format attendu : #rrggbb).'))
+            create_charte_color(label, hex_color, sort_order)
+            return redirect(url_for('admin_charte', ok=f'Couleur « {label} » ajoutée.'))
+
+        if action == 'color_edit':
+            color_id = int(request.form.get('color_id', 0))
+            if not get_charte_color_by_id(color_id):
+                abort(404)
+            label = (request.form.get('label') or '').strip()
+            hex_color = (request.form.get('hex_color') or '').strip().lower()
+            sort_order = int(request.form.get('sort_order') or 0)
+            if not label:
+                return redirect(url_for('admin_charte', err='Le libellé est obligatoire.'))
+            if not re.fullmatch(r'#[0-9a-f]{6}', hex_color):
+                return redirect(url_for('admin_charte', err='Couleur invalide (format attendu : #rrggbb).'))
+            update_charte_color(color_id, label, hex_color, sort_order)
+            return redirect(url_for('admin_charte', ok='Couleur mise à jour.'))
+
+        if action == 'color_delete':
+            color_id = int(request.form.get('color_id', 0))
+            color = delete_charte_color_db(color_id)
+            if color:
+                return redirect(url_for('admin_charte', ok=f"Couleur « {color['label']} » supprimée."))
+            return redirect(url_for('admin_charte', err='Couleur introuvable.'))
+
+        abort(404)
+
+    blocks, block_context = _admin_render_blocks('charte')
+    return render_template(
+        'admin_charte.html', config=CONFIG,
+        blocks=blocks, current_page='charte', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('charte', 'Charte graphique'),
+        charte_colors=list_charte_colors(),
+        alert_success=request.args.get('ok'),
+        alert_error=request.args.get('err'),
+        **block_context,
+    )
 
 
 # ── Admin — tags & ID média ───────────────────────────────────────────────────
@@ -6121,6 +6198,7 @@ def admin_slideshow():
             for i in list_promo_content_images()
         ],
         promo_fonts=_all_fonts(),
+        promo_colors=_charte_colors_for_ckeditor(),
         promo_text_sizes=_PROMO_TEXT_SIZES,
         promo_effects=_PROMO_EFFECTS,
         media_library=_promo_media_library(),

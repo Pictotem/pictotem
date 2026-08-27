@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_label }} — {{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('custom_fonts_css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
+  <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
+  <style>
+    .admin-wrap  { max-width: 820px; margin: 0 auto; padding: 40px 20px 60px; }
+    .back-link   { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
+                   text-decoration: none; font-size: 14px; margin-bottom: 28px; }
+    .back-link:hover { color: var(--text); }
+    h1 { font-size: 28px; font-weight: 700; margin: 0 0 4px; }
+    .subtitle { color: var(--muted); font-size: 14px; margin: 0 0 32px; }
+    .alert { padding: 12px 16px; border-radius: 10px; margin-bottom: 24px; font-size: 14px; }
+    .alert-ok  { background: rgba(50,200,100,.15); border:1px solid rgba(50,200,100,.3); color:#4ecca0; }
+    .alert-err { background: rgba(200,50,50,.15);  border:1px solid rgba(200,50,50,.3);  color:#e57373; }
+    .form-card  { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+                  padding: 24px; margin-bottom: 24px; }
+    .section-title { font-size: 17px; font-weight: 700; margin: 0 0 4px; }
+    .section-hint   { font-size: 13px; color: var(--muted); margin: 0 0 18px; }
+    .btn-primary { background: var(--accent); color: #000; font-weight: 700; border: none;
+                   border-radius: 10px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
+    .btn-primary:hover { opacity: .85; }
+
+    /* Palette de couleurs (CRUD) */
+    .add-form {
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      padding: 14px 16px; background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 12px; margin-bottom: 14px;
+    }
+    .add-form input[type=text]  { flex: 1; min-width: 160px; }
+    .add-form input[type=number]{ width: 90px; }
+    .add-form input[type=text], .add-form input[type=number] {
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 15px;
+    }
+    .color-row { display: flex; align-items: center; gap: 8px; }
+    .color-row input[type=color] {
+      width: 44px; height: 34px; padding: 2px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface-2); cursor: pointer;
+    }
+    .color-hex { font-family: monospace; font-size: 13px; color: var(--text);
+                 background: var(--surface-2); border: 1px solid var(--border);
+                 border-radius: 8px; padding: 6px 10px; width: 92px; }
+    .color-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .color-table th {
+      text-align: left; font-size: 11px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .07em;
+      padding: 8px 10px; border-bottom: 1px solid var(--border);
+    }
+    .color-table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.05); vertical-align: middle; }
+    .color-table .col-order { width: 70px; }
+    .color-table .col-act   { width: 150px; text-align: right; }
+    .color-inline-form { display: flex; gap: 6px; align-items: center; }
+    .color-inline-form input[type=text]   { width: 100%; }
+    .color-inline-form input[type=number] { width: 70px; }
+    .btn-icon {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      border-radius: 8px; padding: 5px 9px; font-size: 13px; cursor: pointer; transition: .15s;
+    }
+    .btn-icon:hover { border-color: var(--accent); color: var(--text); }
+    .btn-icon.del:hover { border-color: rgba(200,50,50,.7); color: #f97b7b; }
+    .btn-icon.save { border-color: var(--accent); color: var(--accent); }
+    .btn-icon.save:hover { background: var(--accent); color: #fff; }
+
+    /* Aperçu palette */
+    .palette-preview-wrap { margin-top: 18px; }
+    .palette-preview-label { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+    .palette-preview-box {
+      background: #111315; border-radius: 12px; padding: 20px; display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .palette-chip {
+      display: inline-flex; align-items: center; gap: 8px; border-radius: 999px;
+      padding: 5px 14px 5px 5px; background: rgba(255,255,255,.06); font-size: 13px; color: #fff;
+    }
+    .palette-chip-swatch {
+      width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); flex-shrink: 0;
+    }
+  </style>
+</head>
+<body class="gallery-body" data-admin-page="charte">
+<div class="admin-wrap">
+
+  <a class="back-link" href="{{ url_for('admin_home') }}">← Administration</a>
+  <h1>{{ page_label }}</h1>
+  <p class="subtitle">Couleurs de la charte graphique, proposées dans les éditeurs de texte enrichi (ex. pages promo du Slideshow Best Of).</p>
+
+  {% if alert_success %}<div class="alert alert-ok">{{ alert_success }}</div>{% endif %}
+  {% if alert_error   %}<div class="alert alert-err">{{ alert_error }}</div>{% endif %}
+
+  {% for block in blocks %}
+  <div class="text-section{% if block.variant %} {{ block.variant }}{% endif %}{% if block.collapsed %} block-collapsed{% endif %}" data-block-id="{{ block.id }}">
+    <div class="block-header-row">
+      <span class="block-drag-handle" title="Glisser pour réordonner">⠿</span>
+      <h2>{{ block.title }}</h2>
+      <button type="button" class="block-collapse-toggle" aria-label="Replier / déplier">▾</button>
+    </div>
+    <div class="admin-block-body">
+      {% include block.template %}
+    </div>
+    <form method="post" action="{{ url_for('admin_move_block') }}" class="block-move-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="block_id" value="{{ block.id }}">
+      <label>Déplacer vers</label>
+      <select name="target_page">
+        {% for slug, label, _ep in admin_pages %}
+        <option value="{{ slug }}" {% if slug == current_page %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Déplacer</button>
+    </form>
+  </div>
+  {% endfor %}
+
+  <!-- Couleurs (CRUD, nombre illimité) -->
+  <div class="form-card">
+    <p class="section-title">Couleurs</p>
+    <p class="section-hint">Nombre illimité. Apparaissent ensuite dans la palette prédéfinie du sélecteur de couleur (texte &amp; surlignage) de l'éditeur des pages promo.</p>
+
+    <form class="add-form" method="post" action="{{ url_for('admin_charte') }}" id="charteAddForm">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="color_new">
+      <div class="color-row">
+        <input type="color" id="charteAddPicker" value="#0d8b8f"
+               oninput="charteSyncHex(this,'charteAddHex')">
+        <input type="text" name="hex_color" id="charteAddHex" class="color-hex" value="#0d8b8f" maxlength="7"
+               oninput="charteSyncPicker(this,'charteAddPicker')">
+      </div>
+      <input type="text" name="label" placeholder="Nom de la couleur (ex. Bleu marque)" required>
+      <input type="number" name="sort_order" placeholder="Ordre" value="0" min="0" max="999" title="Ordre d'affichage">
+      <button class="btn-primary" type="submit">Ajouter</button>
+    </form>
+
+    {% if charte_colors %}
+    <!-- Un <form> par ligne, hors du <table> (un <form> n'est pas un enfant
+         valide de <tr> -- voir HTML5) : chaque cellule éditable lui est
+         rattachée via l'attribut form="charteRow<id>" plutôt que par
+         imbrication -- pattern HTML5 standard, champs dispersés dans
+         plusieurs cellules d'une même ligne mais soumis ensemble. -->
+    {% for c in charte_colors %}
+    <form method="post" action="{{ url_for('admin_charte') }}" id="charteRow{{ c.id }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="color_edit">
+      <input type="hidden" name="color_id" value="{{ c.id }}">
+    </form>
+    {% endfor %}
+    <table class="color-table">
+      <thead>
+        <tr>
+          <th>Couleur</th>
+          <th>Libellé</th>
+          <th class="col-order">Ordre</th>
+          <th class="col-act">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in charte_colors %}
+        <tr>
+          <td>
+            <div class="color-row">
+              <input type="color" id="chartePicker{{ c.id }}" value="{{ c.hex_color }}"
+                     form="charteRow{{ c.id }}"
+                     oninput="charteSyncHex(this,'charteHex{{ c.id }}')">
+              <input type="text" name="hex_color" id="charteHex{{ c.id }}" class="color-hex"
+                     value="{{ c.hex_color }}" maxlength="7" form="charteRow{{ c.id }}"
+                     oninput="charteSyncPicker(this,'chartePicker{{ c.id }}')">
+            </div>
+          </td>
+          <td>
+            <input type="text" name="label" value="{{ c.label }}" required form="charteRow{{ c.id }}" style="width:100%">
+          </td>
+          <td class="col-order">
+            <input type="number" name="sort_order" value="{{ c.sort_order }}" min="0" max="999" form="charteRow{{ c.id }}">
+          </td>
+          <td class="col-act">
+            <button class="btn-icon save" type="submit" form="charteRow{{ c.id }}" title="Enregistrer">✓</button>
+            <form method="post" action="{{ url_for('admin_charte') }}" style="display:inline"
+                  onsubmit="return confirm('Supprimer la couleur « {{ c.label }} » ?')">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="color_delete">
+              <input type="hidden" name="color_id" value="{{ c.id }}">
+              <button class="btn-icon del" type="submit" title="Supprimer">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="palette-preview-wrap">
+      <p class="palette-preview-label">Aperçu de la palette</p>
+      <div class="palette-preview-box">
+        {% for c in charte_colors %}
+        <span class="palette-chip"><span class="palette-chip-swatch" style="background:{{ c.hex_color }}"></span>{{ c.label }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <p style="text-align:center;color:var(--muted);padding:24px 0;">Aucune couleur pour le moment.</p>
+    {% endif %}
+  </div>
+
+</div>
+<script>
+  // Synchronisation pastille <input type=color> <-> champ texte hex,
+  // partagée par le formulaire d'ajout et chaque ligne du tableau (même
+  // esprit que voteSyncHex/voteSyncPicker, blocks/votes_thresholds_colors.html
+  // -- gardé local à cette page plutôt que mutualisé dans admin-blocks.js).
+  function charteSyncHex(picker, hexId) {
+    document.getElementById(hexId).value = picker.value;
+  }
+  function charteSyncPicker(hexInput, pickerId) {
+    var v = hexInput.value.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+      document.getElementById(pickerId).value = v;
+    }
+  }
+</script>
+</body>
+</html>

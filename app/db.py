@@ -319,6 +319,22 @@ def init_db():
         )
         """)
 
+        # Couleurs de la charte graphique (voir /admin/charte) : palette
+        # nommée, nombre illimité, gérée en CRUD par l'admin. Reprise
+        # ensuite comme palette prédéfinie du sélecteur de couleur CKEditor
+        # (fontColor/fontBackgroundColor) -- voir
+        # _charte_colors_for_ckeditor() (app.py), #promo-editor-config
+        # (admin_slideshow.html) et static/promo-editor.js. `hex_color`
+        # stocké avec son '#' (ex. "#1a2b3c"), validé côté route.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS charte_colors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL,
+            hex_color TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+
         # Pages promo (voir /admin/slideshow → Pages promo, app.py) : CRUD
         # v2.0 remplaçant l'ancienne page promo unique (réglages
         # slideshow.promo_* dans `settings` + fond unique dans PROMO_DIR).
@@ -1820,6 +1836,55 @@ def delete_tag_db(tag_id):
         if not row:
             return None
         conn.execute('DELETE FROM tags WHERE id = ?', (tag_id,))
+        conn.commit()
+    return dict(row)
+
+
+# ── Charte graphique (couleurs) ─────────────────────────────────────────────
+# Fonctionnalité activable via /admin/charte. Palette de couleurs nommées,
+# nombre illimité, gérée en CRUD admin -- reprise comme palette prédéfinie
+# du sélecteur de couleur CKEditor (voir _charte_colors_for_ckeditor(),
+# app.py).
+
+def list_charte_colors():
+    with closing(db_conn()) as conn:
+        rows = conn.execute('SELECT * FROM charte_colors ORDER BY sort_order ASC, label ASC').fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_charte_color_by_id(color_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM charte_colors WHERE id = ?', (color_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_charte_color(label, hex_color, sort_order=0):
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            'INSERT INTO charte_colors(label, hex_color, sort_order) VALUES(?,?,?)',
+            (label, hex_color, sort_order))
+        conn.commit()
+        return cur.lastrowid
+
+
+def update_charte_color(color_id, label, hex_color, sort_order):
+    with closing(db_conn()) as conn:
+        conn.execute(
+            'UPDATE charte_colors SET label=?, hex_color=?, sort_order=? WHERE id=?',
+            (label, hex_color, sort_order, color_id))
+        conn.commit()
+
+
+def delete_charte_color_db(color_id):
+    """Supprime une couleur de la charte graphique. Purement une entrée de
+    palette (aucune référence stockée ailleurs, contrairement à un tag) :
+    la supprimer ne modifie aucun contenu déjà édité, seule la pastille
+    disparaît de la palette CKEditor pour les prochaines sélections."""
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM charte_colors WHERE id = ?', (color_id,)).fetchone()
+        if not row:
+            return None
+        conn.execute('DELETE FROM charte_colors WHERE id = ?', (color_id,))
         conn.commit()
     return dict(row)
 
