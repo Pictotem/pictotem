@@ -5426,6 +5426,12 @@ def _slideshow_settings():
         'vote_min':         get_setting('slideshow.vote_min',          ''),
         'vote_max':         get_setting('slideshow.vote_max',          ''),
         'refresh_interval': int(get_setting('slideshow.refresh_interval', '300')),
+        # Pause à distance (nouveau, voir admin_slideshow_toggle_pause et
+        # api_bestof_set_pause ci-dessous) : un seul réglage, lu/écrit aussi
+        # bien par le bouton pause du kiosque lui-même (/bestof) que par son
+        # équivalent du back office (/admin/slideshow → Paramètres) -- les
+        # deux se resynchronisent donc automatiquement entre eux.
+        'paused':          get_setting('slideshow.paused', '0') == '1',
     }
 
 
@@ -5511,6 +5517,7 @@ def api_bestof_slides():
         'order':            s['order'],
         'refresh_interval': s['refresh_interval'],
         'promo_pages':       _active_promo_pages_public(),
+        'paused':           s['paused'],
         'show_media_id':    _media_id_settings()['show_on_bestof'],
         'show_tags':        tags_cfg['show_on_bestof'],
         'tags_style':       {
@@ -5529,8 +5536,30 @@ def api_bestof_promo_pages():
     qui ne cadence que le rafraîchissement complet (captures, images
     intermédiaires) et peut être réglé sur une valeur lente, voire désactivé,
     sans que ça ralentisse l'application des changements faits dans
-    /admin/slideshow → Pages promo."""
-    return jsonify({'pages': _active_promo_pages_public()})
+    /admin/slideshow → Pages promo. `paused` (voir _slideshow_settings) fait
+    le même trajet ici plutôt que d'attendre le rafraîchissement complet :
+    un pause/lecture déclenché depuis le back office (voir
+    admin_slideshow_toggle_pause) s'applique donc sur le kiosque en quelques
+    secondes, comme un changement de plage horaire de page promo."""
+    return jsonify({'pages': _active_promo_pages_public(),
+                     'paused': get_setting('slideshow.paused', '0') == '1'})
+
+
+@app.route('/api/bestof/pause', methods=['POST'])
+def api_bestof_set_pause():
+    """Écrit l'état pause du diaporama public (slideshow.paused, settings) --
+    public et sans CSRF comme /api/vote ci-dessus (kiosque /bestof lui-même
+    sans authentification) : appelé aussi bien par le bouton pause du
+    kiosque que par son équivalent du back office
+    (admin_slideshow_toggle_pause ci-dessous) -- même réglage, donc les deux
+    se resynchronisent automatiquement entre eux au prochain sondage (voir
+    api_bestof_promo_pages, 15s, et bestof.html)."""
+    data = request.get_json(silent=True) or {}
+    paused = data.get('paused')
+    if not isinstance(paused, bool):
+        return jsonify({'ok': False, 'error': "paramètre 'paused' invalide"}), 400
+    set_setting('slideshow.paused', '1' if paused else '0')
+    return jsonify({'ok': True, 'paused': paused})
 
 
 @app.route('/admin/slideshow')
@@ -5600,6 +5629,24 @@ def admin_slideshow_set_settings():
     set_setting('slideshow.refresh_interval',
                 str(max(0, int(request.form.get('refresh_interval', '300') or '300'))))
     return _admin_block_redirect('slideshow_settings', ok='Paramètres mis à jour.')
+
+
+@app.route('/admin/slideshow/toggle_pause', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_slideshow_toggle_pause():
+    """Bascule slideshow.paused (même réglage que le bouton pause du kiosque
+    lui-même, voir api_bestof_set_pause ci-dessus) : contrôle à distance du
+    diaporama /bestof depuis le back office, sans avoir à se déplacer
+    jusqu'à l'écran. Le kiosque applique le changement au prochain sondage
+    rapide (15s, voir api_bestof_promo_pages / refreshPromoPages,
+    bestof.html)."""
+    now_paused = get_setting('slideshow.paused', '0') != '1'
+    set_setting('slideshow.paused', '1' if now_paused else '0')
+    return _admin_block_redirect(
+        'slideshow_settings',
+        ok='Diaporama mis en pause.' if now_paused else 'Diaporama repris.'
+    )
 
 
 # ── Pages promo — CRUD ───────────────────────────────────────────────────────

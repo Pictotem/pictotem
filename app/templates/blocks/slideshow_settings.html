@@ -1,4 +1,24 @@
 <div class="form-card">
+
+  <!-- Pause à distance (nouveau) : bascule le même réglage que le bouton
+       pause du kiosque lui-même (voir #pauseBtn, bestof.html) -- les deux
+       se resynchronisent automatiquement entre eux (sondage 15s côté
+       kiosque, voir admin_slideshow_toggle_pause/api_bestof_set_pause,
+       app.py). Formulaire séparé du reste des paramètres ci-dessous :
+       action immédiate, pas un réglage à "enregistrer". -->
+  <div class="promo-live-control">
+    <span class="promo-live-status{% if slideshow_settings.paused %} is-paused{% endif %}">
+      {% if slideshow_settings.paused %}⏸ En pause{% else %}▶ En lecture{% endif %}
+    </span>
+    <form method="post" action="{{ url_for('admin_slideshow_toggle_pause') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="btn-primary" type="submit">
+        {% if slideshow_settings.paused %}▶ Reprendre le diaporama{% else %}⏸ Mettre le diaporama en pause{% endif %}
+      </button>
+    </form>
+    <a class="preview-link" href="{{ url_for('bestof') }}" target="_blank">↗ Voir le slideshow</a>
+  </div>
+
   <form method="post" action="{{ url_for('admin_slideshow_set_settings') }}">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
 

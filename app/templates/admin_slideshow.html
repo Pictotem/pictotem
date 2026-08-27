@@ -54,6 +54,16 @@
                     color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 600; }
     .preview-link:hover { text-decoration: underline; }
 
+    /* Pause à distance du diaporama (voir blocks/slideshow_settings.html) --
+       même mécanique que le bouton pause du kiosque (#pauseBtn, bestof.html),
+       juste un badge d'état + un bouton plutôt qu'un cercle flottant. */
+    .promo-live-control { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+                           margin-bottom: 22px; padding-bottom: 22px; border-bottom: 1px solid var(--border); }
+    .promo-live-control form { margin: 0; }
+    .promo-live-status { font-size: 13px; font-weight: 700; padding: 5px 12px; border-radius: 999px;
+                          background: rgba(50,200,100,.15); color: #4ecca0; }
+    .promo-live-status.is-paused { background: rgba(230,180,60,.18); color: #e0b64f; }
+
     /* Grille images intermédiaires */
     .img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px;
                 margin-bottom: 24px; }

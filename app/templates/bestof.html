@@ -465,7 +465,39 @@
     updatePauseUI();
   }
 
-  function togglePause() { paused ? resumeSlideshow() : pauseSlideshow(); }
+  // Écrit l'état pause côté serveur (slideshow.paused, voir app.py :
+  // api_bestof_set_pause) -- même réglage que le bouton pause du back
+  // office (/admin/slideshow → Paramètres), donc les deux se
+  // resynchronisent automatiquement entre eux (voir syncRemotePause() et
+  // refreshPromoPages() ci-dessous, sondées toutes les 15s). Fire-and-forget
+  // : l'effet local est déjà appliqué (pauseSlideshow/resumeSlideshow),
+  // un échec réseau ne fait que retarder la resynchronisation du back office.
+  function persistPause(newPaused) {
+    fetch('/api/bestof/pause', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paused: newPaused }),
+    }).catch(() => {});
+  }
+
+  // Action LOCALE (clic sur #pauseBtn ou barre espace) : bascule + persiste.
+  // À distinguer de syncRemotePause() ci-dessous (sondage), qui applique un
+  // changement déjà décidé ailleurs SANS le repersister (pour ne pas
+  // boucler inutilement les deux sur un aller-retour réseau).
+  function togglePause() {
+    paused ? resumeSlideshow() : pauseSlideshow();
+    persistPause(paused);
+  }
+
+  // Applique un état pause décidé À DISTANCE (back office, voir
+  // admin_slideshow_toggle_pause, app.py) dès qu'il diffère de l'état
+  // local -- lu depuis /api/bestof/promo-pages (sondage rapide, 15s) et
+  // /api/bestof/slides (rafraîchissement complet). N'écrit jamais côté
+  // serveur (voir togglePause() ci-dessus pour la version qui persiste).
+  function syncRemotePause(remotePaused) {
+    if (typeof remotePaused !== 'boolean' || remotePaused === paused) return;
+    if (remotePaused) pauseSlideshow(); else resumeSlideshow();
+  }
 
   if (pauseBtn) pauseBtn.addEventListener('click', togglePause);
   window.addEventListener('keydown', (e) => {
@@ -522,6 +554,7 @@
       settings.delay = data.delay || 5;
       settings.order = data.order || settings.order;
       applySlides(buildSlides(data));
+      syncRemotePause(data.paused);
     } catch (e) {
       console.warn('slideshow refresh échoué', e);
     }
@@ -540,6 +573,7 @@
       const data = await res.json();
       promoPages = data.pages || [];
       if (lastData) applySlides(buildSlides(lastData));
+      syncRemotePause(data.paused);
     } catch (e) { /* on garde les réglages actuels */ }
   }
   setInterval(refreshPromoPages, 15000);
@@ -561,6 +595,11 @@
       document.getElementById('empty').style.display = 'flex';
     } else {
       showNext();
+      // Diaporama déjà mis en pause depuis le back office avant même
+      // l'ouverture du kiosque (voir slideshow.paused, app.py) : afficher la
+      // 1re slide puis la geler aussitôt, plutôt que de démarrer la lecture
+      // contre la volonté de l'admin le temps du 1er sondage (15s).
+      if (data.paused) pauseSlideshow();
       if (settings.refreshInterval > 0) {
         setInterval(refreshSlides, settings.refreshInterval * 1000);
       }
