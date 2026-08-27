@@ -3211,7 +3211,13 @@ def _block_ctx_tags_display() -> dict:
 
 
 def _block_ctx_slideshow_settings() -> dict:
-    return {'slideshow_settings': _slideshow_settings()}
+    # forced_promo (voir _forced_promo_public ci-dessus) : affiché dans ce
+    # même bloc, juste sous le contrôle pause (voir
+    # blocks/slideshow_settings.html) -- le <select> des pages promo
+    # utilise directement `promo_pages`, déjà fourni globalement par
+    # admin_slideshow() (partagé avec les cartes plus bas sur la page,
+    # inutile de le redemander ici).
+    return {'slideshow_settings': _slideshow_settings(), 'forced_promo': _forced_promo_public()}
 
 
 def _block_ctx_screensaver_settings() -> dict:
@@ -5416,6 +5422,44 @@ def _active_promo_pages_public() -> list:
     ]
 
 
+def _forced_promo_public():
+    """Affichage forcé d'une page promo HORS cycle (voir
+    admin_promo_force_start/admin_promo_force_stop ci-dessous, déclenchés
+    depuis /admin/slideshow → Paramètres, à côté du bouton pause) : None si
+    aucun n'est en cours, sinon {'page': <page promo, même forme que dans
+    promo_pages>, 'remaining_ms': N}. `remaining_ms` est recalculé à CHAQUE
+    appel à partir de l'heure de fin stockée (slideshow.forced_promo_until)
+    et de l'heure actuelle du serveur -- pas de minuteur côté serveur ; le
+    kiosque programme son propre minuteur local à partir de cette valeur
+    puis reprend le cycle normal tout seul une fois écoulée (voir
+    showForcedPromo/endForcedPromo, bestof.html). Auto-nettoyage : la durée
+    écoulée (ou la page introuvable, ex. supprimée entretemps) efface les
+    réglages ICI MÊME -- /admin/slideshow affiche donc aussi "inactif" sans
+    action supplémentaire, pas seulement le kiosque."""
+    raw_page_id = get_setting('slideshow.forced_promo_page_id', '')
+    raw_until = get_setting('slideshow.forced_promo_until', '')
+    if not raw_page_id or not raw_until:
+        return None
+    try:
+        page_id = int(raw_page_id)
+        until = datetime.fromisoformat(raw_until)
+    except ValueError:
+        set_setting('slideshow.forced_promo_page_id', '')
+        set_setting('slideshow.forced_promo_until', '')
+        return None
+    remaining_ms = int((until - datetime.now()).total_seconds() * 1000)
+    page = get_promo_page(page_id)
+    if remaining_ms <= 0 or not page:
+        set_setting('slideshow.forced_promo_page_id', '')
+        set_setting('slideshow.forced_promo_until', '')
+        return None
+    # Volontairement PAS filtré sur page['active'] : forcer l'affichage hors
+    # cycle est justement un moyen de montrer une page qui n'est pas (ou
+    # plus) dans la rotation normale -- voir le <select> de
+    # blocks/slideshow_settings.html, qui liste toutes les pages promo.
+    return {'page': _promo_page_public(page), 'remaining_ms': remaining_ms}
+
+
 def _slideshow_settings():
     return {
         'type':            get_setting('slideshow.type',           'both'),
@@ -5518,6 +5562,7 @@ def api_bestof_slides():
         'refresh_interval': s['refresh_interval'],
         'promo_pages':       _active_promo_pages_public(),
         'paused':           s['paused'],
+        'forced_promo':     _forced_promo_public(),
         'show_media_id':    _media_id_settings()['show_on_bestof'],
         'show_tags':        tags_cfg['show_on_bestof'],
         'tags_style':       {
@@ -5540,9 +5585,13 @@ def api_bestof_promo_pages():
     le même trajet ici plutôt que d'attendre le rafraîchissement complet :
     un pause/lecture déclenché depuis le back office (voir
     admin_slideshow_toggle_pause) s'applique donc sur le kiosque en quelques
-    secondes, comme un changement de plage horaire de page promo."""
+    secondes, comme un changement de plage horaire de page promo. Même
+    trajet rapide pour `forced_promo` (voir _forced_promo_public) : un
+    affichage forcé hors cycle démarre, se met à jour (durée restante) et se
+    termine sans attendre le rafraîchissement complet."""
     return jsonify({'pages': _active_promo_pages_public(),
-                     'paused': get_setting('slideshow.paused', '0') == '1'})
+                     'paused': get_setting('slideshow.paused', '0') == '1',
+                     'forced_promo': _forced_promo_public()})
 
 
 @app.route('/api/bestof/pause', methods=['POST'])
@@ -5647,6 +5696,43 @@ def admin_slideshow_toggle_pause():
         'slideshow_settings',
         ok='Diaporama mis en pause.' if now_paused else 'Diaporama repris.'
     )
+
+
+# ── Page promo forcée hors cycle ─────────────────────────────────────────────
+# Bouton actif/inactif à côté de la pause ci-dessus (voir
+# blocks/slideshow_settings.html) : affiche IMMÉDIATEMENT une page promo
+# choisie, pour une durée fixée, en interrompant le cycle normal en cours
+# (peu importe ce qui est affiché à cet instant) -- puis reprend ce cycle
+# tout seul une fois la durée écoulée. Un seul affichage forcé à la fois
+# (2 réglages, voir _forced_promo_public ci-dessus) : en démarrer un
+# nouveau remplace silencieusement le précédent s'il y en avait un.
+
+@app.route('/admin/slideshow/promo/force_start', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_promo_force_start():
+    raw_page_id = (request.form.get('page_id') or '').strip()
+    raw_duration = (request.form.get('duration_seconds') or '').strip()
+    if not raw_page_id.isdigit() or not get_promo_page(int(raw_page_id)):
+        return _admin_block_redirect('slideshow_settings', err='Page promo introuvable.')
+    if not raw_duration.isdigit() or not (1 <= int(raw_duration) <= 600):
+        return _admin_block_redirect('slideshow_settings', err='Durée invalide (1 à 600 secondes).')
+    until = datetime.now() + timedelta(seconds=int(raw_duration))
+    set_setting('slideshow.forced_promo_page_id', raw_page_id)
+    set_setting('slideshow.forced_promo_until', until.isoformat(timespec='seconds'))
+    return _admin_block_redirect('slideshow_settings', ok='Page promo forcée — affichage en cours sur le kiosque.')
+
+
+@app.route('/admin/slideshow/promo/force_stop', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_promo_force_stop():
+    """Annule l'affichage forcé avant la fin de sa durée (voir
+    admin_promo_force_start ci-dessus) -- le kiosque reprend le cycle normal
+    au prochain sondage rapide (15s)."""
+    set_setting('slideshow.forced_promo_page_id', '')
+    set_setting('slideshow.forced_promo_until', '')
+    return _admin_block_redirect('slideshow_settings', ok='Affichage forcé arrêté — reprise du cycle normal.')
 
 
 # ── Pages promo — CRUD ───────────────────────────────────────────────────────

@@ -63,6 +63,17 @@
     .promo-live-status { font-size: 13px; font-weight: 700; padding: 5px 12px; border-radius: 999px;
                           background: rgba(50,200,100,.15); color: #4ecca0; }
     .promo-live-status.is-paused { background: rgba(230,180,60,.18); color: #e0b64f; }
+    /* Affichage forcé hors cycle (voir blocks/slideshow_settings.html) --
+       même rangée que la pause juste au-dessus, sa propre couleur de badge
+       pour ne pas se confondre avec "En pause". */
+    .promo-force-control { border-bottom: none; padding-bottom: 0; }
+    .promo-live-status.is-forced { background: rgba(123,97,255,.18); color: #9b8aff; }
+    .promo-force-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; }
+    .promo-force-form select,
+    .promo-force-form input[type=number] {
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 8px; padding: 6px 10px; font-size: 13px;
+    }
 
     /* Grille images intermédiaires */
     .img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px;

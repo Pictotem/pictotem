@@ -19,6 +19,43 @@
     <a class="preview-link" href="{{ url_for('bestof') }}" target="_blank">↗ Voir le slideshow</a>
   </div>
 
+  <!-- Affichage forcé hors cycle (nouveau) : montre IMMÉDIATEMENT une page
+       promo choisie, pour une durée donnée, en interrompant le cycle en
+       cours -- puis reprend ce cycle tout seul une fois la durée écoulée
+       (voir showForcedPromo/endForcedPromo, bestof.html, et
+       admin_promo_force_start/admin_promo_force_stop, app.py). Juste sous
+       le contrôle pause ci-dessus, à sa demande. `promo_pages` vient du
+       contexte global de la page (voir admin_slideshow(), app.py), pas de
+       ce bloc -- déjà utilisé plus bas par les cartes de pages promo. -->
+  <div class="promo-live-control promo-force-control">
+    {% if forced_promo %}
+    <span class="promo-live-status is-forced">
+      ⏵ Page #{{ forced_promo.page.id }} forcée — encore {{ (forced_promo.remaining_ms / 1000) | round(0, 'ceil') | int }}s
+    </span>
+    <form method="post" action="{{ url_for('admin_promo_force_stop') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="btn-danger" type="submit">✕ Désactiver</button>
+    </form>
+    {% else %}
+    <form method="post" action="{{ url_for('admin_promo_force_start') }}" class="promo-force-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <label style="font-size:13px;font-weight:600;color:var(--muted)">Afficher hors cycle</label>
+      <select name="page_id" {% if not promo_pages %}disabled{% endif %}>
+        {% if not promo_pages %}
+        <option value="">Aucune page promo</option>
+        {% endif %}
+        {% for p in promo_pages %}
+        <option value="{{ p.id }}">Page #{{ p.id }}{% if not p.active %} (inactive){% endif %}</option>
+        {% endfor %}
+      </select>
+      <span style="font-size:13px;color:var(--muted)">pendant</span>
+      <input type="number" name="duration_seconds" min="1" max="600" value="15" style="max-width:90px">
+      <span style="font-size:13px;color:var(--muted)">s</span>
+      <button class="btn-primary" type="submit" {% if not promo_pages %}disabled{% endif %}>▶ Activer</button>
+    </form>
+    {% endif %}
+  </div>
+
   <form method="post" action="{{ url_for('admin_slideshow_set_settings') }}">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
 

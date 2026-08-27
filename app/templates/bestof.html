@@ -208,6 +208,16 @@
   let pauseAdvanceFn = null;  // callback "passer à la slide suivante" de la slide affichée
   let pauseDurationMs = null; // durée totale (photo/promo) à reprogrammer à la reprise
 
+  // Affichage forcé hors cycle (voir /admin/slideshow → Paramètres, juste
+  // sous le contrôle pause) : interrompt le cycle normal pour montrer une
+  // page promo choisie pendant une durée fixée, puis reprend ce cycle tout
+  // seul. Réutilise le même mécanisme que la pause ci-dessus (`cleanup`,
+  // `pauseAdvanceFn`, `pauseDurationMs`) -- une pause déclenchée PENDANT un
+  // affichage forcé le fige donc comme n'importe quelle autre slide, sans
+  // code supplémentaire (voir pauseSlideshow/resumeSlideshow).
+  let forcedPromoActive = false;
+  let forcedPromoPageId = null; // id de la page forcée actuellement affichée (ou en cours de reprise), null sinon
+
   function shuffle(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -430,6 +440,63 @@
     }
   }
 
+  // ── Affichage forcé hors cycle ────────────────────────────────────────
+  // Affiche `page` immédiatement (coupe court à la slide en cours, quelle
+  // qu'elle soit) pendant `remainingMs`, puis appelle endForcedPromo().
+  // Construite sur le même squelette que la branche 'promo' de showNext()
+  // ci-dessus (fond/texte/QR, effet visuel, crossfade) -- mais HORS de
+  // `slides`/`idx` : le cycle normal n'est ni consommé ni avancé pendant ce
+  // temps, showNext() reprend exactement où il en était à la fin.
+  function showForcedPromo(page, remainingMs) {
+    if (cleanup) { cleanup(); cleanup = null; }
+    forcedPromoActive = true;
+    forcedPromoPageId = page.id;
+
+    const next = current === 'A' ? 'B' : 'A';
+    const curEl  = document.getElementById('slide' + current);
+    const nextEl = document.getElementById('slide' + next);
+    nextEl.className = `slide slide-promo effect-${page.effect || 'fade'}`;
+    buildPromoContent(nextEl, page);
+
+    let called = false;
+    const advance = () => { if (!called) { called = true; endForcedPromo(); } };
+    const t = setTimeout(advance, Math.max(0, remainingMs));
+    cleanup = () => clearTimeout(t);
+    pauseVideoEl = null;
+    pauseAdvanceFn = advance;
+    pauseDurationMs = Math.max(0, remainingMs);
+
+    requestAnimationFrame(() => {
+      nextEl.classList.add('active');
+      setTimeout(() => curEl.classList.remove('active'), 800);
+    });
+    current = next;
+
+    // Une page promo forcée n'est ni une capture invitée, ni identifiée par
+    // un media_uid, ni taguée : masquer les badges de la slide précédente
+    // plutôt que de les laisser affichés par erreur pendant l'interruption.
+    const badge = document.getElementById('slideBadge');
+    if (badge) badge.classList.add('hidden');
+    const idBadge = document.getElementById('slideMediaId');
+    if (idBadge) idBadge.classList.add('hidden');
+    const tagsBox = document.getElementById('slideTags');
+    if (tagsBox) tagsBox.classList.add('hidden');
+  }
+
+  // Fin naturelle de l'affichage forcé (durée écoulée) : reprend le cycle
+  // normal via showNext(), qui reprogramme `cleanup`/pauseAdvanceFn/etc.
+  // pour la slide suivante comme d'habitude. N'est appelée QUE si le
+  // diaporama n'est pas en pause à cet instant : sinon (voir
+  // pauseSlideshow ci-dessus, qui annule ce minuteur comme n'importe quel
+  // autre) le minuteur ne peut de toute façon pas se déclencher tant que
+  // resumeSlideshow() ne l'a pas reprogrammé -- garde-fou plutôt que cas
+  // réellement atteint.
+  function endForcedPromo() {
+    forcedPromoActive = false;
+    forcedPromoPageId = null;
+    if (!paused) showNext();
+  }
+
   // ── Pause (voir #pauseBtn) ────────────────────────────────────────────
   const pauseBtn = document.getElementById('pauseBtn');
 
@@ -499,6 +566,30 @@
     if (remotePaused) pauseSlideshow(); else resumeSlideshow();
   }
 
+  // Applique un affichage forcé décidé À DISTANCE (back office, voir
+  // admin_promo_force_start/admin_promo_force_stop, app.py) -- lu depuis
+  // /api/bestof/promo-pages (sondage rapide, 15s) et /api/bestof/slides,
+  // `remote` étant `forced_promo` de ces réponses : null (inactif) ou
+  // {page, remaining_ms}. Ignore les sondages "rien de nouveau" (même page
+  // déjà affichée localement) pour ne pas relancer/interrompre le minuteur
+  // en cours à chaque sondage -- seule une VRAIE transition (démarrage,
+  // changement de page, ou annulation) déclenche quelque chose ici.
+  function syncForcedPromo(remote) {
+    const remoteId = remote && remote.page ? remote.page.id : null;
+    if (remoteId === forcedPromoPageId) return;
+    if (remoteId != null) {
+      showForcedPromo(remote.page, remote.remaining_ms);
+    } else if (forcedPromoActive) {
+      // Désactivé côté back office avant la fin normale (bouton
+      // "Désactiver") : reprend le cycle normal tout de suite, comme une
+      // fin de durée naturelle.
+      forcedPromoActive = false;
+      forcedPromoPageId = null;
+      if (cleanup) { cleanup(); cleanup = null; }
+      if (!paused) showNext();
+    }
+  }
+
   if (pauseBtn) pauseBtn.addEventListener('click', togglePause);
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Space' || e.key === ' ') {
@@ -555,6 +646,7 @@
       settings.order = data.order || settings.order;
       applySlides(buildSlides(data));
       syncRemotePause(data.paused);
+      syncForcedPromo(data.forced_promo);
     } catch (e) {
       console.warn('slideshow refresh échoué', e);
     }
@@ -574,6 +666,7 @@
       promoPages = data.pages || [];
       if (lastData) applySlides(buildSlides(lastData));
       syncRemotePause(data.paused);
+      syncForcedPromo(data.forced_promo);
     } catch (e) { /* on garde les réglages actuels */ }
   }
   setInterval(refreshPromoPages, 15000);
@@ -595,10 +688,13 @@
       document.getElementById('empty').style.display = 'flex';
     } else {
       showNext();
-      // Diaporama déjà mis en pause depuis le back office avant même
-      // l'ouverture du kiosque (voir slideshow.paused, app.py) : afficher la
-      // 1re slide puis la geler aussitôt, plutôt que de démarrer la lecture
-      // contre la volonté de l'admin le temps du 1er sondage (15s).
+      // Affichage forcé et/ou pause déjà actifs depuis le back office avant
+      // même l'ouverture du kiosque (voir slideshow.forced_promo_*/paused,
+      // app.py) : appliqués ici dans cet ordre -- la page forcée remplace
+      // la 1re slide normale si besoin, la pause fige ensuite sur ce qui
+      // est effectivement affiché (forcé ou non) -- plutôt que de démarrer
+      // la lecture contre la volonté de l'admin le temps du 1er sondage (15s).
+      syncForcedPromo(data.forced_promo);
       if (data.paused) pauseSlideshow();
       if (settings.refreshInterval > 0) {
         setInterval(refreshSlides, settings.refreshInterval * 1000);
