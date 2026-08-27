@@ -27,10 +27,10 @@
        le contrôle pause ci-dessus, à sa demande. `promo_pages` vient du
        contexte global de la page (voir admin_slideshow(), app.py), pas de
        ce bloc -- déjà utilisé plus bas par les cartes de pages promo. -->
-  <div class="promo-live-control promo-force-control">
+  <div class="promo-live-control promo-force-control" id="promoForceControl">
     {% if forced_promo %}
     <span class="promo-live-status is-forced">
-      ⏵ Page #{{ forced_promo.page.id }} forcée — encore {{ (forced_promo.remaining_ms / 1000) | round(0, 'ceil') | int }}s
+      ⏵ Page #{{ forced_promo.page.id }} forcée — encore <span id="promoForceCountdown">{{ (forced_promo.remaining_ms / 1000) | round(0, 'ceil') | int }}</span>s
     </span>
     <form method="post" action="{{ url_for('admin_promo_force_stop') }}">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -55,6 +55,87 @@
     </form>
     {% endif %}
   </div>
+
+  {% if forced_promo %}
+  <script type="application/json" id="promo-force-pages-data">{{ promo_force_options | tojson }}</script>
+  <script>
+  (function () {
+    // Décompte + reprise automatique du contrôle "Afficher hors cycle"
+    // ci-dessus (voir showForcedPromo/endForcedPromo, bestof.html, et
+    // admin_promo_force_start/admin_promo_force_stop, app.py) : sans ce
+    // script, "encore Ns" était rendu UNE SEULE FOIS côté serveur -- figé à
+    // l'écran tant que l'admin ne rechargeait pas la page à la main, et le
+    // bouton restait bloqué sur "Désactiver" même après la fin réelle de
+    // l'affichage forcé côté kiosque (qui, lui, reprend son cycle tout
+    // seul -- voir endForcedPromo()). Ne recharge JAMAIS toute la page
+    // (qui perdrait un formulaire en cours d'édition ailleurs sur
+    // /admin/slideshow, ex. une page promo ouverte dans l'éditeur) --
+    // reconstruit seulement ce petit bloc.
+    const control = document.getElementById('promoForceControl');
+    const countdownEl = document.getElementById('promoForceCountdown');
+    if (!control || !countdownEl) return;
+
+    const remainingMsAtLoad = {{ forced_promo.remaining_ms }};
+    const loadedAt = Date.now();
+
+    function csrfToken() {
+      const meta = document.querySelector('meta[name="csrf-token"]');
+      return meta ? meta.content : '';
+    }
+
+    function renderActivateForm(pages) {
+      const options = !pages.length
+        ? '<option value="">Aucune page promo</option>'
+        : pages.map((p) => `<option value="${p.id}">Page #${p.id}${p.active ? '' : ' (inactive)'}</option>`).join('');
+      const disabledAttr = pages.length ? '' : 'disabled';
+      control.innerHTML = `
+        <form method="post" action="/admin/slideshow/promo/force_start" class="promo-force-form">
+          <input type="hidden" name="_csrf_token" value="${csrfToken()}">
+          <label style="font-size:13px;font-weight:600;color:var(--muted)">Afficher hors cycle</label>
+          <select name="page_id" ${disabledAttr}>${options}</select>
+          <span style="font-size:13px;color:var(--muted)">pendant</span>
+          <input type="number" name="duration_seconds" min="1" max="600" value="15" style="max-width:90px">
+          <span style="font-size:13px;color:var(--muted)">s</span>
+          <button class="btn-primary" type="submit" ${disabledAttr}>▶ Activer</button>
+        </form>
+      `;
+    }
+
+    // Vérifie AUPRÈS DU SERVEUR (jamais sur la seule foi du minuteur local)
+    // que l'affichage forcé est bien terminé -- même source que le kiosque
+    // (voir syncForcedPromo, bestof.html), déjà publique et auto-nettoyante
+    // (voir _forced_promo_public, app.py) : couvre aussi le cas où l'admin
+    // l'aurait arrêté depuis un AUTRE onglet/appareil entre-temps.
+    let checking = false;
+    async function checkEnded() {
+      if (checking) return;
+      checking = true;
+      try {
+        const res = await fetch('/api/bestof/promo-pages');
+        const data = await res.json();
+        if (!data.forced_promo) {
+          clearInterval(tick);
+          const pagesData = document.getElementById('promo-force-pages-data');
+          let pages = [];
+          try { pages = JSON.parse(pagesData.textContent); } catch (e) { /* ignore */ }
+          renderActivateForm(pages);
+        }
+      } catch (e) { /* réseau en échec -- retenté au prochain tic */ }
+      checking = false;
+    }
+
+    // Décompte local, purement visuel, à la seconde -- recalculé à chaque
+    // tic sur le temps réellement écoulé (Date.now()) plutôt qu'un simple
+    // compteur décrémenté, pour rester juste même si l'onglet a été mis en
+    // arrière-plan entre deux tics.
+    const tick = setInterval(() => {
+      const leftMs = remainingMsAtLoad - (Date.now() - loadedAt);
+      countdownEl.textContent = Math.max(0, Math.ceil(leftMs / 1000));
+      if (leftMs <= 0) checkEnded();
+    }, 1000);
+  })();
+  </script>
+  {% endif %}
 
   <form method="post" action="{{ url_for('admin_slideshow_set_settings') }}">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">

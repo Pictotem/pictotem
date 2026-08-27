@@ -3232,7 +3232,17 @@ def _block_ctx_slideshow_settings() -> dict:
     # utilise directement `promo_pages`, déjà fourni globalement par
     # admin_slideshow() (partagé avec les cartes plus bas sur la page,
     # inutile de le redemander ici).
-    return {'slideshow_settings': _slideshow_settings(), 'forced_promo': _forced_promo_public()}
+    # promo_force_options : version allégée (id/active seulement, voir
+    # timeline_pages plus haut pour le même principe) embarquée en JSON par
+    # blocks/slideshow_settings.html pour reconstruire le <select> "Afficher
+    # hors cycle" en JS une fois l'affichage forcé terminé, SANS recharger
+    # toute la page (voir le script du bloc) -- `promo_pages` (complet, avec
+    # html_content etc.) ne convient pas pour ça, trop volumineux à embarquer.
+    return {
+        'slideshow_settings': _slideshow_settings(),
+        'forced_promo': _forced_promo_public(),
+        'promo_force_options': [{'id': p['id'], 'active': bool(p['active'])} for p in list_promo_pages()],
+    }
 
 
 def _block_ctx_screensaver_settings() -> dict:
