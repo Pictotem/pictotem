@@ -53,8 +53,131 @@
     </div>
   </div>
 
+  <!-- Affichage des tags dans la GALERIE (vue unitaire /lightbox, sous le
+       media, voir #lbTags, gallery.html) -- reglages INDEPENDANTS de
+       "Afficher les tags sur le diaporama /bestof" ci-dessus (contexte
+       visuel different). Emplacement fixe (sous le media) -- pas de
+       position/marges ici. -->
+  <div class="field" style="margin-top:28px;padding-top:18px;border-top:1px solid var(--border)">
+    <label style="font-weight:700;color:var(--text);font-size:14px;margin-bottom:14px">
+      Affichage dans la galerie (vue unitaire)
+    </label>
+  </div>
+
+  <div class="field">
+    <div class="check-row">
+      <input type="checkbox" id="tags_gallery_show" name="tags_gallery_show"
+             {% if tags_settings.gallery_show %}checked{% endif %}>
+      <span>Afficher les tags sous le média, dans la galerie</span>
+    </div>
+  </div>
+
+  <div class="field-row">
+    <div class="field field-half">
+      <label>Police</label>
+      <select name="tags_gallery_font" id="tags_gallery_font" onchange="tagsGalleryUpdatePreview()">
+        {% for value, label in tags_fonts %}
+        <option value="{{ value }}" {% if tags_settings.gallery_style_font == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field field-half">
+      <label>Taille du texte (px)</label>
+      <input type="number" name="tags_gallery_font_size" id="tags_gallery_font_size" min="8" max="72"
+             value="{{ tags_settings.gallery_style_font_size }}" style="max-width:140px" oninput="tagsGalleryUpdatePreview()">
+    </div>
+  </div>
+
+  <div class="field-row">
+    <div class="field field-half">
+      <label>Couleur du texte</label>
+      <div class="color-row">
+        <input type="color" id="tg_cp_text" value="{{ tags_settings.gallery_style_text_color }}"
+               oninput="document.getElementById('tags_gallery_text_color').value=this.value; tagsGalleryUpdatePreview()">
+        <input type="text" id="tags_gallery_text_color" name="tags_gallery_text_color" class="color-hex"
+               value="{{ tags_settings.gallery_style_text_color }}" maxlength="7"
+               oninput="document.getElementById('tg_cp_text').value=this.value; tagsGalleryUpdatePreview()">
+      </div>
+    </div>
+    <div class="field field-half">
+      <label>Couleur du fond</label>
+      <div class="color-row">
+        <input type="color" id="tg_cp_bg" value="{{ tags_settings.gallery_style_bg_color }}"
+               oninput="document.getElementById('tags_gallery_bg_color').value=this.value; tagsGalleryUpdatePreview()">
+        <input type="text" id="tags_gallery_bg_color" name="tags_gallery_bg_color" class="color-hex"
+               value="{{ tags_settings.gallery_style_bg_color }}" maxlength="7"
+               oninput="document.getElementById('tg_cp_bg').value=this.value; tagsGalleryUpdatePreview()">
+      </div>
+      <p class="field-hint">Visible derrière l'image de fond ci-dessous si elle est transparente, ou seule si aucune image n'est choisie.</p>
+    </div>
+  </div>
+
+  <div class="field-row">
+    <div class="field field-half">
+      <label>Taille du cartouche</label>
+      <input type="number" name="tags_gallery_badge_size" id="tags_gallery_badge_size" min="8" max="500"
+             value="{{ tags_settings.gallery_badge_size }}" style="max-width:140px"
+             oninput="tagsGalleryUpdatePreview()">
+      <p class="field-hint">
+        Disque/carré : diamètre/côté fixe (le texte reste centré, quitte à déborder si le tag est long).
+        Rectangle (droit ou arrondi) : ajusté à la largeur du texte, cette taille pilote l'épaisseur du padding.
+      </p>
+    </div>
+    <div class="field field-half">
+      <label>Forme du cartouche</label>
+      <select name="tags_gallery_shape" id="tags_gallery_shape" onchange="tagsGalleryUpdatePreview()">
+        {% for value, label in tags_shapes %}
+        <option value="{{ value }}" {% if tags_settings.gallery_shape == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="tags-preview-wrap">
+    <p class="tags-preview-label">Aperçu</p>
+    <div class="tags-preview-box">
+      <span class="tag-preview-chip" id="tagsGalleryPreviewChip1">Anniversaire</span>
+      <span class="tag-preview-chip" id="tagsGalleryPreviewChip2">Trop bien !</span>
+    </div>
+  </div>
+
   <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
 </form>
+
+<!-- Image de fond des chips de tags dans la galerie : formulaire separe
+     (multipart, upload dedie -- une seule image, voir
+     admin_tags_gallery_bg_upload/admin_tags_gallery_bg_remove, app.py). -->
+<div class="field" style="margin-top:24px">
+  <label>Image de fond des chips (galerie) <span style="font-weight:400;color:var(--muted)">(optionnel)</span></label>
+  <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-top:8px">
+    {% if tags_settings.gallery_style_bg_image %}
+    <div style="flex:0 0 auto;width:120px;aspect-ratio:1/1;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:#0d0f11;">
+      <img src="{{ url_for('static', filename='tags_badge/' + tags_settings.gallery_style_bg_image) }}"
+           style="width:100%;height:100%;object-fit:cover;" alt="Image de fond des chips de tags (galerie)">
+    </div>
+    {% endif %}
+    <div style="flex:1;min-width:220px">
+      <form method="post" action="{{ url_for('admin_tags_gallery_bg_upload') }}" enctype="multipart/form-data" style="margin-bottom:10px">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="upload-zone">
+          <label class="upload-label" for="tags_gallery_bg_input">Choisir une image…</label>
+          <input type="file" id="tags_gallery_bg_input" name="tags_gallery_bg" accept=".png,.jpg,.jpeg,.webp"
+                 onchange="document.getElementById('tags-gallery-bg-name').textContent = this.files[0]?.name || ''">
+          <span id="tags-gallery-bg-name"></span>
+          <p class="upload-hint">PNG, JPG, WEBP — remplace l'image actuelle s'il y en a une.</p>
+          <button class="btn-primary" type="submit" style="margin-top:10px">Mettre à jour</button>
+        </div>
+      </form>
+      {% if tags_settings.gallery_style_bg_image %}
+      <form method="post" action="{{ url_for('admin_tags_gallery_bg_remove') }}"
+            onsubmit="return confirm('Supprimer l\'image de fond des chips ?')">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button class="btn-danger" type="submit">✕ Supprimer l'image de fond</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
 
 <script>
   // Section auto-suffisante (pas de couplage avec un autre bloc) : IIFE +
@@ -83,5 +206,52 @@
     document.getElementById('style_font')?.addEventListener('change', tagsUpdatePreviewImpl);
     document.getElementById('style_font_size')?.addEventListener('input', tagsUpdatePreviewImpl);
     tagsUpdatePreviewImpl();
+  })();
+</script>
+
+<script>
+  // Apercu en direct des chips de tags DANS LA GALERIE -- IIFE separee,
+  // meme principe que tagsUpdatePreviewImpl ci-dessus mais sur les champs
+  // *_gallery_* / #tagsGalleryPreviewChip1/2 (reglages independants),
+  // plus taille/forme du cartouche (voir mediaIdGalleryUpdatePreviewImpl,
+  // blocks/tags_media_id.html, meme formule).
+  (function () {
+    function tagsGalleryUpdatePreviewImpl() {
+      const fontEl = document.getElementById('tags_gallery_font');
+      if (!fontEl) return;
+      const font = fontEl.value;
+      const size = document.getElementById('tags_gallery_font_size').value || 13;
+      const bg   = document.getElementById('tags_gallery_bg_color').value || '#0d8b8f';
+      const text = document.getElementById('tags_gallery_text_color').value || '#ffffff';
+      const shape = document.getElementById('tags_gallery_shape').value || 'rounded';
+      const badgeSize = parseInt(document.getElementById('tags_gallery_badge_size').value, 10) || 20;
+      ['tagsGalleryPreviewChip1', 'tagsGalleryPreviewChip2'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.fontFamily = font;
+        el.style.fontSize = size + 'px';
+        el.style.background = bg;
+        el.style.color = text;
+        el.style.display = 'inline-flex';
+        el.style.alignItems = 'center';
+        el.style.justifyContent = 'center';
+        if (shape === 'circle' || shape === 'square') {
+          el.style.width = badgeSize + 'px';
+          el.style.height = badgeSize + 'px';
+          el.style.padding = '0';
+          el.style.borderRadius = shape === 'circle' ? '50%' : '0';
+        } else {
+          el.style.width = 'auto';
+          el.style.height = 'auto';
+          el.style.padding = Math.round(badgeSize * 0.3) + 'px ' + Math.round(badgeSize * 0.7) + 'px';
+          el.style.borderRadius = shape === 'rounded' ? '999px' : '0';
+        }
+      });
+    }
+    window.tagsGalleryUpdatePreview = tagsGalleryUpdatePreviewImpl;
+
+    document.getElementById('tags_gallery_font')?.addEventListener('change', tagsGalleryUpdatePreviewImpl);
+    document.getElementById('tags_gallery_font_size')?.addEventListener('input', tagsGalleryUpdatePreviewImpl);
+    tagsGalleryUpdatePreviewImpl();
   })();
 </script>

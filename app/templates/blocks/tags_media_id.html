@@ -135,6 +135,93 @@
     </div>
   </div>
 
+  <!-- Affichage de l'ID media dans la GALERIE (vue unitaire /lightbox,
+       entre la date et le vote, voir #lbMediaId, gallery.html) -- reglages
+       INDEPENDANTS de "Apparence du cartouche" ci-dessus (contexte visuel
+       different : barre d'outils de galerie plutot que plein ecran
+       kiosque). Emplacement fixe -- pas de position/marges ici. -->
+  <div class="field" style="margin-top:28px;padding-top:18px;border-top:1px solid var(--border)">
+    <label style="font-weight:700;color:var(--text);font-size:14px;margin-bottom:14px">
+      Affichage dans la galerie (vue unitaire)
+    </label>
+  </div>
+
+  <div class="field">
+    <div class="check-row">
+      <input type="checkbox" id="media_id_gallery_show" name="media_id_gallery_show"
+             {% if media_id.gallery_show %}checked{% endif %}>
+      <span>Afficher l'ID média dans la barre supérieure de la galerie (entre la date et le vote)</span>
+    </div>
+  </div>
+
+  <div class="field-row">
+    <div class="field field-half">
+      <label>Police</label>
+      <select name="media_id_gallery_font" id="media_id_gallery_font" onchange="mediaIdGalleryUpdatePreview()">
+        {% for value, label in media_id_fonts %}
+        <option value="{{ value }}" {% if media_id.gallery_font == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field field-half">
+      <label>Taille du texte (px)</label>
+      <input type="number" name="media_id_gallery_font_size" id="media_id_gallery_font_size" min="8" max="200"
+             value="{{ media_id.gallery_font_size }}" style="max-width:140px" oninput="mediaIdGalleryUpdatePreview()">
+    </div>
+  </div>
+
+  <div class="field-row">
+    <div class="field field-half">
+      <label>Couleur du texte</label>
+      <div class="color-row">
+        <input type="color" id="mig_cp_text" value="{{ media_id.gallery_text_color }}"
+               oninput="document.getElementById('media_id_gallery_text_color').value=this.value; mediaIdGalleryUpdatePreview()">
+        <input type="text" id="media_id_gallery_text_color" name="media_id_gallery_text_color" class="color-hex"
+               value="{{ media_id.gallery_text_color }}" maxlength="7"
+               oninput="document.getElementById('mig_cp_text').value=this.value; mediaIdGalleryUpdatePreview()">
+      </div>
+    </div>
+    <div class="field field-half">
+      <label>Couleur du cartouche</label>
+      <div class="color-row">
+        <input type="color" id="mig_cp_bg" value="{{ media_id.gallery_bg_color }}"
+               oninput="document.getElementById('media_id_gallery_bg_color').value=this.value; mediaIdGalleryUpdatePreview()">
+        <input type="text" id="media_id_gallery_bg_color" name="media_id_gallery_bg_color" class="color-hex"
+               value="{{ media_id.gallery_bg_color }}" maxlength="7"
+               oninput="document.getElementById('mig_cp_bg').value=this.value; mediaIdGalleryUpdatePreview()">
+      </div>
+      <p class="field-hint">Visible derrière l'image de fond ci-dessous si elle est transparente, ou seule si aucune image n'est choisie.</p>
+    </div>
+  </div>
+
+  <div class="field-row">
+    <div class="field field-half">
+      <label>Taille du cartouche</label>
+      <input type="number" name="media_id_gallery_badge_size" id="media_id_gallery_badge_size" min="8" max="500"
+             value="{{ media_id.gallery_badge_size }}" style="max-width:140px"
+             oninput="mediaIdGalleryUpdatePreview()">
+      <p class="field-hint">
+        Disque/carré : diamètre/côté fixe (le texte reste centré, quitte à déborder si l'ID est long).
+        Rectangle (droit ou arrondi) : ajusté à la largeur du texte, cette taille pilote l'épaisseur du padding.
+      </p>
+    </div>
+    <div class="field field-half">
+      <label>Forme du cartouche</label>
+      <select name="media_id_gallery_shape" id="media_id_gallery_shape" onchange="mediaIdGalleryUpdatePreview()">
+        {% for value, label in media_id_shapes %}
+        <option value="{{ value }}" {% if media_id.gallery_shape == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="tags-preview-wrap">
+    <p class="tags-preview-label">Aperçu</p>
+    <div class="tags-preview-box">
+      <span class="tag-preview-chip" id="mediaIdGalleryPreviewChip">#123456</span>
+    </div>
+  </div>
+
   <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
 </form>
 
@@ -166,6 +253,38 @@
       {% if media_id.bg_image %}
       <form method="post" action="{{ url_for('admin_media_id_bg_remove') }}"
             onsubmit="return confirm('Supprimer l\'image de fond du cartouche ?')">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button class="btn-danger" type="submit">✕ Supprimer l'image de fond</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="field" style="margin-top:24px">
+  <label>Image de fond du cartouche (galerie) <span style="font-weight:400;color:var(--muted)">(optionnel)</span></label>
+  <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-top:8px">
+    {% if media_id.gallery_bg_image %}
+    <div style="flex:0 0 auto;width:120px;aspect-ratio:1/1;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:#0d0f11;">
+      <img src="{{ url_for('static', filename='media_id/' + media_id.gallery_bg_image) }}"
+           style="width:100%;height:100%;object-fit:cover;" alt="Image de fond du cartouche ID média (galerie)">
+    </div>
+    {% endif %}
+    <div style="flex:1;min-width:220px">
+      <form method="post" action="{{ url_for('admin_media_id_gallery_bg_upload') }}" enctype="multipart/form-data" style="margin-bottom:10px">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="upload-zone">
+          <label class="upload-label" for="media_id_gallery_bg_input">Choisir une image…</label>
+          <input type="file" id="media_id_gallery_bg_input" name="media_id_gallery_bg" accept=".png,.jpg,.jpeg,.webp"
+                 onchange="document.getElementById('media-id-gallery-bg-name').textContent = this.files[0]?.name || ''">
+          <span id="media-id-gallery-bg-name"></span>
+          <p class="upload-hint">PNG, JPG, WEBP — remplace l'image actuelle s'il y en a une.</p>
+          <button class="btn-primary" type="submit" style="margin-top:10px">Mettre à jour</button>
+        </div>
+      </form>
+      {% if media_id.gallery_bg_image %}
+      <form method="post" action="{{ url_for('admin_media_id_gallery_bg_remove') }}"
+            onsubmit="return confirm('Supprimer l\'image de fond du cartouche (galerie) ?')">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <button class="btn-danger" type="submit">✕ Supprimer l'image de fond</button>
       </form>
@@ -211,5 +330,43 @@
     document.getElementById('media_id_font')?.addEventListener('change', mediaIdUpdatePreviewImpl);
     document.getElementById('media_id_font_size')?.addEventListener('input', mediaIdUpdatePreviewImpl);
     mediaIdUpdatePreviewImpl();
+  })();
+</script>
+
+<script>
+  // Apercu en direct du cartouche ID media DANS LA GALERIE -- IIFE separee,
+  // meme logique que mediaIdUpdatePreviewImpl ci-dessus mais sur les champs
+  // *_gallery_* / #mediaIdGalleryPreviewChip (reglages independants).
+  (function () {
+    function mediaIdGalleryUpdatePreviewImpl() {
+      const fontEl = document.getElementById('media_id_gallery_font');
+      const chip = document.getElementById('mediaIdGalleryPreviewChip');
+      if (!fontEl || !chip) return;
+      chip.style.fontFamily = fontEl.value;
+      chip.style.fontSize = (document.getElementById('media_id_gallery_font_size').value || 13) + 'px';
+      chip.style.color = document.getElementById('media_id_gallery_text_color').value || '#ffffff';
+      chip.style.background = document.getElementById('media_id_gallery_bg_color').value || '#23282c';
+      const shape = document.getElementById('media_id_gallery_shape').value || 'rounded';
+      const size = parseInt(document.getElementById('media_id_gallery_badge_size').value, 10) || 20;
+      chip.style.display = 'inline-flex';
+      chip.style.alignItems = 'center';
+      chip.style.justifyContent = 'center';
+      if (shape === 'circle' || shape === 'square') {
+        chip.style.width = size + 'px';
+        chip.style.height = size + 'px';
+        chip.style.padding = '0';
+        chip.style.borderRadius = shape === 'circle' ? '50%' : '0';
+      } else {
+        chip.style.width = 'auto';
+        chip.style.height = 'auto';
+        chip.style.padding = Math.round(size * 0.3) + 'px ' + Math.round(size * 0.7) + 'px';
+        chip.style.borderRadius = shape === 'rounded' ? '999px' : '0';
+      }
+    }
+    window.mediaIdGalleryUpdatePreview = mediaIdGalleryUpdatePreviewImpl;
+
+    document.getElementById('media_id_gallery_font')?.addEventListener('change', mediaIdGalleryUpdatePreviewImpl);
+    document.getElementById('media_id_gallery_font_size')?.addEventListener('input', mediaIdGalleryUpdatePreviewImpl);
+    mediaIdGalleryUpdatePreviewImpl();
   })();
 </script>

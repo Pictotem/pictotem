@@ -753,6 +753,22 @@ def _tags_settings():
         'style_bg_color':    get_setting('tags.style_bg_color', '') or '#0d8b8f',
         'style_text_color':  get_setting('tags.style_text_color', '') or '#ffffff',
         'style_font_size':   int(get_setting('tags.style_font_size', '') or '14'),
+        # Affichage des tags dans la galerie (vue unitaire /lightbox, voir
+        # #lbTags, gallery.html) -- réglage INDÉPENDANT de show_on_bestof/
+        # style_* ci-dessus (contexte visuel très différent : barre d'outils
+        # de galerie plutôt que plein écran kiosque). Emplacement fixe (sous
+        # le média, voir gallery.html) -- pas de position/marges, contrairement
+        # au cartouche ID média sur /bestof (voir _media_id_settings).
+        'gallery_show':            get_setting('tags.gallery_show', '0') == '1',
+        'gallery_style_font':      get_setting('tags.gallery_style_font', '') or _PROMO_FONTS[0][0],
+        'gallery_style_font_size': int(get_setting('tags.gallery_style_font_size', '') or '13'),
+        'gallery_style_text_color': get_setting('tags.gallery_style_text_color', '') or '#ffffff',
+        'gallery_style_bg_color':  get_setting('tags.gallery_style_bg_color', '') or '#0d8b8f',
+        # Filename dans TAGS_BADGE_DIR, '' = aucune image (voir
+        # admin_tags_gallery_bg_upload/admin_tags_gallery_bg_remove ci-dessous).
+        'gallery_style_bg_image':  get_setting('tags.gallery_style_bg_image', ''),
+        'gallery_badge_size':      int(get_setting('tags.gallery_badge_size', '') or '20'),
+        'gallery_shape':           get_setting('tags.gallery_shape', '') or 'rounded',
     }
 
 
@@ -770,7 +786,7 @@ _MEDIA_ID_DEFAULT_FONT = '"Courier New", monospace'
 # mais à coins droits ; 'square'/'circle' ont une taille FIXE (voir
 # media_id.badge_size) -- le texte y reste centré, quitte à déborder si l'ID
 # est trop long pour tenir dedans (voir applyMediaIdStyle, bestof.html).
-_MEDIA_ID_SHAPES = [
+_BADGE_SHAPES = [
     ('rounded', 'Rectangle arrondi'),
     ('rect',    'Rectangle'),
     ('square',  'Carré'),
@@ -798,7 +814,7 @@ def _media_id_settings():
         # admin_media_id_bg_upload/admin_media_id_bg_remove ci-dessous).
         'bg_image':      get_setting('media_id.bg_image', ''),
         # badge_size pilote soit une taille fixe (carré/disque), soit un
-        # padding proportionnel (rectangle/pilule) -- voir _MEDIA_ID_SHAPES
+        # padding proportionnel (rectangle/pilule) -- voir _BADGE_SHAPES
         # ci-dessus et applyMediaIdStyle(), bestof.html. Défaut 20 -> padding
         # 6px/14px, identique à l'ancien padding fixe de la pilule.
         'badge_size':    int(get_setting('media_id.badge_size', '') or '20'),
@@ -808,10 +824,50 @@ def _media_id_settings():
         'margin_left':   int(get_setting('media_id.margin_left', '') or '24'),
         'margin_right':  int(get_setting('media_id.margin_right', '') or '24'),
         'shape':         get_setting('media_id.shape', '') or 'rounded',
+        # Affichage de l'ID média dans la galerie (vue unitaire /lightbox,
+        # entre la date et le vote, voir #lbMediaId, gallery.html) --
+        # réglage INDÉPENDANT du style /bestof ci-dessus (contexte visuel
+        # différent). Emplacement fixe -- pas de position/marges ici,
+        # contrairement au cartouche /bestof.
+        'gallery_show':       get_setting('media_id.gallery_show', '0') == '1',
+        'gallery_font':       get_setting('media_id.gallery_font', '') or _PROMO_FONTS[0][0],
+        'gallery_font_size':  int(get_setting('media_id.gallery_font_size', '') or '13'),
+        'gallery_text_color': get_setting('media_id.gallery_text_color', '') or '#ffffff',
+        'gallery_bg_color':   get_setting('media_id.gallery_bg_color', '') or '#23282c',
+        # Filename dans MEDIA_ID_BADGE_DIR, '' = aucune image.
+        'gallery_bg_image':   get_setting('media_id.gallery_bg_image', ''),
+        'gallery_badge_size': int(get_setting('media_id.gallery_badge_size', '') or '20'),
+        'gallery_shape':      get_setting('media_id.gallery_shape', '') or 'rounded',
     }
 
 
 MEDIA_ID_BADGE_DIR = BASE_DIR / 'app' / 'static' / 'media_id'
+TAGS_BADGE_DIR = BASE_DIR / 'app' / 'static' / 'tags_badge'
+
+
+def _badge_css_style(font, font_size, text_color, bg_color, bg_image_url, badge_size, shape):
+    """Construit la chaîne de style CSS inline d'un cartouche (police/
+    taille/couleur de texte, fond uni ou image, taille/forme) -- partagée par
+    le badge ID média ET les chips de tags dans la galerie (vue unitaire,
+    voir gallery.html), rendue une fois côté serveur plutôt qu'en JS
+    (contrairement à /bestof, la galerie n'est pas un kiosque qui tourne en
+    continu -- un rechargement de page suffit à appliquer un changement de
+    réglage, pas besoin de sondage). Même formule taille/forme que
+    applyMediaIdStyle() (bestof.html) : disque/carré = taille FIXE (texte
+    centré, quitte à déborder), rectangle (droit/arrondi) = padding
+    proportionnel à badge_size, ajusté à la largeur du texte."""
+    parts = [f'font-family:{font}', f'font-size:{font_size}px', f'color:{text_color}',
+             f'background-color:{bg_color}']
+    if bg_image_url:
+        parts += [f"background-image:url('{bg_image_url}')", 'background-size:cover',
+                  'background-position:center']
+    if shape in ('circle', 'square'):
+        parts += [f'width:{badge_size}px', f'height:{badge_size}px', 'padding:0',
+                   f"border-radius:{'50%' if shape == 'circle' else '0'}"]
+    else:
+        pad_v, pad_h = round(badge_size * 0.3), round(badge_size * 0.7)
+        parts += [f'padding:{pad_v}px {pad_h}px', f"border-radius:{'999px' if shape == 'rounded' else '0'}"]
+    return '; '.join(parts) + ';'
 
 
 
@@ -2116,6 +2172,27 @@ def gallery():
         c['tags'] = tags_by_capture.get(c['id'], []) if c.get('source', 'official') == 'official' else []
     distinct_tags = list_distinct_tag_labels()
 
+    # Affichage de l'ID media + des tags dans la galerie (vue unitaire /
+    # lightbox) -- reglages independants du style /bestof, voir
+    # _media_id_settings()/_tags_settings() et _badge_css_style() ci-dessus.
+    # Style CSS calcule une fois ici (rendu serveur) plutot qu'en JS : la
+    # galerie n'est pas un kiosque qui tourne en continu, un rechargement de
+    # page suffit a appliquer un changement de reglage.
+    media_id_cfg = _media_id_settings()
+    tags_cfg = _tags_settings()
+    media_id_bg_url = (f"/static/media_id/{media_id_cfg['gallery_bg_image']}"
+                        if media_id_cfg['gallery_bg_image'] else '')
+    tags_bg_url = (f"/static/tags_badge/{tags_cfg['gallery_style_bg_image']}"
+                   if tags_cfg['gallery_style_bg_image'] else '')
+    media_id_badge_style = _badge_css_style(
+        media_id_cfg['gallery_font'], media_id_cfg['gallery_font_size'],
+        media_id_cfg['gallery_text_color'], media_id_cfg['gallery_bg_color'],
+        media_id_bg_url, media_id_cfg['gallery_badge_size'], media_id_cfg['gallery_shape'])
+    tags_badge_style = _badge_css_style(
+        tags_cfg['gallery_style_font'], tags_cfg['gallery_style_font_size'],
+        tags_cfg['gallery_style_text_color'], tags_cfg['gallery_style_bg_color'],
+        tags_bg_url, tags_cfg['gallery_badge_size'], tags_cfg['gallery_shape'])
+
     voter_token = request.cookies.get('voter_token', '')
     new_token = False
     if not voter_token:
@@ -2141,6 +2218,8 @@ def gallery():
         guest_in_gallery=guest_in_gallery, source=source,
         media_id_query=media_id_query,
         tag_query=tag_query, distinct_tags=distinct_tags,
+        media_id_cfg=media_id_cfg, tags_cfg=tags_cfg,
+        media_id_badge_style=media_id_badge_style, tags_badge_style=tags_badge_style,
     ))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
@@ -3264,7 +3343,7 @@ def _block_ctx_tags_media_id() -> dict:
         'media_id': _media_id_settings(),
         'media_id_fonts': _all_fonts(),
         'media_id_positions': _BADGE_POSITIONS,
-        'media_id_shapes': _MEDIA_ID_SHAPES,
+        'media_id_shapes': _BADGE_SHAPES,
     }
 
 
@@ -3273,7 +3352,7 @@ def _block_ctx_tags_display() -> dict:
     # partagée à l'identique, sans risque si les deux blocs cohabitent sur
     # une même page) ; 'tags_fonts' plutôt que 'fonts' pour ne pas entrer en
     # collision avec la clé 'buttons_fonts' d'un bloc buttons_style déplacé ici.
-    return {'tags_settings': _tags_settings(), 'tags_fonts': _all_fonts()}
+    return {'tags_settings': _tags_settings(), 'tags_fonts': _all_fonts(), 'tags_shapes': _BADGE_SHAPES}
 
 
 def _block_ctx_tags_media_api() -> dict:
@@ -4341,8 +4420,30 @@ def admin_tags_set_media_id():
         if raw_margin.isdigit() and int(raw_margin) <= 500:
             set_setting(f'media_id.margin_{side}', raw_margin)
     shape_value = request.form.get('media_id_shape', '').strip()
-    if shape_value in dict(_MEDIA_ID_SHAPES):
+    if shape_value in dict(_BADGE_SHAPES):
         set_setting('media_id.shape', shape_value)
+
+    # Affichage dans la galerie (vue unitaire) -- réglages indépendants,
+    # voir _media_id_settings() ci-dessus.
+    set_setting('media_id.gallery_show', '1' if request.form.get('media_id_gallery_show') else '0')
+    gallery_font_value = request.form.get('media_id_gallery_font', '')
+    if gallery_font_value in dict(_all_fonts()):
+        set_setting('media_id.gallery_font', gallery_font_value)
+    raw_gallery_fs = (request.form.get('media_id_gallery_font_size') or '').strip()
+    if raw_gallery_fs.isdigit() and int(raw_gallery_fs) >= 8:
+        set_setting('media_id.gallery_font_size', raw_gallery_fs)
+    gallery_text_value = request.form.get('media_id_gallery_text_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', gallery_text_value):
+        set_setting('media_id.gallery_text_color', gallery_text_value)
+    gallery_bg_value = request.form.get('media_id_gallery_bg_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', gallery_bg_value):
+        set_setting('media_id.gallery_bg_color', gallery_bg_value)
+    raw_gallery_badge_size = (request.form.get('media_id_gallery_badge_size') or '').strip()
+    if raw_gallery_badge_size.isdigit() and 8 <= int(raw_gallery_badge_size) <= 500:
+        set_setting('media_id.gallery_badge_size', raw_gallery_badge_size)
+    gallery_shape_value = request.form.get('media_id_gallery_shape', '').strip()
+    if gallery_shape_value in dict(_BADGE_SHAPES):
+        set_setting('media_id.gallery_shape', gallery_shape_value)
 
     return _admin_block_redirect('tags_media_id', ok='Réglages ID média mis à jour.')
 
@@ -4386,6 +4487,41 @@ def admin_media_id_bg_remove():
     return _admin_block_redirect('tags_media_id', ok='Image de fond supprimée.')
 
 
+@app.route('/admin/tags/media_id/gallery_background', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media_id_gallery_bg_upload():
+    """Même principe qu'admin_media_id_bg_upload ci-dessus, mais pour
+    l'image de fond du badge ID média dans la GALERIE (vue unitaire) --
+    fichier distinct (media-id-bg-gallery{ext}), même dossier
+    (MEDIA_ID_BADGE_DIR), réglage indépendant (media_id.gallery_bg_image)."""
+    file = request.files.get('media_id_gallery_bg')
+    if not file or not file.filename:
+        return _admin_block_redirect('tags_media_id', err='Aucun fichier sélectionné.')
+    ext = Path(file.filename).suffix.lower()
+    if ext not in _PROMO_ALLOWED_EXT:
+        return _admin_block_redirect('tags_media_id', err='Format non supporté (PNG, JPG, WEBP).')
+    MEDIA_ID_BADGE_DIR.mkdir(parents=True, exist_ok=True)
+    old_fn = get_setting('media_id.gallery_bg_image', '')
+    new_fn = f'media-id-bg-gallery{ext}'
+    if old_fn and old_fn != new_fn:
+        (MEDIA_ID_BADGE_DIR / old_fn).unlink(missing_ok=True)
+    file.save(str(MEDIA_ID_BADGE_DIR / new_fn))
+    set_setting('media_id.gallery_bg_image', new_fn)
+    return _admin_block_redirect('tags_media_id', ok='Image de fond mise à jour.')
+
+
+@app.route('/admin/tags/media_id/gallery_background/remove', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media_id_gallery_bg_remove():
+    fn = get_setting('media_id.gallery_bg_image', '')
+    if fn:
+        (MEDIA_ID_BADGE_DIR / fn).unlink(missing_ok=True)
+        set_setting('media_id.gallery_bg_image', '')
+    return _admin_block_redirect('tags_media_id', ok='Image de fond supprimée.')
+
+
 @app.route('/admin/tags/display', methods=['POST'])
 @require_admin_auth
 @csrf_protect
@@ -4403,7 +4539,66 @@ def admin_tags_set_display():
     raw_fs = (request.form.get('style_font_size') or '').strip()
     if raw_fs.isdigit() and int(raw_fs) >= 8:
         set_setting('tags.style_font_size', raw_fs)
+
+    # Affichage dans la galerie (vue unitaire, sous le média) -- réglages
+    # indépendants, voir _tags_settings() ci-dessus.
+    set_setting('tags.gallery_show', '1' if request.form.get('tags_gallery_show') else '0')
+    gallery_font_value = request.form.get('tags_gallery_font', '')
+    if gallery_font_value in dict(_all_fonts()):
+        set_setting('tags.gallery_style_font', gallery_font_value)
+    raw_gallery_fs = (request.form.get('tags_gallery_font_size') or '').strip()
+    if raw_gallery_fs.isdigit() and int(raw_gallery_fs) >= 8:
+        set_setting('tags.gallery_style_font_size', raw_gallery_fs)
+    gallery_text_value = request.form.get('tags_gallery_text_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', gallery_text_value):
+        set_setting('tags.gallery_style_text_color', gallery_text_value)
+    gallery_bg_value = request.form.get('tags_gallery_bg_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', gallery_bg_value):
+        set_setting('tags.gallery_style_bg_color', gallery_bg_value)
+    raw_gallery_badge_size = (request.form.get('tags_gallery_badge_size') or '').strip()
+    if raw_gallery_badge_size.isdigit() and 8 <= int(raw_gallery_badge_size) <= 500:
+        set_setting('tags.gallery_badge_size', raw_gallery_badge_size)
+    gallery_shape_value = request.form.get('tags_gallery_shape', '').strip()
+    if gallery_shape_value in dict(_BADGE_SHAPES):
+        set_setting('tags.gallery_shape', gallery_shape_value)
+
     return _admin_block_redirect('tags_display', ok="Réglages d'affichage mis à jour.")
+
+
+@app.route('/admin/tags/display/gallery_background', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tags_gallery_bg_upload():
+    """Image de fond commune aux chips de tags affichés dans la galerie
+    (vue unitaire, sous le média) -- même patron qu'admin_media_id_bg_upload
+    (upload dédié, une seule image, remplacée à chaque envoi), dossier séparé
+    (TAGS_BADGE_DIR) puisque ce sont des chips potentiellement multiples,
+    distinctes du badge ID média."""
+    file = request.files.get('tags_gallery_bg')
+    if not file or not file.filename:
+        return _admin_block_redirect('tags_display', err='Aucun fichier sélectionné.')
+    ext = Path(file.filename).suffix.lower()
+    if ext not in _PROMO_ALLOWED_EXT:
+        return _admin_block_redirect('tags_display', err='Format non supporté (PNG, JPG, WEBP).')
+    TAGS_BADGE_DIR.mkdir(parents=True, exist_ok=True)
+    old_fn = get_setting('tags.gallery_style_bg_image', '')
+    new_fn = f'tags-bg-gallery{ext}'
+    if old_fn and old_fn != new_fn:
+        (TAGS_BADGE_DIR / old_fn).unlink(missing_ok=True)
+    file.save(str(TAGS_BADGE_DIR / new_fn))
+    set_setting('tags.gallery_style_bg_image', new_fn)
+    return _admin_block_redirect('tags_display', ok='Image de fond mise à jour.')
+
+
+@app.route('/admin/tags/display/gallery_background/remove', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_tags_gallery_bg_remove():
+    fn = get_setting('tags.gallery_style_bg_image', '')
+    if fn:
+        (TAGS_BADGE_DIR / fn).unlink(missing_ok=True)
+        set_setting('tags.gallery_style_bg_image', '')
+    return _admin_block_redirect('tags_display', ok='Image de fond supprimée.')
 
 
 @app.route('/admin/tags/api/settings', methods=['POST'])
