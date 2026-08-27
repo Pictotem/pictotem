@@ -95,6 +95,17 @@
   {% if alert_success %}<ul class="flash-list"><li class="success">{{ alert_success }}</li></ul>{% endif %}
   {% if alert_error   %}<ul class="flash-list"><li class="error">{{ alert_error }}</li></ul>{% endif %}
 
+  {% if capture_id %}
+  <!-- Lien profond depuis une miniature du bloc "Tags appliqués" (/admin/tags) :
+       la grille ci-dessous est filtrée sur ce seul média. -->
+  <div class="toolbar" style="border-color:var(--accent)">
+    <span style="font-size:13px;font-weight:600">Filtré sur la capture #{{ capture_id }}</span>
+    <div class="tb-sep"></div>
+    <a class="tb-btn" href="{{ url_for('admin_tags') }}">← Tags &amp; ID média</a>
+    <a class="tb-btn" href="{{ url_for('admin_captures', kind=kind, sort=sort) }}">✕ Toutes les captures</a>
+  </div>
+  {% endif %}
+
   <!-- Filtres -->
   <div class="toolbar">
     <div class="tb-group">

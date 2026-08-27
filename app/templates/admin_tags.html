@@ -99,24 +99,60 @@
       border-radius: 999px; padding: 5px 14px; font-weight: 700; display: inline-block;
     }
 
-    /* Tags appliqués (journal) */
-    .applied-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    .applied-table th {
-      text-align: left; font-size: 11px; font-weight: 700; color: var(--muted);
-      text-transform: uppercase; letter-spacing: .07em;
-      padding: 8px 10px; border-bottom: 1px solid var(--border);
+    /* Tags appliqués — regroupés par tag, tri + recherche (tag + date) */
+    .applied-search {
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px;
     }
-    .applied-table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.05); vertical-align: middle; }
+    .applied-search input[type=text],
+    .applied-search input[type=date] {
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 10px; padding: 9px 13px; font-size: 14px;
+    }
+    .applied-search input[type=text] { flex: 1; min-width: 180px; }
+    .applied-search .btn-icon { white-space: nowrap; }
+    .applied-count { font-size: 12px; color: var(--muted); margin: -6px 0 14px; }
+
+    /* Fenêtre redimensionnable (verticalement) avec ascenseur pour la
+       liste des tags + photos — voir .applied-scroll ci-dessous. */
+    .applied-scroll {
+      resize: vertical; overflow-y: auto; height: 440px; min-height: 180px; max-height: 85vh;
+      border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2);
+    }
+    .tag-group { border-bottom: 1px solid var(--border); }
+    .tag-group:last-child { border-bottom: none; }
+    .tag-group[data-hidden] { display: none; }
+    .tag-group > summary {
+      cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px; font-weight: 700; font-size: 14px; user-select: none;
+    }
+    .tag-group > summary::-webkit-details-marker { display: none; }
+    .tag-group > summary::before { content: '▸'; font-size: 11px; color: var(--muted); transition: transform .15s; }
+    .tag-group[open] > summary::before { transform: rotate(90deg); }
+    .tag-group-count {
+      font-size: 11px; font-weight: 700; color: var(--muted); background: var(--surface);
+      border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px;
+    }
+    .tag-group-thumbs { display: flex; flex-wrap: wrap; gap: 14px; padding: 2px 16px 18px; }
+    .applied-item { width: 104px; }
+    .applied-item[data-hidden] { display: none; }
+    .applied-item-link { display: block; text-decoration: none; color: inherit; }
     .applied-thumb {
-      width: 52px; height: 52px; border-radius: 8px; object-fit: cover; background: #111315; display: block;
+      width: 104px; height: 104px; border-radius: 10px; object-fit: cover; background: #111315;
+      display: block; border: 1px solid var(--border); transition: border-color .15s, transform .15s;
     }
     .applied-thumb-empty {
-      width: 52px; height: 52px; border-radius: 8px; background: #111315;
-      display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 10px;
+      width: 104px; height: 104px; border-radius: 10px; background: #111315; border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 11px;
     }
-    .applied-label { font-weight: 700; }
-    .applied-meta { font-size: 12px; color: var(--muted); }
-    .applied-table .col-act { width: 110px; text-align: right; }
+    .applied-item-link:hover .applied-thumb,
+    .applied-item-link:hover .applied-thumb-empty { border-color: var(--accent); transform: translateY(-1px); }
+    .applied-meta { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+    .applied-remove {
+      display: block; width: 100%; margin-top: 4px; background: none; border: 1px solid var(--border);
+      color: var(--muted); border-radius: 7px; padding: 3px 0; font-size: 11px; cursor: pointer; transition: .15s;
+    }
+    .applied-remove:hover { border-color: rgba(200,50,50,.7); color: #f97b7b; }
+    .applied-empty { text-align: center; color: var(--muted); padding: 24px 0; }
   </style>
 </head>
 <body class="gallery-body" data-admin-page="tags">
@@ -205,54 +241,111 @@
     {% endif %}
   </div>
 
-  <!-- Tags appliqués (journal des tags posés depuis le kiosque) -->
+  <!-- Tags appliqués : regroupés par tag (tri par tag), recherche tag +
+       date, miniatures cliquables ouvrant la gestion des captures
+       (/admin/captures?capture_id=...) sur le média sélectionné. Liste
+       affichée dans une fenêtre à ascenseur et redimensionnable
+       verticalement (voir .applied-scroll, resize:vertical). -->
   <div class="form-card" style="margin-top:24px">
     <p class="section-title">Tags appliqués</p>
-    <p class="section-hint">Tags posés par les invités depuis le kiosque, avec le média concerné — les plus récents en premier.</p>
+    <p class="section-hint">Tags posés par les invités depuis le kiosque, regroupés par tag — cliquer une miniature ouvre la gestion des captures sur ce média.</p>
 
-    {% if assignments %}
-    <table class="applied-table">
-      <thead>
-        <tr>
-          <th>Média</th>
-          <th>Tag</th>
-          <th>Date</th>
-          <th class="col-act">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for a in assignments %}
-        <tr>
-          <td>
-            {% if a.thumb_filename %}
-            <img class="applied-thumb" src="{{ url_for('media_thumb', filename=a.thumb_filename) }}" alt="{{ a.kind }}">
-            {% else %}
-            <div class="applied-thumb-empty">{{ a.kind }}</div>
-            {% endif %}
-          </td>
-          <td>
-            <div class="applied-label">{{ a.label }}</div>
-            <div class="applied-meta">{{ a.kind }}{% if a.media_uid %} · #{{ a.media_uid }}{% endif %}</div>
-          </td>
-          <td class="applied-meta">{{ a.created_at | format_dt }}</td>
-          <td class="col-act">
-            <form method="post" action="{{ url_for('admin_tags') }}" style="display:inline"
-                  onsubmit="return confirm('Retirer le tag « {{ a.label }} » de ce média ?')">
+    {% if tag_groups %}
+    <div class="applied-search">
+      <input type="text" id="appliedSearchTag" placeholder="Filtrer par tag…" autocomplete="off">
+      <input type="date" id="appliedSearchDate" title="Filtrer par date d'application du tag">
+      <button type="button" class="btn-icon" id="appliedSearchReset">✕ Réinitialiser</button>
+    </div>
+    <p class="applied-count" id="appliedCount"></p>
+
+    <div class="applied-scroll">
+      {% for group in tag_groups %}
+      <details class="tag-group" data-tag-label="{{ group.label|lower }}">
+        <summary>{{ group.label }} <span class="tag-group-count">{{ group.count }}</span></summary>
+        <div class="tag-group-thumbs">
+          {% for a in group.media %}
+          <div class="applied-item" data-date="{{ a.created_at[:10] }}">
+            <a class="applied-item-link" href="{{ url_for('admin_captures', capture_id=a.capture_id) }}"
+               title="Ouvrir la gestion des captures sur ce média">
+              {% if a.thumb_filename %}
+              <img class="applied-thumb" src="{{ url_for('media_thumb', filename=a.thumb_filename) }}" alt="{{ a.kind }}">
+              {% else %}
+              <div class="applied-thumb-empty">{{ a.kind }}</div>
+              {% endif %}
+              <div class="applied-meta">
+                {{ a.kind }}{% if a.media_uid %} · #{{ a.media_uid }}{% endif %}<br>
+                {{ a.created_at | format_dt }}
+              </div>
+            </a>
+            <form method="post" action="{{ url_for('admin_tags') }}"
+                  onsubmit="return confirm('Retirer le tag « {{ group.label }} » de ce média ?')">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="action" value="assignment_delete">
               <input type="hidden" name="assignment_id" value="{{ a.assignment_id }}">
-              <button class="btn-icon del" type="submit" title="Retirer">✕ Retirer</button>
+              <button class="applied-remove" type="submit" title="Retirer">✕ Retirer</button>
             </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endfor %}
+    </div>
     {% else %}
-    <p style="text-align:center;color:var(--muted);padding:24px 0;">Aucun tag appliqué pour le moment.</p>
+    <p class="applied-empty">Aucun tag appliqué pour le moment.</p>
     {% endif %}
   </div>
 
 </div>
+<script>
+(function () {
+  var tagInput  = document.getElementById('appliedSearchTag');
+  var dateInput = document.getElementById('appliedSearchDate');
+  var resetBtn  = document.getElementById('appliedSearchReset');
+  var countEl   = document.getElementById('appliedCount');
+  var groups    = document.querySelectorAll('.tag-group');
+  if (!tagInput || !groups.length) return;
+
+  function normalize(s) {
+    return (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  function applyFilter() {
+    var tagQuery  = normalize(tagInput.value.trim());
+    var dateQuery = dateInput.value; // 'YYYY-MM-DD' ou ''
+    var visibleGroups = 0, visibleItems = 0;
+
+    groups.forEach(function (group) {
+      var tagMatches = !tagQuery || normalize(group.dataset.tagLabel).indexOf(tagQuery) !== -1;
+      var anyItemVisible = false;
+
+      group.querySelectorAll('.applied-item').forEach(function (item) {
+        var visible = tagMatches && (!dateQuery || item.dataset.date === dateQuery);
+        if (visible) { item.removeAttribute('data-hidden'); anyItemVisible = true; visibleItems++; }
+        else { item.setAttribute('data-hidden', ''); }
+      });
+
+      if (anyItemVisible) {
+        group.removeAttribute('data-hidden');
+        visibleGroups++;
+        if (tagQuery || dateQuery) group.open = true;
+      } else {
+        group.setAttribute('data-hidden', '');
+      }
+    });
+
+    countEl.textContent = (tagQuery || dateQuery)
+      ? visibleItems + ' média(s) sur ' + visibleGroups + ' tag(s) affiché(s).'
+      : '';
+  }
+
+  tagInput.addEventListener('input', applyFilter);
+  dateInput.addEventListener('change', applyFilter);
+  resetBtn.addEventListener('click', function () {
+    tagInput.value = '';
+    dateInput.value = '';
+    applyFilter();
+  });
+})();
+</script>
 </body>
 </html>

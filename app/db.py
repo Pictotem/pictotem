@@ -624,12 +624,17 @@ def record_capture(kind, filename, thumb_filename=None):
         return cur.lastrowid, media_uid
 
 
-def list_captures(sort='desc', kind='', page=1, page_size=None, media_uid='', tag=''):
+def list_captures(sort='desc', kind='', page=1, page_size=None, media_uid='', tag='', capture_id=None):
     """Retourne (liste, total). page_size=None charge tout (usage interne).
     sort: 'desc'|'asc' (par date) ou 'votes_desc'|'votes_asc' (par score).
     media_uid : filtre optionnel (recherche partielle) sur l'ID média —
     voir champ de recherche de la galerie. tag : filtre optionnel (libellé
-    exact, prédéfini ou libre) — voir filtre "Tags" de la galerie."""
+    exact, prédéfini ou libre) — voir filtre "Tags" de la galerie.
+    capture_id : filtre optionnel (id exact) — utilisé par le bloc "Tags
+    appliqués" de /admin/tags pour ouvrir la gestion des captures
+    directement sur le média sélectionné (miniature cliquable), y compris
+    pour les captures antérieures à media_uid (id toujours présent, à la
+    différence de media_uid qui peut être vide sur les anciennes lignes)."""
     if sort in ('votes_desc', 'votes_asc'):
         col = 'vote_score'
         order = 'DESC' if sort == 'votes_desc' else 'ASC'
@@ -647,6 +652,9 @@ def list_captures(sort='desc', kind='', page=1, page_size=None, media_uid='', ta
     if tag:
         conditions.append('id IN (SELECT capture_id FROM capture_tags WHERE label = ?)')
         params.append(tag)
+    if capture_id:
+        conditions.append('id = ?')
+        params.append(capture_id)
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ''
 
     with closing(db_conn()) as conn:
@@ -1974,3 +1982,30 @@ def get_media_with_tags_by_uid(media_uid):
     capture = dict(row)
     tags = [t['label'] for t in list_capture_tags(capture['id'])]
     return _media_api_payload(capture, tags)
+
+
+def search_media_by_tag(label):
+    """Toutes les captures officielles portant ce tag (recherche exacte,
+    insensible à la casse), avec la date de CRÉATION DU TAG (i.e. la date
+    où le tag a été posé sur ce média, capture_tags.created_at) — distincte
+    de la date de la capture elle-même. Alimente GET
+    /api/media/by_tag/<label> (media_api.py, bloc "API REST — accès aux ID
+    média & tags" de /admin/tags). Un même tag posé plusieurs fois (labels
+    identiques sur des captures différentes) renvoie une entrée par
+    assignation, les plus récentes en premier — comme list_capture_tags_
+    with_media() pour le journal du back office."""
+    label = (label or '').strip()
+    if not label:
+        return []
+    with closing(db_conn()) as conn:
+        rows = conn.execute("""
+            SELECT c.media_uid AS media_uid, c.id AS capture_id, ct.created_at AS tag_created_at
+            FROM capture_tags ct
+            JOIN captures c ON c.id = ct.capture_id
+            WHERE ct.label = ? COLLATE NOCASE
+            ORDER BY ct.id DESC
+        """, (label,)).fetchall()
+    return [
+        {'id': r['media_uid'] or None, 'capture_id': r['capture_id'], 'tag_created_at': r['tag_created_at']}
+        for r in rows
+    ]

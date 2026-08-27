@@ -2284,11 +2284,16 @@ def admin_captures():
     kind = request.args.get('kind', '')
     page_size = 40
     page = max(1, int(request.args.get('page', 1)))
-    captures, total = list_captures(sort, kind, page=page, page_size=page_size)
+    # capture_id : lien profond depuis une miniature du bloc "Tags appliqués"
+    # (/admin/tags) — ouvre cette page filtrée sur le seul média cliqué,
+    # plutôt que de chercher sa page dans la liste paginée complète.
+    capture_id = request.args.get('capture_id', type=int)
+    captures, total = list_captures(sort, kind, page=page, page_size=page_size, capture_id=capture_id)
     total_pages = max(1, (total + page_size - 1) // page_size)
     return render_template(
         'admin_captures.html', config=CONFIG, captures=captures,
         sort=sort, kind=kind, page=page, total_pages=total_pages, total=total,
+        capture_id=capture_id,
         vote_cfg=_vote_cfg(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
@@ -4137,6 +4142,26 @@ def admin_votes_set_thresholds_colors():
 
 # ── Admin — tags & ID média ───────────────────────────────────────────────────
 
+def _group_capture_tags_by_label(assignments):
+    """Regroupe les assignations (list_capture_tags_with_media(), déjà
+    triées ct.id DESC) par libellé de tag, pour le bloc "Tags appliqués"
+    de /admin/tags : tri par tag (ordre alphabétique, insensible à la
+    casse/accents FR via casefold), et pour chaque tag la liste de ses
+    médias, du plus récent au plus ancien (ordre d'entrée conservé).
+    Retourne [{'label': str, 'count': int, 'media': [assignment, ...]}, ...]."""
+    groups, order = {}, []
+    for a in assignments:
+        key = a['label']
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(a)
+    order.sort(key=lambda label: label.casefold())
+    # Clé 'media' (pas 'items') : group.items en Jinja shadow la méthode
+    # dict.items() sur l'attribute lookup — voir admin_tags.html.
+    return [{'label': label, 'count': len(groups[label]), 'media': groups[label]} for label in order]
+
+
 @app.route('/admin/tags', methods=['GET', 'POST'])
 @require_admin_auth
 @csrf_protect
@@ -4190,7 +4215,8 @@ def admin_tags():
         'admin_tags.html', config=CONFIG,
         blocks=blocks, current_page='tags', admin_pages=_admin_all_pages(),
         page_label=_admin_page_label('tags', 'Tags & ID média'),
-        tags=list_tags(), assignments=list_capture_tags_with_media(),
+        tags=list_tags(),
+        tag_groups=_group_capture_tags_by_label(list_capture_tags_with_media()),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,

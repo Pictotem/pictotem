@@ -18,21 +18,38 @@ que le reste de l'application : variable d'environnement > réglage en base
 (settings) > config.toml (voir _get_api_login/_get_api_password, même
 principe que auth._get_admin_password).
 
-Endpoints exposés (authentification HTTP Basic obligatoire sur les deux) :
-  GET /api/media          -> liste complète
-                              [{id, capture_id, type, tags, date, votes}, ...]
-  GET /api/media/<id>     -> un seul média (recherché par son ID média,
-                              c.-à-d. media_uid — voir la tuile "Tags & ID
-                              média"), ou 404
+Endpoints exposés (authentification HTTP Basic obligatoire sur les trois) :
+  GET /api/media               -> liste complète
+                                   [{id, capture_id, type, tags, date, votes}, ...]
+  GET /api/media/<id>          -> un seul média (recherché par son ID média,
+                                   c.-à-d. media_uid — voir la tuile "Tags &
+                                   ID média"), ou 404
+  GET /api/media/by_tag/<tag>  -> recherche par tag (libellé exact,
+                                   insensible à la casse ; prédéfini ou
+                                   libre) -> tous les médias qui le portent
+                                   [{id, capture_id, tag_created_at}, ...]
+                                   (liste vide, jamais 404, si le tag
+                                   n'existe pas ou n'est posé sur aucun
+                                   média — voir bloc "Tags appliqués" de
+                                   /admin/tags pour le même regroupement
+                                   côté back office)
 
-  id     : ID média unique (media_uid), l'identifiant recherchable/affiché
-           côté back office et galerie — null si la capture est antérieure
-           à la mise en place de cette fonctionnalité.
-  type   : 'photo' | 'photo_strip' | 'video'.
-  tags   : tous les tags (prédéfinis et libres) posés sur ce média, dans
-           l'ordre où ils ont été appliqués.
-  date   : date de capture (ISO 8601, horodatage local de l'application).
-  votes  : score de votes officiels actuellement cumulé sur ce média.
+  id              : ID média unique (media_uid), l'identifiant recherchable/
+                    affiché côté back office et galerie — null si la
+                    capture est antérieure à la mise en place de cette
+                    fonctionnalité.
+  type            : 'photo' | 'photo_strip' | 'video'.
+  tags            : tous les tags (prédéfinis et libres) posés sur ce
+                    média, dans l'ordre où ils ont été appliqués.
+  date            : date de capture (ISO 8601, horodatage local de
+                    l'application).
+  tag_created_at  : date de pose DE CE TAG précis sur ce média (ISO 8601)
+                    — distincte de `date` ci-dessus (qui est la date de la
+                    capture elle-même) : un tag posé après-coup sur une
+                    ancienne capture a un tag_created_at plus récent que
+                    `date`.
+  votes           : score de votes officiels actuellement cumulé sur ce
+                    média.
 
 Portée aux captures officielles uniquement (pas aux uploads invités), comme
 le système de tags lui-même (voir db.py).
@@ -62,7 +79,7 @@ from flask import Flask, jsonify, request
 from werkzeug.serving import make_server
 
 from config_loader import CONFIG, LOGS_DIR
-from db import get_media_with_tags_by_uid, list_media_with_tags
+from db import get_media_with_tags_by_uid, list_media_with_tags, search_media_by_tag
 
 # ── Réglages ──────────────────────────────────────────────────────────────
 # Priorité, comme le reste de l'authentification de l'application (voir
@@ -280,6 +297,13 @@ def api_get_media(media_id):
         _log_request(404, f'média {media_id!r} introuvable')
         return jsonify({'error': 'Média introuvable.'}), 404
     _log_request(200, json.dumps(payload, ensure_ascii=False))
+    return jsonify(payload)
+
+
+@media_api_app.route('/api/media/by_tag/<tag_label>', methods=['GET'])
+def api_get_media_by_tag(tag_label):
+    payload = search_media_by_tag(tag_label)
+    _log_request(200, f'{len(payload)} média(s) pour le tag {tag_label!r}')
     return jsonify(payload)
 
 
