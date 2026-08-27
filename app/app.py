@@ -3242,6 +3242,7 @@ def _block_ctx_slideshow_settings() -> dict:
         'slideshow_settings': _slideshow_settings(),
         'forced_promo': _forced_promo_public(),
         'promo_force_options': [{'id': p['id'], 'active': bool(p['active'])} for p in list_promo_pages()],
+        'countdown_positions': _COUNTDOWN_POSITIONS,
     }
 
 
@@ -5552,6 +5553,19 @@ def _forced_promo_public():
     return {'page': _promo_page_public(page), 'remaining_ms': remaining_ms}
 
 
+# Positions possibles pour le décompte en secondes (voir #slideCountdown,
+# bestof.html) -- un des 6 coins/centres haut/bas de l'écran, réglable
+# depuis /admin/slideshow -> Paramètres (voir blocks/slideshow_settings.html).
+_COUNTDOWN_POSITIONS = [
+    ('top-left',      'Haut gauche'),
+    ('top-center',    'Haut centre'),
+    ('top-right',     'Haut droite'),
+    ('bottom-left',   'Bas gauche'),
+    ('bottom-center', 'Bas centre'),
+    ('bottom-right',  'Bas droite'),
+]
+
+
 def _slideshow_settings():
     return {
         'type':            get_setting('slideshow.type',           'both'),
@@ -5568,6 +5582,22 @@ def _slideshow_settings():
         # équivalent du back office (/admin/slideshow → Paramètres) -- les
         # deux se resynchronisent donc automatiquement entre eux.
         'paused':          get_setting('slideshow.paused', '0') == '1',
+        # Décompte en secondes affiché en overlay sur chaque slide (voir
+        # #slideCountdown, bestof.html) -- actif/inactif + police/taille/
+        # couleurs/position/marges, réglables depuis /admin/slideshow ->
+        # Paramètres (voir blocks/slideshow_settings.html). Le délai pris en
+        # compte est celui RÉELLEMENT affiché pour la slide en cours (délai
+        # photo, pause_seconds d'une page promo -- y compris forcée hors
+        # cycle -- ou durée réelle de la vidéo), voir startCountdownFixed/
+        # startCountdownVideo, bestof.html.
+        'countdown_enabled':     get_setting('countdown.enabled', '0') == '1',
+        'countdown_font':        get_setting('countdown.font', '') or _PROMO_FONTS[0][0],
+        'countdown_font_size':   int(get_setting('countdown.font_size', '') or '20'),
+        'countdown_text_color':  get_setting('countdown.text_color', '') or '#ffffff',
+        'countdown_bg_color':    get_setting('countdown.bg_color', '') or '#000000',
+        'countdown_position':    get_setting('countdown.position', '') or 'bottom-center',
+        'countdown_margin_x':    int(get_setting('countdown.margin_x', '') or '24'),
+        'countdown_margin_y':    int(get_setting('countdown.margin_y', '') or '24'),
     }
 
 
@@ -5656,6 +5686,16 @@ def api_bestof_slides():
         'paused':           s['paused'],
         'forced_promo':     _forced_promo_public(),
         'show_media_id':    _media_id_settings()['show_on_bestof'],
+        'countdown':        {
+            'enabled':     s['countdown_enabled'],
+            'font':        s['countdown_font'],
+            'font_size':   s['countdown_font_size'],
+            'text_color':  s['countdown_text_color'],
+            'bg_color':    s['countdown_bg_color'],
+            'position':    s['countdown_position'],
+            'margin_x':    s['countdown_margin_x'],
+            'margin_y':    s['countdown_margin_y'],
+        },
         'show_tags':        tags_cfg['show_on_bestof'],
         'tags_style':       {
             'font':       tags_cfg['style_font'],
@@ -5769,6 +5809,21 @@ def admin_slideshow_set_settings():
     set_setting('slideshow.vote_max', request.form.get('vote_max', '').strip())
     set_setting('slideshow.refresh_interval',
                 str(max(0, int(request.form.get('refresh_interval', '300') or '300'))))
+    set_setting('countdown.enabled', '1' if request.form.get('countdown_enabled') else '0')
+    countdown_font = request.form.get('countdown_font', '').strip()
+    set_setting('countdown.font', countdown_font if countdown_font in dict(_all_fonts()) else _PROMO_FONTS[0][0])
+    set_setting('countdown.font_size',
+                str(max(8, min(200, int(request.form.get('countdown_font_size', '20') or '20')))))
+    set_setting('countdown.text_color', request.form.get('countdown_text_color', '#ffffff').strip() or '#ffffff')
+    set_setting('countdown.bg_color', request.form.get('countdown_bg_color', '#000000').strip() or '#000000')
+    countdown_position = request.form.get('countdown_position', 'bottom-center').strip()
+    if countdown_position not in dict(_COUNTDOWN_POSITIONS):
+        countdown_position = 'bottom-center'
+    set_setting('countdown.position', countdown_position)
+    set_setting('countdown.margin_x',
+                str(max(0, min(500, int(request.form.get('countdown_margin_x', '24') or '24')))))
+    set_setting('countdown.margin_y',
+                str(max(0, min(500, int(request.form.get('countdown_margin_y', '24') or '24')))))
     return _admin_block_redirect('slideshow_settings', ok='Paramètres mis à jour.')
 
 

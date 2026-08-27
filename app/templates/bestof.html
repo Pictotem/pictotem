@@ -52,6 +52,19 @@
       backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,.15);
     }
     #slideMediaId.hidden { display: none; }
+    /* Décompte en secondes (voir /admin/slideshow → Paramètres →
+       « Afficher un décompte en secondes sur chaque slide »), overlay libre
+       -- position/marges/police/taille/couleurs entièrement réglables
+       depuis l'admin (voir applyCountdownStyle() plus bas, JS) plutôt que
+       fixées ici comme les autres badges : top/bottom/left/right/transform
+       sont posés en style inline par applyCountdownStyle(), jamais ici. */
+    #slideCountdown {
+      position: absolute; z-index: 6;
+      font-weight: 700; letter-spacing: .04em;
+      padding: 6px 14px; border-radius: 999px;
+      backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,.15);
+    }
+    #slideCountdown.hidden { display: none; }
     /* Tags du média (voir /admin/tags → Affichage sur /bestof), coin
        haut-gauche — police/fond/couleur/taille pilotés par tagsStyle (JS),
        réglables depuis l'admin. */
@@ -180,6 +193,7 @@
   <div id="slideBadge" class="hidden">Invité</div>
   <div id="slideMediaId" class="hidden"></div>
   <div id="slideTags" class="hidden"></div>
+  <div id="slideCountdown" class="hidden"></div>
   <button id="pauseBtn" type="button" aria-label="Mettre en pause" title="Pause (espace)">❚❚</button>
   <div id="empty" style="display:none">Aucun média à afficher.</div>
 </div>
@@ -194,6 +208,14 @@
   let showMediaId = false;
   let showTags = false;
   let tagsStyle = { font: 'system-ui, sans-serif', bg_color: '#0d8b8f', text_color: '#ffffff', font_size: 14 };
+  // Décompte en secondes (voir /admin/slideshow → Paramètres, #slideCountdown
+  // ci-dessus et startCountdownFixed/startCountdownVideo plus bas) : actif/
+  // inactif + apparence, réglés depuis l'admin comme tagsStyle ci-dessus.
+  let countdownEnabled = false;
+  let countdownStyle = {
+    font: 'system-ui, sans-serif', font_size: 20, text_color: '#ffffff', bg_color: '#000000',
+    position: 'bottom-center', margin_x: 24, margin_y: 24,
+  };
   let cleanup = null;
 
   // Pause (voir #pauseBtn ci-dessous) : fige le diaporama sur la slide en
@@ -360,6 +382,101 @@
     }
   }
 
+  // ── Décompte en secondes (voir /admin/slideshow → Paramètres) ──────────
+  // Overlay affiché sur CHAQUE slide (photo, vidéo, page promo -- y compris
+  // forcée hors cycle), montrant le temps restant réellement affiché pour
+  // CETTE slide précise. Deux modes selon le type de slide :
+  //  - « fixe » (photo, promo, promo forcée) : durée totale connue à
+  //    l'avance (délai réglé / pause_seconds de la page / durée forcée
+  //    restante) -- décompte par un simple minuteur décrémenté à intervalle
+  //    fixe (countdownFixedRemainingMs), plutôt que Date.now() - horodatage
+  //    de départ : ce dernier continuerait de courir même quand
+  //    pauseSlideshow() a annulé le minuteur d'avancement (voir plus bas),
+  //    ce qui désynchroniserait le décompte affiché de la vraie reprise.
+  //  - « vidéo » : pas de durée fixe programmée à l'avance (la slide avance
+  //    sur l'évènement 'ended', pas un minuteur, voir showNext() plus bas)
+  //    -- le décompte est directement dérivé de la position de lecture
+  //    (duration - currentTime), ce qui le fige automatiquement dès que
+  //    pauseSlideshow() met la vidéo en pause, sans code de pause dédié.
+  let countdownInterval = null;
+
+  function stopCountdown() {
+    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+  }
+
+  // Applique police/taille/couleurs/position/marges (voir countdownStyle,
+  // rafraîchi par refreshSlides()/refreshPromoPages() plus bas) -- appelé à
+  // chaque rafraîchissement des réglages plutôt qu'à chaque tic du décompte
+  // (countdownStyle ne change pas plus vite qu'un sondage, inutile de
+  // recalculer ce style à chaque seconde).
+  function applyCountdownStyle() {
+    const el = document.getElementById('slideCountdown');
+    if (!el) return;
+    el.style.fontFamily = countdownStyle.font;
+    el.style.fontSize = countdownStyle.font_size + 'px';
+    el.style.color = countdownStyle.text_color;
+    el.style.background = countdownStyle.bg_color;
+    // Remise à zéro des 4 côtés avant de ne poser que ceux pertinents pour
+    // la position choisie -- sinon un ancien réglage (ex. `right` posé pour
+    // "bottom-right") resterait actif après bascule vers "bottom-left".
+    el.style.top = el.style.bottom = el.style.left = el.style.right = '';
+    el.style.transform = '';
+    const mx = countdownStyle.margin_x + 'px';
+    const my = countdownStyle.margin_y + 'px';
+    const pos = countdownStyle.position || 'bottom-center';
+    if (pos.startsWith('top')) el.style.top = my; else el.style.bottom = my;
+    if (pos.endsWith('left')) {
+      el.style.left = mx;
+    } else if (pos.endsWith('right')) {
+      el.style.right = mx;
+    } else {
+      el.style.left = '50%';
+      el.style.transform = 'translateX(-50%)';
+    }
+  }
+
+  function renderCountdown(seconds) {
+    const el = document.getElementById('slideCountdown');
+    if (!el) return;
+    if (!countdownEnabled || seconds == null || !isFinite(seconds)) {
+      el.classList.add('hidden');
+      return;
+    }
+    el.textContent = Math.max(0, Math.ceil(seconds));
+    el.classList.remove('hidden');
+  }
+
+  // Décompte à durée fixe connue à l'avance (photo / promo / promo forcée).
+  // resumeSlideshow() (voir plus bas) appelle ceci de nouveau avec la durée
+  // COMPLÈTE (pas le temps restant) à la reprise, cohérent avec son propre
+  // choix de reprogrammer un minuteur d'avancement complet plutôt que de
+  // calculer un temps restant précis (voir le commentaire au-dessus de
+  // `paused` plus haut).
+  let countdownFixedRemainingMs = 0;
+  function startCountdownFixed(durationMs) {
+    stopCountdown();
+    countdownFixedRemainingMs = durationMs;
+    renderCountdown(countdownFixedRemainingMs / 1000);
+    if (!countdownEnabled) return;
+    countdownInterval = setInterval(() => {
+      countdownFixedRemainingMs -= 200;
+      renderCountdown(countdownFixedRemainingMs / 1000);
+    }, 200);
+  }
+
+  // Décompte dérivé de la position de lecture d'une <video> -- voir
+  // commentaire de section ci-dessus pour pourquoi (fige tout seul en pause).
+  function startCountdownVideo(videoEl) {
+    stopCountdown();
+    const tick = () => {
+      const dur = videoEl.duration;
+      renderCountdown(isFinite(dur) ? Math.max(0, dur - videoEl.currentTime) : null);
+    };
+    tick();
+    if (!countdownEnabled) return;
+    countdownInterval = setInterval(tick, 200);
+  }
+
   function showNext() {
     if (!slides.length) return;
     if (cleanup) { cleanup(); cleanup = null; }
@@ -389,6 +506,7 @@
       pauseVideoEl = null;
       pauseAdvanceFn = advance;
       pauseDurationMs = duration;
+      startCountdownFixed(duration);
     } else if (slide.type === 'video') {
       nextEl.innerHTML = '';
       const v = document.createElement('video');
@@ -405,6 +523,7 @@
       pauseVideoEl = v;
       pauseAdvanceFn = advance;
       pauseDurationMs = null;
+      startCountdownVideo(v);
     } else {
       nextEl.innerHTML = '';
       const el = document.createElement('img');
@@ -418,6 +537,7 @@
       pauseVideoEl = null;
       pauseAdvanceFn = advance;
       pauseDurationMs = duration;
+      startCountdownFixed(duration);
     }
 
     // Crossfade -- annule d'abord un éventuel retrait d'opacité déjà
@@ -489,6 +609,7 @@
     pauseVideoEl = null;
     pauseAdvanceFn = advance;
     pauseDurationMs = Math.max(0, remainingMs);
+    startCountdownFixed(Math.max(0, remainingMs));
 
     requestAnimationFrame(() => {
       if (fadeOutTimers[next]) { clearTimeout(fadeOutTimers[next]); fadeOutTimers[next] = null; }
@@ -542,6 +663,7 @@
     paused = true;
     cleanup(); // annule le minuteur en cours -- pour une vidéo, met aussi en pause sa lecture (voir showNext())
     cleanup = null;
+    stopCountdown(); // fige l'affichage du décompte sur sa dernière valeur -- rien à recalculer pendant la pause
     updatePauseUI();
   }
 
@@ -553,9 +675,11 @@
       const guard = setTimeout(pauseAdvanceFn, 120_000);
       const v = pauseVideoEl;
       cleanup = () => { clearTimeout(guard); v.pause(); };
+      startCountdownVideo(v); // reprend sur la position de lecture réelle, déjà à jour
     } else if (pauseAdvanceFn) {
       const t = setTimeout(pauseAdvanceFn, pauseDurationMs || 5000);
       cleanup = () => clearTimeout(t);
+      startCountdownFixed(pauseDurationMs || 5000); // même durée COMPLÈTE que le minuteur ci-dessus, voir showNext()
     }
     updatePauseUI();
   }
@@ -670,6 +794,9 @@
       showMediaId = !!data.show_media_id;
       showTags = !!data.show_tags;
       tagsStyle = data.tags_style || tagsStyle;
+      countdownEnabled = !!(data.countdown && data.countdown.enabled);
+      countdownStyle = data.countdown || countdownStyle;
+      applyCountdownStyle();
       settings.delay = data.delay || 5;
       settings.order = data.order || settings.order;
       applySlides(buildSlides(data));
@@ -711,6 +838,9 @@
     showMediaId = !!data.show_media_id;
     showTags = !!data.show_tags;
     tagsStyle = data.tags_style || tagsStyle;
+    countdownEnabled = !!(data.countdown && data.countdown.enabled);
+    countdownStyle = data.countdown || countdownStyle;
+    applyCountdownStyle();
     slides = buildSlides(data);
     if (!slides.length) {
       document.getElementById('empty').style.display = 'flex';

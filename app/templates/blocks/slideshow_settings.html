@@ -210,7 +210,117 @@
              value="{{ slideshow_settings.refresh_interval }}" style="max-width:140px">
     </div>
 
-    <button class="btn-primary" type="submit">Enregistrer</button>
+    <!-- Décompte en secondes (voir #slideCountdown, bestof.html) : overlay
+         affiché sur CHAQUE slide (photos, vidéos, pages promo — y compris
+         forcées hors cycle), avec le temps restant réellement affiché pour
+         cette slide (délai photo, pause_seconds de la page promo, ou durée
+         de la vidéo). Même patron que "Affichage sur /bestof" des tags
+         (blocks/tags_display.html) : case actif/inactif + police/taille/
+         couleurs, avec un aperçu en direct — plus position + marges, propres
+         à ce décompte (il n'a pas d'emplacement fixe comme les tags). -->
+    <div class="field" style="margin-top:28px;padding-top:18px;border-top:1px solid var(--border)">
+      <div class="check-row">
+        <input type="checkbox" id="countdown_enabled" name="countdown_enabled"
+               {% if slideshow_settings.countdown_enabled %}checked{% endif %}>
+        <span>Afficher un décompte en secondes sur chaque slide</span>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Police</label>
+        <select name="countdown_font" id="countdown_font">
+          {% for value, label in promo_fonts %}
+          <option value="{{ value }}" {% if slideshow_settings.countdown_font == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field field-half">
+        <label>Taille du texte (px)</label>
+        <input type="number" name="countdown_font_size" id="countdown_font_size" min="8" max="200"
+               value="{{ slideshow_settings.countdown_font_size }}" style="max-width:140px">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Couleur du texte</label>
+        <div class="color-row">
+          <input type="color" id="cd_cp_text" value="{{ slideshow_settings.countdown_text_color }}"
+                 oninput="document.getElementById('countdown_text_color').value=this.value; countdownUpdatePreview()">
+          <input type="text" id="countdown_text_color" name="countdown_text_color" class="color-hex"
+                 value="{{ slideshow_settings.countdown_text_color }}" maxlength="7"
+                 oninput="document.getElementById('cd_cp_text').value=this.value; countdownUpdatePreview()">
+        </div>
+      </div>
+      <div class="field field-half">
+        <label>Couleur du fond</label>
+        <div class="color-row">
+          <input type="color" id="cd_cp_bg" value="{{ slideshow_settings.countdown_bg_color }}"
+                 oninput="document.getElementById('countdown_bg_color').value=this.value; countdownUpdatePreview()">
+          <input type="text" id="countdown_bg_color" name="countdown_bg_color" class="color-hex"
+                 value="{{ slideshow_settings.countdown_bg_color }}" maxlength="7"
+                 oninput="document.getElementById('cd_cp_bg').value=this.value; countdownUpdatePreview()">
+        </div>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-third">
+        <label>Position à l'écran</label>
+        <select name="countdown_position" id="countdown_position">
+          {% for value, label in countdown_positions %}
+          <option value="{{ value }}" {% if slideshow_settings.countdown_position == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field field-third">
+        <label>Marge horizontale (px)</label>
+        <input type="number" name="countdown_margin_x" min="0" max="500"
+               value="{{ slideshow_settings.countdown_margin_x }}" style="max-width:140px">
+      </div>
+      <div class="field field-third">
+        <label>Marge verticale (px)</label>
+        <input type="number" name="countdown_margin_y" min="0" max="500"
+               value="{{ slideshow_settings.countdown_margin_y }}" style="max-width:140px">
+      </div>
+    </div>
+    <p class="upload-hint" style="margin:-6px 0 18px">
+      Marges par rapport au(x) bord(s) de l'écran vers lequel/lesquels la position choisie ci-dessus colle
+      (ex. « Bas droite » : marge horizontale = distance au bord droit, marge verticale = distance au bord bas).
+    </p>
+
+    <div class="tags-preview-wrap">
+      <p class="tags-preview-label">Aperçu</p>
+      <div class="tags-preview-box">
+        <span class="tag-preview-chip" id="countdownPreviewChip">5</span>
+      </div>
+    </div>
+
+    <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
     <a class="preview-link" href="{{ url_for('bestof') }}" target="_blank">↗ Voir le slideshow</a>
   </form>
 </div>
+
+<script>
+  // Aperçu en direct du décompte (même IIFE + exposition sur window que
+  // tagsUpdatePreview, voir blocks/tags_display.html) -- indépendant de la
+  // position/des marges, qui ne sont visibles qu'une fois enregistrées sur
+  // le vrai /bestof (l'aperçu ici ne mime que police/taille/couleurs).
+  (function () {
+    function countdownUpdatePreviewImpl() {
+      const fontEl = document.getElementById('countdown_font');
+      const chip = document.getElementById('countdownPreviewChip');
+      if (!fontEl || !chip) return;
+      chip.style.fontFamily = fontEl.value;
+      chip.style.fontSize = (document.getElementById('countdown_font_size').value || 20) + 'px';
+      chip.style.color = document.getElementById('countdown_text_color').value || '#ffffff';
+      chip.style.background = document.getElementById('countdown_bg_color').value || '#000000';
+    }
+    window.countdownUpdatePreview = countdownUpdatePreviewImpl;
+
+    document.getElementById('countdown_font')?.addEventListener('change', countdownUpdatePreviewImpl);
+    document.getElementById('countdown_font_size')?.addEventListener('input', countdownUpdatePreviewImpl);
+    countdownUpdatePreviewImpl();
+  })();
+</script>
