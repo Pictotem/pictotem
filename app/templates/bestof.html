@@ -42,13 +42,17 @@
       backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,.15);
     }
     #slideBadge.hidden { display: none; }
-    /* Badge ID média (voir /admin/tags → media_id.show_on_bestof), coin
-       bas-droit — ne recouvre jamais le média, ne gêne pas #slideBadge. */
+    /* Badge ID média (voir /admin/tags → ID unique par média), coin
+       bas-droit par défaut — ne recouvre jamais le média, ne gêne pas
+       #slideBadge. Police/taille/couleurs/fond/taille de cartouche/
+       position/marges/forme entièrement réglables depuis l'admin (voir
+       applyMediaIdStyle() plus bas, JS) plutôt que fixées ici : seules les
+       propriétés qui ne dépendent JAMAIS des réglages restent en dur. */
     #slideMediaId {
-      position: absolute; bottom: 24px; right: 24px; z-index: 5;
-      background: rgba(0,0,0,.6); color: #fff; font-family: monospace;
-      font-size: 14px; font-weight: 700; letter-spacing: .04em;
-      padding: 6px 14px; border-radius: 999px;
+      position: absolute; z-index: 5;
+      font-weight: 700; letter-spacing: .04em; white-space: nowrap;
+      display: flex; align-items: center; justify-content: center;
+      background-repeat: no-repeat;
       backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,.15);
     }
     #slideMediaId.hidden { display: none; }
@@ -206,6 +210,16 @@
   let settings = { delay: 5, order: 'chrono', refreshInterval: 300 };
   let promoPages = [];
   let showMediaId = false;
+  // Style du cartouche ID média (voir #slideMediaId ci-dessus et
+  // applyMediaIdStyle() plus bas) : réglé depuis /admin/tags → ID unique
+  // par média, comme showMediaId ci-dessus. Défauts = ancien style CSS fixe
+  // (voir _media_id_settings, app.py) -- utilisés tant que le 1er fetch n'a
+  // pas encore répondu.
+  let mediaIdStyle = {
+    font: 'monospace', font_size: 14, text_color: '#ffffff', bg_color: '#000000',
+    bg_image_url: '', badge_size: 20, position: 'bottom-right',
+    margin_top: 24, margin_bottom: 24, margin_left: 24, margin_right: 24, shape: 'rounded',
+  };
   let showTags = false;
   let tagsStyle = { font: 'system-ui, sans-serif', bg_color: '#0d8b8f', text_color: '#ffffff', font_size: 14 };
   // Décompte en secondes (voir /admin/slideshow → Paramètres, #slideCountdown
@@ -379,6 +393,66 @@
       const styleEl = document.createElement('style');
       styleEl.textContent = '@scope {\n' + page.custom_css + '\n}';
       el.appendChild(styleEl);
+    }
+  }
+
+  // ── Style du cartouche ID média (voir /admin/tags → ID unique par
+  // média) ─────────────────────────────────────────────────────────────
+  // Appelé à chaque rafraîchissement des réglages (voir mediaIdStyle plus
+  // haut), pas par slide -- contrairement au texte/à la visibilité du
+  // badge (voir showNext() plus bas), qui eux dépendent de la slide
+  // affichée (media_uid, showMediaId).
+  function applyMediaIdStyle() {
+    const el = document.getElementById('slideMediaId');
+    if (!el) return;
+    const st = mediaIdStyle;
+    el.style.fontFamily = st.font;
+    el.style.fontSize = st.font_size + 'px';
+    el.style.color = st.text_color;
+    el.style.backgroundColor = st.bg_color;
+    if (st.bg_image_url) {
+      el.style.backgroundImage = `url("${st.bg_image_url}")`;
+      el.style.backgroundSize = 'cover';
+      el.style.backgroundPosition = 'center';
+    } else {
+      el.style.backgroundImage = 'none';
+    }
+
+    // Position + 4 marges INDÉPENDANTES (haut/bas/gauche/droite, contrairement
+    // au décompte ci-dessous qui n'a qu'une marge horizontale/verticale) --
+    // seuls les 2 côtés pertinents pour la position choisie sont appliqués
+    // (ex. "bottom-right" -> bottom + right) ; les 2 autres restent
+    // enregistrés mais inutilisés tant que la position ne change pas.
+    el.style.top = el.style.bottom = el.style.left = el.style.right = '';
+    el.style.transform = '';
+    const pos = st.position || 'bottom-right';
+    if (pos.startsWith('top')) el.style.top = st.margin_top + 'px';
+    else el.style.bottom = st.margin_bottom + 'px';
+    if (pos.endsWith('left')) {
+      el.style.left = st.margin_left + 'px';
+    } else if (pos.endsWith('right')) {
+      el.style.right = st.margin_right + 'px';
+    } else {
+      el.style.left = '50%';
+      el.style.transform = 'translateX(-50%)';
+    }
+
+    // Forme : disque/carré = taille FIXE (largeur = hauteur = badge_size),
+    // texte centré dedans quitte à déborder si l'ID est trop long pour y
+    // tenir -- rectangle (droit ou arrondi) reste ajusté à la largeur du
+    // texte, badge_size pilote alors un padding proportionnel (mêmes
+    // proportions que l'ancien padding fixe 6px/14px, pour badge_size=20).
+    const shape = st.shape || 'rounded';
+    if (shape === 'circle' || shape === 'square') {
+      el.style.width = st.badge_size + 'px';
+      el.style.height = st.badge_size + 'px';
+      el.style.padding = '0';
+      el.style.borderRadius = shape === 'circle' ? '50%' : '0';
+    } else {
+      el.style.width = 'auto';
+      el.style.height = 'auto';
+      el.style.padding = Math.round(st.badge_size * 0.3) + 'px ' + Math.round(st.badge_size * 0.7) + 'px';
+      el.style.borderRadius = shape === 'rounded' ? '999px' : '0';
     }
   }
 
@@ -792,6 +866,8 @@
       lastData = data;
       promoPages = data.promo_pages || promoPages;
       showMediaId = !!data.show_media_id;
+      mediaIdStyle = data.media_id_style || mediaIdStyle;
+      applyMediaIdStyle();
       showTags = !!data.show_tags;
       tagsStyle = data.tags_style || tagsStyle;
       countdownEnabled = !!(data.countdown && data.countdown.enabled);
@@ -836,6 +912,8 @@
     };
     promoPages = data.promo_pages || [];
     showMediaId = !!data.show_media_id;
+    mediaIdStyle = data.media_id_style || mediaIdStyle;
+    applyMediaIdStyle();
     showTags = !!data.show_tags;
     tagsStyle = data.tags_style || tagsStyle;
     countdownEnabled = !!(data.countdown && data.countdown.enabled);

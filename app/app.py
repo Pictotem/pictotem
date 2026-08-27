@@ -756,11 +756,63 @@ def _tags_settings():
     }
 
 
+# Police monospace par défaut du badge ID média (voir _media_id_settings) --
+# reprend exactement l'ancien style CSS fixe (font-family: monospace) sous sa
+# forme sélectionnable dans le picker (doit rester en phase avec l'entrée
+# "Courier New" de _PROMO_FONTS) : aucun changement visuel par défaut tant
+# que l'admin n'a pas choisi une autre police.
+_MEDIA_ID_DEFAULT_FONT = '"Courier New", monospace'
+
+# Formes possibles du cartouche ID média (voir #slideMediaId, bestof.html) --
+# réglable depuis /admin/tags -> ID unique par média. 'rounded' (par défaut)
+# reprend l'ancien style fixe (pilule, largeur ajustée au texte) -- aucun
+# changement visuel par défaut. 'rect' est la même largeur ajustée au texte
+# mais à coins droits ; 'square'/'circle' ont une taille FIXE (voir
+# media_id.badge_size) -- le texte y reste centré, quitte à déborder si l'ID
+# est trop long pour tenir dedans (voir applyMediaIdStyle, bestof.html).
+_MEDIA_ID_SHAPES = [
+    ('rounded', 'Rectangle arrondi'),
+    ('rect',    'Rectangle'),
+    ('square',  'Carré'),
+    ('circle',  'Disque'),
+]
+
+
 def _media_id_settings():
     return {
         'length':         int(get_setting('media_id.length', '') or '6'),
         'show_on_bestof': get_setting('media_id.show_on_bestof', '0') == '1',
+        # Style/position du cartouche (voir #slideMediaId, bestof.html) --
+        # réglable depuis /admin/tags -> ID unique par média (voir
+        # blocks/tags_media_id.html). Défauts = ancien style CSS fixe (police
+        # monospace 14px blanche, fond noir, coin bas-droit à 24px, pilule) :
+        # aucun changement visuel tant que l'admin n'a pas touché ces champs
+        # -- sauf le fond, qui devient opaque par défaut (au lieu de
+        # translucide) : un <input type=color> ne sait pas exprimer
+        # l'ancienne transparence, voir blocks/tags_media_id.html.
+        'font':          get_setting('media_id.font', '') or _MEDIA_ID_DEFAULT_FONT,
+        'font_size':     int(get_setting('media_id.font_size', '') or '14'),
+        'text_color':    get_setting('media_id.text_color', '') or '#ffffff',
+        'bg_color':      get_setting('media_id.bg_color', '') or '#000000',
+        # Filename dans MEDIA_ID_BADGE_DIR, '' = aucune image (voir
+        # admin_media_id_bg_upload/admin_media_id_bg_remove ci-dessous).
+        'bg_image':      get_setting('media_id.bg_image', ''),
+        # badge_size pilote soit une taille fixe (carré/disque), soit un
+        # padding proportionnel (rectangle/pilule) -- voir _MEDIA_ID_SHAPES
+        # ci-dessus et applyMediaIdStyle(), bestof.html. Défaut 20 -> padding
+        # 6px/14px, identique à l'ancien padding fixe de la pilule.
+        'badge_size':    int(get_setting('media_id.badge_size', '') or '20'),
+        'position':      get_setting('media_id.position', '') or 'bottom-right',
+        'margin_top':    int(get_setting('media_id.margin_top', '') or '24'),
+        'margin_bottom': int(get_setting('media_id.margin_bottom', '') or '24'),
+        'margin_left':   int(get_setting('media_id.margin_left', '') or '24'),
+        'margin_right':  int(get_setting('media_id.margin_right', '') or '24'),
+        'shape':         get_setting('media_id.shape', '') or 'rounded',
     }
+
+
+MEDIA_ID_BADGE_DIR = BASE_DIR / 'app' / 'static' / 'media_id'
+
 
 
 # ── Add-on : détection de QR-codes → tags automatiques ────────────────────────
@@ -3208,7 +3260,12 @@ def _block_ctx_tags_settings() -> dict:
 
 
 def _block_ctx_tags_media_id() -> dict:
-    return {'media_id': _media_id_settings()}
+    return {
+        'media_id': _media_id_settings(),
+        'media_id_fonts': _all_fonts(),
+        'media_id_positions': _BADGE_POSITIONS,
+        'media_id_shapes': _MEDIA_ID_SHAPES,
+    }
 
 
 def _block_ctx_tags_display() -> dict:
@@ -3242,7 +3299,7 @@ def _block_ctx_slideshow_settings() -> dict:
         'slideshow_settings': _slideshow_settings(),
         'forced_promo': _forced_promo_public(),
         'promo_force_options': [{'id': p['id'], 'active': bool(p['active'])} for p in list_promo_pages()],
-        'countdown_positions': _COUNTDOWN_POSITIONS,
+        'countdown_positions': _BADGE_POSITIONS,
     }
 
 
@@ -4260,7 +4317,73 @@ def admin_tags_set_media_id():
     if raw_len.isdigit() and 3 <= int(raw_len) <= 12:
         set_setting('media_id.length', raw_len)
     set_setting('media_id.show_on_bestof', '1' if request.form.get('show_on_bestof') else '0')
+
+    font_value = request.form.get('media_id_font', '')
+    if font_value in dict(_all_fonts()):
+        set_setting('media_id.font', font_value)
+    raw_fs = (request.form.get('media_id_font_size') or '').strip()
+    if raw_fs.isdigit() and int(raw_fs) >= 8:
+        set_setting('media_id.font_size', raw_fs)
+    text_value = request.form.get('media_id_text_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', text_value):
+        set_setting('media_id.text_color', text_value)
+    bg_value = request.form.get('media_id_bg_color', '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_value):
+        set_setting('media_id.bg_color', bg_value)
+    raw_badge_size = (request.form.get('media_id_badge_size') or '').strip()
+    if raw_badge_size.isdigit() and 8 <= int(raw_badge_size) <= 500:
+        set_setting('media_id.badge_size', raw_badge_size)
+    position_value = request.form.get('media_id_position', '').strip()
+    if position_value in dict(_BADGE_POSITIONS):
+        set_setting('media_id.position', position_value)
+    for side in ('top', 'bottom', 'left', 'right'):
+        raw_margin = (request.form.get(f'media_id_margin_{side}') or '').strip()
+        if raw_margin.isdigit() and int(raw_margin) <= 500:
+            set_setting(f'media_id.margin_{side}', raw_margin)
+    shape_value = request.form.get('media_id_shape', '').strip()
+    if shape_value in dict(_MEDIA_ID_SHAPES):
+        set_setting('media_id.shape', shape_value)
+
     return _admin_block_redirect('tags_media_id', ok='Réglages ID média mis à jour.')
+
+
+@app.route('/admin/tags/media_id/background', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media_id_bg_upload():
+    """Image de fond du cartouche ID média (voir /admin/tags -> ID unique par
+    média, blocks/tags_media_id.html) -- upload dédié, une seule image à la
+    fois (remplacée à chaque envoi) : même patron que le cadre d'accueil
+    (voir admin_welcome_frame_upload ci-dessus) plutôt que la bibliothèque
+    partagée des pages promo -- ce fond n'a de sens que pour ce badge précis."""
+    file = request.files.get('media_id_bg')
+    if not file or not file.filename:
+        return _admin_block_redirect('tags_media_id', err='Aucun fichier sélectionné.')
+    ext = Path(file.filename).suffix.lower()
+    if ext not in _PROMO_ALLOWED_EXT:
+        return _admin_block_redirect('tags_media_id', err='Format non supporté (PNG, JPG, WEBP).')
+    MEDIA_ID_BADGE_DIR.mkdir(parents=True, exist_ok=True)
+    # Supprime un éventuel fichier d'une extension différente laissé par un
+    # envoi précédent -- sinon orphelin sur disque, plus jamais référencé
+    # dès que le réglage ci-dessous pointe vers le nouveau fichier.
+    old_fn = get_setting('media_id.bg_image', '')
+    new_fn = f'media-id-bg{ext}'
+    if old_fn and old_fn != new_fn:
+        (MEDIA_ID_BADGE_DIR / old_fn).unlink(missing_ok=True)
+    file.save(str(MEDIA_ID_BADGE_DIR / new_fn))
+    set_setting('media_id.bg_image', new_fn)
+    return _admin_block_redirect('tags_media_id', ok='Image de fond mise à jour.')
+
+
+@app.route('/admin/tags/media_id/background/remove', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media_id_bg_remove():
+    fn = get_setting('media_id.bg_image', '')
+    if fn:
+        (MEDIA_ID_BADGE_DIR / fn).unlink(missing_ok=True)
+        set_setting('media_id.bg_image', '')
+    return _admin_block_redirect('tags_media_id', ok='Image de fond supprimée.')
 
 
 @app.route('/admin/tags/display', methods=['POST'])
@@ -5553,10 +5676,12 @@ def _forced_promo_public():
     return {'page': _promo_page_public(page), 'remaining_ms': remaining_ms}
 
 
-# Positions possibles pour le décompte en secondes (voir #slideCountdown,
-# bestof.html) -- un des 6 coins/centres haut/bas de l'écran, réglable
-# depuis /admin/slideshow -> Paramètres (voir blocks/slideshow_settings.html).
-_COUNTDOWN_POSITIONS = [
+# Positions possibles pour un overlay coin/centre haut/bas de l'écran --
+# partagé par le décompte en secondes (voir #slideCountdown, bestof.html,
+# réglable depuis /admin/slideshow -> Paramètres) ET le cartouche ID média
+# (voir #slideMediaId, bestof.html, réglable depuis /admin/tags -> ID
+# unique par média) -- même sémantique de position pour les deux.
+_BADGE_POSITIONS = [
     ('top-left',      'Haut gauche'),
     ('top-center',    'Haut centre'),
     ('top-right',     'Haut droite'),
@@ -5618,6 +5743,7 @@ def bestof():
 def api_bestof_slides():
     s = _slideshow_settings()
     tags_cfg = _tags_settings()
+    media_id_cfg = _media_id_settings()
 
     # Construire la requête captures
     conditions, params = ['1=1'], []
@@ -5685,7 +5811,21 @@ def api_bestof_slides():
         'promo_pages':       _active_promo_pages_public(),
         'paused':           s['paused'],
         'forced_promo':     _forced_promo_public(),
-        'show_media_id':    _media_id_settings()['show_on_bestof'],
+        'show_media_id':    media_id_cfg['show_on_bestof'],
+        'media_id_style':   {
+            'font':          media_id_cfg['font'],
+            'font_size':     media_id_cfg['font_size'],
+            'text_color':    media_id_cfg['text_color'],
+            'bg_color':      media_id_cfg['bg_color'],
+            'bg_image_url':  f"/static/media_id/{media_id_cfg['bg_image']}" if media_id_cfg['bg_image'] else '',
+            'badge_size':    media_id_cfg['badge_size'],
+            'position':      media_id_cfg['position'],
+            'margin_top':    media_id_cfg['margin_top'],
+            'margin_bottom': media_id_cfg['margin_bottom'],
+            'margin_left':   media_id_cfg['margin_left'],
+            'margin_right':  media_id_cfg['margin_right'],
+            'shape':         media_id_cfg['shape'],
+        },
         'countdown':        {
             'enabled':     s['countdown_enabled'],
             'font':        s['countdown_font'],
@@ -5817,7 +5957,7 @@ def admin_slideshow_set_settings():
     set_setting('countdown.text_color', request.form.get('countdown_text_color', '#ffffff').strip() or '#ffffff')
     set_setting('countdown.bg_color', request.form.get('countdown_bg_color', '#000000').strip() or '#000000')
     countdown_position = request.form.get('countdown_position', 'bottom-center').strip()
-    if countdown_position not in dict(_COUNTDOWN_POSITIONS):
+    if countdown_position not in dict(_BADGE_POSITIONS):
         countdown_position = 'bottom-center'
     set_setting('countdown.position', countdown_position)
     set_setting('countdown.margin_x',

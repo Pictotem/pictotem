@@ -20,5 +20,196 @@
     </div>
   </div>
 
+  <!-- Apparence du cartouche affiché sur /bestof (voir #slideMediaId,
+       bestof.html) : même patron que "Affichage sur /bestof" des tags
+       (blocks/tags_display.html) pour police/taille/couleur de texte, plus
+       fond du cartouche (couleur + image), taille de cartouche, position,
+       marges (4 côtés indépendants) et forme -- propres à ce badge, il n'a
+       pas d'emplacement fixe comme les tags. -->
+  <div class="field" style="margin-top:28px;padding-top:18px;border-top:1px solid var(--border)">
+    <label style="font-weight:700;color:var(--text);font-size:14px;margin-bottom:14px">
+      Apparence du cartouche
+    </label>
+  </div>
+
+  <div class="field-row">
+    <div class="field field-half">
+      <label>Police</label>
+      <select name="media_id_font" id="media_id_font">
+        {% for value, label in media_id_fonts %}
+        <option value="{{ value }}" {% if media_id.font == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field field-half">
+      <label>Taille du texte (px)</label>
+      <input type="number" name="media_id_font_size" id="media_id_font_size" min="8" max="200"
+             value="{{ media_id.font_size }}" style="max-width:140px">
+    </div>
+  </div>
+
+  <div class="field-row">
+    <div class="field field-half">
+      <label>Couleur du texte</label>
+      <div class="color-row">
+        <input type="color" id="mi_cp_text" value="{{ media_id.text_color }}"
+               oninput="document.getElementById('media_id_text_color').value=this.value; mediaIdUpdatePreview()">
+        <input type="text" id="media_id_text_color" name="media_id_text_color" class="color-hex"
+               value="{{ media_id.text_color }}" maxlength="7"
+               oninput="document.getElementById('mi_cp_text').value=this.value; mediaIdUpdatePreview()">
+      </div>
+    </div>
+    <div class="field field-half">
+      <label>Couleur du cartouche</label>
+      <div class="color-row">
+        <input type="color" id="mi_cp_bg" value="{{ media_id.bg_color }}"
+               oninput="document.getElementById('media_id_bg_color').value=this.value; mediaIdUpdatePreview()">
+        <input type="text" id="media_id_bg_color" name="media_id_bg_color" class="color-hex"
+               value="{{ media_id.bg_color }}" maxlength="7"
+               oninput="document.getElementById('mi_cp_bg').value=this.value; mediaIdUpdatePreview()">
+      </div>
+      <p class="field-hint">Visible derrière l'image de fond ci-dessous si elle est transparente, ou seule si aucune image n'est choisie.</p>
+    </div>
+  </div>
+
+  <div class="field-row">
+    <div class="field field-half">
+      <label>Taille du cartouche</label>
+      <input type="number" name="media_id_badge_size" id="media_id_badge_size" min="8" max="500"
+             value="{{ media_id.badge_size }}" style="max-width:140px"
+             oninput="mediaIdUpdatePreview()">
+      <p class="field-hint">
+        Disque/carré : diamètre/côté fixe (le texte reste centré, quitte à déborder si l'ID est long).
+        Rectangle (droit ou arrondi) : ajusté à la largeur du texte, cette taille pilote l'épaisseur du padding.
+      </p>
+    </div>
+    <div class="field field-half">
+      <label>Forme du cartouche</label>
+      <select name="media_id_shape" id="media_id_shape" onchange="mediaIdUpdatePreview()">
+        {% for value, label in media_id_shapes %}
+        <option value="{{ value }}" {% if media_id.shape == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="field">
+    <label>Position à l'écran</label>
+    <select name="media_id_position">
+      {% for value, label in media_id_positions %}
+      <option value="{{ value }}" {% if media_id.position == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="field-row">
+    <div class="field field-half">
+      <label>Marge haute (px)</label>
+      <input type="number" name="media_id_margin_top" min="0" max="500" value="{{ media_id.margin_top }}" style="max-width:140px">
+    </div>
+    <div class="field field-half">
+      <label>Marge basse (px)</label>
+      <input type="number" name="media_id_margin_bottom" min="0" max="500" value="{{ media_id.margin_bottom }}" style="max-width:140px">
+    </div>
+  </div>
+  <div class="field-row">
+    <div class="field field-half">
+      <label>Marge gauche (px)</label>
+      <input type="number" name="media_id_margin_left" min="0" max="500" value="{{ media_id.margin_left }}" style="max-width:140px">
+    </div>
+    <div class="field field-half">
+      <label>Marge droite (px)</label>
+      <input type="number" name="media_id_margin_right" min="0" max="500" value="{{ media_id.margin_right }}" style="max-width:140px">
+    </div>
+  </div>
+  <p class="field-hint" style="margin-top:-6px">
+    Seules les 2 marges du côté vers lequel colle la position choisie ci-dessus s'appliquent
+    (ex. « Bas droite » : marge basse + marge droite) — les 2 autres restent enregistrées, prêtes à
+    resservir si vous changez de position plus tard.
+  </p>
+
+  <div class="tags-preview-wrap">
+    <p class="tags-preview-label">Aperçu (police/taille/couleurs/forme — position et image de fond visibles uniquement sur /bestof)</p>
+    <div class="tags-preview-box">
+      <span class="tag-preview-chip" id="mediaIdPreviewChip">#123456</span>
+    </div>
+  </div>
+
   <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
 </form>
+
+<!-- Image de fond du cartouche : formulaire séparé (multipart, upload dédié
+     -- une seule image à la fois, voir admin_media_id_bg_upload/
+     admin_media_id_bg_remove, app.py) plutôt qu'inclus dans le formulaire
+     de réglages ci-dessus, qui n'est pas multipart. -->
+<div class="field" style="margin-top:24px">
+  <label>Image de fond du cartouche <span style="font-weight:400;color:var(--muted)">(optionnel)</span></label>
+  <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-top:8px">
+    {% if media_id.bg_image %}
+    <div style="flex:0 0 auto;width:120px;aspect-ratio:1/1;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:#0d0f11;">
+      <img src="{{ url_for('static', filename='media_id/' + media_id.bg_image) }}"
+           style="width:100%;height:100%;object-fit:cover;" alt="Image de fond du cartouche ID média">
+    </div>
+    {% endif %}
+    <div style="flex:1;min-width:220px">
+      <form method="post" action="{{ url_for('admin_media_id_bg_upload') }}" enctype="multipart/form-data" style="margin-bottom:10px">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="upload-zone">
+          <label class="upload-label" for="media_id_bg_input">Choisir une image…</label>
+          <input type="file" id="media_id_bg_input" name="media_id_bg" accept=".png,.jpg,.jpeg,.webp"
+                 onchange="document.getElementById('media-id-bg-name').textContent = this.files[0]?.name || ''">
+          <span id="media-id-bg-name"></span>
+          <p class="upload-hint">PNG, JPG, WEBP — remplace l'image actuelle s'il y en a une.</p>
+          <button class="btn-primary" type="submit" style="margin-top:10px">Mettre à jour</button>
+        </div>
+      </form>
+      {% if media_id.bg_image %}
+      <form method="post" action="{{ url_for('admin_media_id_bg_remove') }}"
+            onsubmit="return confirm('Supprimer l\'image de fond du cartouche ?')">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button class="btn-danger" type="submit">✕ Supprimer l'image de fond</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script>
+  // Aperçu en direct du cartouche (même IIFE + exposition sur window que
+  // tagsUpdatePreview/countdownUpdatePreview, voir blocks/tags_display.html
+  // et blocks/slideshow_settings.html) -- mime police/taille/couleurs/forme ;
+  // position/marges/image de fond ne sont visibles que sur /bestof lui-même
+  // (voir le texte au-dessus de l'aperçu).
+  (function () {
+    function mediaIdUpdatePreviewImpl() {
+      const fontEl = document.getElementById('media_id_font');
+      const chip = document.getElementById('mediaIdPreviewChip');
+      if (!fontEl || !chip) return;
+      chip.style.fontFamily = fontEl.value;
+      chip.style.fontSize = (document.getElementById('media_id_font_size').value || 14) + 'px';
+      chip.style.color = document.getElementById('media_id_text_color').value || '#ffffff';
+      chip.style.background = document.getElementById('media_id_bg_color').value || '#000000';
+      const shape = document.getElementById('media_id_shape').value || 'rounded';
+      const size = parseInt(document.getElementById('media_id_badge_size').value, 10) || 20;
+      chip.style.display = 'inline-flex';
+      chip.style.alignItems = 'center';
+      chip.style.justifyContent = 'center';
+      if (shape === 'circle' || shape === 'square') {
+        chip.style.width = size + 'px';
+        chip.style.height = size + 'px';
+        chip.style.padding = '0';
+        chip.style.borderRadius = shape === 'circle' ? '50%' : '0';
+      } else {
+        chip.style.width = 'auto';
+        chip.style.height = 'auto';
+        chip.style.padding = Math.round(size * 0.3) + 'px ' + Math.round(size * 0.7) + 'px';
+        chip.style.borderRadius = shape === 'rounded' ? '999px' : '0';
+      }
+    }
+    window.mediaIdUpdatePreview = mediaIdUpdatePreviewImpl;
+
+    document.getElementById('media_id_font')?.addEventListener('change', mediaIdUpdatePreviewImpl);
+    document.getElementById('media_id_font_size')?.addEventListener('input', mediaIdUpdatePreviewImpl);
+    mediaIdUpdatePreviewImpl();
+  })();
+</script>
