@@ -1059,14 +1059,16 @@ const tagsKeyboard       = document.getElementById('tagsKeyboard');
 const btnTagsPhoto       = document.getElementById('btnTagsPhoto');
 const btnTagsVideo       = document.getElementById('btnTagsVideo');
 
-let tagsData     = { settings: {}, available: [], assigned: [] };
-let tagsFreeText = '';
-let tagsShift    = false;
+let tagsData         = { settings: {}, available: [], assigned: [] };
+let tagsFreeText     = '';
+let tagsShift        = false;
+let tagsKeyboardMode = 'alpha'; // 'alpha' | 'numeric' — voir buildVirtualKeyboard()
 
 async function openTagsModal() {
   if (!replayCapture?.id || !tagsModalOverlay) return;
   tagsFreeText = '';
   tagsShift = false;
+  tagsKeyboardMode = 'alpha';
   showTagsError('');
   try {
     const res = await fetch(`/api/capture/${replayCapture.id}/tags`);
@@ -1214,10 +1216,55 @@ function vkbdInsert(ch) {
   renderTagsFreeInput();
 }
 
+// Pavé numérique (bascule "123") — saisie d'un ID qui se transformera en
+// nom : chiffres seuls, pas d'accents ni de majuscule.
+const VKBD_NUM_ROWS = [
+  ['1', '2', '3'],
+  ['4', '5', '6'],
+  ['7', '8', '9'],
+];
+
+function _vkbdMakeBackspaceKey() {
+  const back = document.createElement('button');
+  back.className = 'vkbd-key func';
+  back.textContent = '⌫';
+  back.addEventListener('click', () => {
+    tagsFreeText = tagsFreeText.slice(0, -1);
+    renderTagsFreeInput();
+  });
+  return back;
+}
+
+function _vkbdMakeEnterKey() {
+  const enterKey = document.createElement('button');
+  enterKey.className = 'vkbd-key enter';
+  enterKey.textContent = 'Ajouter';
+  enterKey.addEventListener('click', submitFreeTag);
+  return enterKey;
+}
+
+function _vkbdMakeModeKey(label, targetMode) {
+  const modeKey = document.createElement('button');
+  modeKey.className = 'vkbd-key func vkbd-mode';
+  modeKey.textContent = label;
+  modeKey.addEventListener('click', () => {
+    tagsKeyboardMode = targetMode;
+    buildVirtualKeyboard();
+  });
+  return modeKey;
+}
+
 function buildVirtualKeyboard() {
   if (!tagsKeyboard) return;
   tagsKeyboard.innerHTML = '';
+  if (tagsKeyboardMode === 'numeric') {
+    buildNumericKeyboard();
+  } else {
+    buildAlphaKeyboard();
+  }
+}
 
+function buildAlphaKeyboard() {
   VKBD_ROWS.forEach((row, i) => {
     const rowEl = document.createElement('div');
     rowEl.className = 'vkbd-row';
@@ -1243,14 +1290,7 @@ function buildVirtualKeyboard() {
     });
 
     if (isLast) {
-      const back = document.createElement('button');
-      back.className = 'vkbd-key func';
-      back.textContent = '⌫';
-      back.addEventListener('click', () => {
-        tagsFreeText = tagsFreeText.slice(0, -1);
-        renderTagsFreeInput();
-      });
-      rowEl.appendChild(back);
+      rowEl.appendChild(_vkbdMakeBackspaceKey());
     }
 
     tagsKeyboard.appendChild(rowEl);
@@ -1273,12 +1313,40 @@ function buildVirtualKeyboard() {
   spaceKey.className = 'vkbd-key space';
   spaceKey.textContent = 'Espace';
   spaceKey.addEventListener('click', () => vkbdInsert(' '));
-  const enterKey = document.createElement('button');
-  enterKey.className = 'vkbd-key enter';
-  enterKey.textContent = 'Ajouter';
-  enterKey.addEventListener('click', submitFreeTag);
+  lastRow.appendChild(_vkbdMakeModeKey('123', 'numeric'));
   lastRow.appendChild(spaceKey);
-  lastRow.appendChild(enterKey);
+  lastRow.appendChild(_vkbdMakeEnterKey());
+  tagsKeyboard.appendChild(lastRow);
+}
+
+function buildNumericKeyboard() {
+  VKBD_NUM_ROWS.forEach((row) => {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'vkbd-row';
+    row.forEach((ch) => {
+      const key = document.createElement('button');
+      key.className = 'vkbd-key';
+      key.textContent = ch;
+      key.addEventListener('click', () => vkbdInsert(ch));
+      rowEl.appendChild(key);
+    });
+    tagsKeyboard.appendChild(rowEl);
+  });
+
+  const funcRow = document.createElement('div');
+  funcRow.className = 'vkbd-row';
+  const zeroKey = document.createElement('button');
+  zeroKey.className = 'vkbd-key';
+  zeroKey.textContent = '0';
+  zeroKey.addEventListener('click', () => vkbdInsert('0'));
+  funcRow.appendChild(_vkbdMakeModeKey('ABC', 'alpha'));
+  funcRow.appendChild(zeroKey);
+  funcRow.appendChild(_vkbdMakeBackspaceKey());
+  tagsKeyboard.appendChild(funcRow);
+
+  const lastRow = document.createElement('div');
+  lastRow.className = 'vkbd-row';
+  lastRow.appendChild(_vkbdMakeEnterKey());
   tagsKeyboard.appendChild(lastRow);
 }
 

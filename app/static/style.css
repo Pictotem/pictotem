@@ -980,3 +980,4 @@ button, input, a { font: inherit; }
 .vkbd-key.space { flex: 6; }
 .vkbd-key.enter { background: var(--accent); color: #fff; flex: 1.8; }
 .vkbd-accents .vkbd-key { flex: 1; font-size: 15px; }
+.vkbd-key.vkbd-mode { font-weight: 700; letter-spacing: .02em; }
