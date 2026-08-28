@@ -1,0 +1,27 @@
+<div class="form-card">
+  <p class="section-hint">
+    Quand l'opérateur ajoute un tag libre à la main sur une capture (modal « Tags » du
+    kiosque, juste après la prise de vue) — par exemple parce que la détection automatique
+    du QR-code a échoué — cette option reconnaît si le texte saisi correspond exactement à
+    un code invité de la liste ci-dessous et le remplace alors par le texte associé, au lieu
+    de garder le code numérique brut. Il suffit donc de taper le code invité (court, imprimé
+    sur le support) plutôt que le nom lui-même : plus rapide, et sans risque de faute de
+    frappe ou de casse sur l'orthographe du nom. Même principe que la résolution déjà
+    appliquée à la détection automatique par QR-code (tuile « Add-on — Détection de
+    QR-codes » ci-dessous) — indépendant de celle-ci, fonctionne même si l'add-on QR-code
+    est désactivé. Un texte qui ne correspond à aucun code est ajouté tel quel, comme
+    n'importe quel tag libre.
+  </p>
+
+  <form method="post" action="{{ url_for('admin_guest_codes_set_manual_resolve_settings') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="field">
+      <div class="check-row">
+        <input type="checkbox" id="guest_codes_manual_resolve_enabled" name="enabled"
+               {% if guest_codes_manual_resolve_settings.enabled %}checked{% endif %}>
+        <span>Reconnaître un code invité saisi manuellement comme tag et le remplacer par son nom</span>
+      </div>
+    </div>
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+</div>

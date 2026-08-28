@@ -916,6 +916,21 @@ def _qrcode_settings() -> dict:
     }
 
 
+def _guest_codes_manual_resolve_settings() -> dict:
+    """Réglage indépendant du tag automatique par QR-code (qrcode.enabled)
+    ci-dessus : reconnaissance d'un code invité saisi À LA MAIN comme tag
+    libre (voir api_capture_tags, modal "Tags" du kiosque). Cas d'usage :
+    détection QR-code manquée -- l'opérateur tape le code invité (numérique,
+    court, imprimé sur le support) plutôt que le nom de l'invité, plus
+    rapide et sans risque de faute de frappe/casse. Résolution appliquée
+    AVANT les contrôles de longueur du tag libre (tags.free_min_length/
+    free_max_length) : le nom qui remplace le code doit donc, comme un tag
+    libre saisi directement, respecter ces bornes."""
+    return {
+        'enabled': get_setting('guest_codes.manual_resolve', '1') == '1',
+    }
+
+
 def _qr_burn_settings() -> dict:
     """Incrustation (dure, dans le fichier final) de la forme + du texte
     QR-code live sur les médias capturés — option indépendante par type de
@@ -1900,6 +1915,14 @@ def api_capture_tags(capture_id):
         if not s['free_enabled']:
             return jsonify({'ok': False, 'error': 'Tag libre désactivé'}), 403
         free_text = (data.get('free_text') or '').strip()
+        if free_text and _guest_codes_manual_resolve_settings()['enabled']:
+            # Le texte saisi peut être un code invité (voir /admin/guest_codes)
+            # plutôt que le nom lui-même -- même principe que la résolution
+            # QR-code (_qr_detect_for_capture) : le code n'est jamais gardé
+            # tel quel, c'est le texte associé qui devient le tag.
+            mapped = get_guest_code_text(free_text)
+            if mapped is not None:
+                free_text = resolve_dynamic_placeholders(mapped)
         if len(free_text) < s['free_min_length'] or len(free_text) > s['free_max_length']:
             return jsonify({
                 'ok': False,
@@ -3015,6 +3038,7 @@ _ADMIN_BLOCKS = {
     'guest_uploads_settings':   {'title': "Paramètres",                         'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_settings.html',   'context_fn': '_block_ctx_guest_uploads_settings'},
     'guest_uploads_share_link': {'title': "Lien de partage",                    'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_share_link.html', 'context_fn': '_block_ctx_guest_uploads_share_link'},
     'guest_codes_code_settings':    {'title': "Réglages",                                    'default_page': 'guest_codes', 'template': 'blocks/guest_codes_code_settings.html',    'context_fn': '_block_ctx_guest_codes_code_settings'},
+    'guest_codes_manual_resolve':   {'title': "Reconnaissance dans le tag manuel",             'default_page': 'guest_codes', 'template': 'blocks/guest_codes_manual_resolve.html', 'context_fn': '_block_ctx_guest_codes_manual_resolve'},
     'guest_codes_qr_export':        {'title': "Génération de QR-codes imprimables",          'default_page': 'guest_codes', 'template': 'blocks/guest_codes_qr_export.html',        'context_fn': '_block_ctx_guest_codes_qr_export'},
     'guest_codes_purge_date':       {'title': "Purger par plage de dates",                   'default_page': 'guest_codes', 'template': 'blocks/guest_codes_purge_date.html',       'context_fn': None},
     'guest_codes_purge_first_n':    {'title': "Purger les N premiers",                       'default_page': 'guest_codes', 'template': 'blocks/guest_codes_purge_first_n.html',    'context_fn': '_block_ctx_guest_codes_purge_first_n'},
@@ -3417,6 +3441,10 @@ def _block_ctx_guest_uploads_share_link() -> dict:
 
 def _block_ctx_guest_codes_code_settings() -> dict:
     return {'guest_codes_settings': _guest_codes_settings()}
+
+
+def _block_ctx_guest_codes_manual_resolve() -> dict:
+    return {'guest_codes_manual_resolve_settings': _guest_codes_manual_resolve_settings()}
 
 
 def _block_ctx_guest_codes_qr_export() -> dict:
@@ -5284,6 +5312,14 @@ def admin_guest_codes_set_code_settings():
     if raw_len.isdigit() and 2 <= int(raw_len) <= 10:
         set_setting('guest_codes.code_length', raw_len)
     return _admin_block_redirect('guest_codes_code_settings', sort=sort, q=q, ok='Réglages mis à jour.')
+
+
+@app.route('/admin/guest_codes/manual_resolve_settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_guest_codes_set_manual_resolve_settings():
+    set_setting('guest_codes.manual_resolve', '1' if request.form.get('enabled') else '0')
+    return _admin_block_redirect('guest_codes_manual_resolve', ok='Réglages mis à jour.')
 
 
 @app.route('/admin/guest_codes/qr_export_settings', methods=['POST'])
