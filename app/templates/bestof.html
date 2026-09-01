@@ -313,12 +313,29 @@
   // passage (promoPages déjà trié par sort_order — voir list_promo_pages
   // côté serveur). Ne compte que les slides "réelles" (photos/vidéos/images
   // intermédiaires), jamais les slides promo elles-mêmes.
+  //
+  // `base` ne contient QUE les captures qui passent déjà les filtres dédiés
+  // (type/dates/score de vote, voir _slideshow_settings côté serveur) : sa
+  // longueur varie donc avec ces critères, sans rapport avec la fréquence
+  // configurée d'une page promo. Sans précaution, une page réglée par ex.
+  // « toutes les 12 slides » ne serait JAMAIS insérée dès que le filtre
+  // (notamment un seuil de votes restrictif) réduit le nombre de captures
+  // affichées en dessous de 12 -- la page promo semblerait alors « désactivée
+  // par le vote » alors que sa fréquence n'a pas changé. On répète donc
+  // `base` autant de fois que nécessaire pour que même la page la moins
+  // fréquente ait l'occasion d'apparaître au moins une fois : les pages
+  // promo restent ainsi cadencées uniquement par leur propre réglage de
+  // fréquence, jamais par les critères propres aux captures.
   function insertPromo(base) {
     const active = promoPages.filter((p) => p.frequency > 0);
-    if (!active.length) return base;
+    if (!active.length || !base.length) return base;
+    const maxFrequency = Math.max(...active.map((p) => p.frequency));
+    const repeatCount = Math.max(1, Math.ceil(maxFrequency / base.length));
+    const repeatedBase = [];
+    for (let r = 0; r < repeatCount; r++) repeatedBase.push(...base);
     const result = [];
     let realCount = 0;
-    base.forEach((s) => {
+    repeatedBase.forEach((s) => {
       result.push(s);
       realCount++;
       active.forEach((p) => {
