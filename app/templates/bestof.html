@@ -18,7 +18,7 @@
     .slide {
       position: absolute; inset: 0;
       display: flex; align-items: center; justify-content: center;
-      opacity: 0; transition: opacity 0.8s ease;
+      opacity: 0; transition: opacity var(--crossfade-ms, 0.8s) ease;
     }
     .slide.active { opacity: 1; }
     /* Classe explicite (plutôt qu'un sélecteur .slide img/video global) pour
@@ -231,6 +231,15 @@
     position: 'bottom-center', margin_x: 24, margin_y: 24,
   };
   let cleanup = null;
+
+  // Durée du fondu-enchaîné entre deux slides (voir .slide, CSS ci-dessus)
+  // -- SEULE source de vérité, exposée au CSS via --crossfade-ms pour que
+  // la transition opacity, le retrait de .active (fadeOutTimers ci-dessous)
+  // et le démarrage du décompte (voir startCountdownFixedDelayed/
+  // startCountdownVideoDelayed plus bas) restent forcément synchronisés
+  // entre eux, même si cette durée change un jour.
+  const CROSSFADE_MS = 800;
+  document.documentElement.style.setProperty('--crossfade-ms', CROSSFADE_MS + 'ms');
 
   // Pause (voir #pauseBtn ci-dessous) : fige le diaporama sur la slide en
   // cours plutôt que d'essayer de calculer un temps restant précis --
@@ -473,9 +482,11 @@
   //    (duration - currentTime), ce qui le fige automatiquement dès que
   //    pauseSlideshow() met la vidéo en pause, sans code de pause dédié.
   let countdownInterval = null;
+  let countdownStartTimer = null; // voir startCountdownFixedDelayed/startCountdownVideoDelayed plus bas
 
   function stopCountdown() {
     if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+    if (countdownStartTimer) { clearTimeout(countdownStartTimer); countdownStartTimer = null; }
   }
 
   // Applique police/taille/couleurs/position/marges (voir countdownStyle,
@@ -551,6 +562,46 @@
     countdownInterval = setInterval(tick, 200);
   }
 
+  // Démarrage RETARDÉ du décompte -- attend la fin du fondu-enchaîné
+  // (CROSSFADE_MS) avant d'afficher/décrémenter le décompte : sans ce
+  // délai, le décompte démarrait pile au même instant que le fondu
+  // (déclenché juste après dans showNext(), voir section Crossfade), donc
+  // le chiffre affiché tournait déjà alors que le média précédent était
+  // encore visible à l'écran -- c'est le désync signalé. Le badge reste
+  // masqué pendant ce délai (aucune valeur affichée n'aurait de sens)
+  // plutôt que de garder affichée la dernière valeur de la slide
+  // précédente.
+  function startCountdownFixedDelayed(durationMs) {
+    stopCountdown();
+    const el = document.getElementById('slideCountdown');
+    if (el) el.classList.add('hidden');
+    if (!countdownEnabled) return;
+    // Durée réduite du délai déjà écoulé, pour que le décompte atteigne 0
+    // pile au même instant que le minuteur d'avancement (`advance`,
+    // programmé lui SANS délai sur la durée COMPLÈTE -- inchangé, pour ne
+    // pas décaler le rythme réel du diaporama réglé depuis l'admin).
+    const startDelay = Math.min(CROSSFADE_MS, Math.max(0, durationMs));
+    countdownStartTimer = setTimeout(() => {
+      countdownStartTimer = null;
+      startCountdownFixed(durationMs - startDelay);
+    }, startDelay);
+  }
+
+  // Vidéo : la lecture démarre bien dès t=0 (autoplay, inchangé) -- seul
+  // l'AFFICHAGE du décompte est retardé. currentTime reflète déjà la
+  // vraie position de lecture à ce moment-là, donc aucune valeur de
+  // départ à recalculer ici (contrairement à la version "fixe" ci-dessus).
+  function startCountdownVideoDelayed(videoEl) {
+    stopCountdown();
+    const el = document.getElementById('slideCountdown');
+    if (el) el.classList.add('hidden');
+    if (!countdownEnabled) return;
+    countdownStartTimer = setTimeout(() => {
+      countdownStartTimer = null;
+      startCountdownVideo(videoEl);
+    }, CROSSFADE_MS);
+  }
+
   function showNext() {
     if (!slides.length) return;
     if (cleanup) { cleanup(); cleanup = null; }
@@ -580,7 +631,7 @@
       pauseVideoEl = null;
       pauseAdvanceFn = advance;
       pauseDurationMs = duration;
-      startCountdownFixed(duration);
+      startCountdownFixedDelayed(duration);
     } else if (slide.type === 'video') {
       nextEl.innerHTML = '';
       const v = document.createElement('video');
@@ -597,7 +648,7 @@
       pauseVideoEl = v;
       pauseAdvanceFn = advance;
       pauseDurationMs = null;
-      startCountdownVideo(v);
+      startCountdownVideoDelayed(v);
     } else {
       nextEl.innerHTML = '';
       const el = document.createElement('img');
@@ -611,7 +662,7 @@
       pauseVideoEl = null;
       pauseAdvanceFn = advance;
       pauseDurationMs = duration;
-      startCountdownFixed(duration);
+      startCountdownFixedDelayed(duration);
     }
 
     // Crossfade -- annule d'abord un éventuel retrait d'opacité déjà
@@ -624,7 +675,7 @@
       fadeOutTimers[curKey] = setTimeout(() => {
         curEl.classList.remove('active');
         fadeOutTimers[curKey] = null;
-      }, 800);
+      }, CROSSFADE_MS);
     });
     current = next;
 
@@ -683,7 +734,7 @@
     pauseVideoEl = null;
     pauseAdvanceFn = advance;
     pauseDurationMs = Math.max(0, remainingMs);
-    startCountdownFixed(Math.max(0, remainingMs));
+    startCountdownFixedDelayed(Math.max(0, remainingMs));
 
     requestAnimationFrame(() => {
       if (fadeOutTimers[next]) { clearTimeout(fadeOutTimers[next]); fadeOutTimers[next] = null; }
@@ -691,7 +742,7 @@
       fadeOutTimers[curKey] = setTimeout(() => {
         curEl.classList.remove('active');
         fadeOutTimers[curKey] = null;
-      }, 800);
+      }, CROSSFADE_MS);
     });
     current = next;
 
