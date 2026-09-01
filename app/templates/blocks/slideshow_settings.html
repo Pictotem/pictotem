@@ -226,6 +226,23 @@
       </div>
     </div>
 
+    <!-- Délai supplémentaire avant chaque transition (voir bestof.html ->
+         transitionExtraDelayMs) : une fois le décompte tombe à 0 (ou la
+         slide arrivée à échéance, décompte désactivé), le média reste
+         affiché tel quel encore ce délai avant que le fondu vers la
+         slide suivante ne s'engage -- indépendant de la case ci-dessus,
+         s'applique même décompte désactivé. -->
+    <div class="field">
+      <label>Délai supplémentaire avant la transition (millisecondes)
+        <span style="color:var(--muted);font-weight:400">
+          Une fois le décompte à 0 (ou la slide arrivée à échéance), le média reste affiché
+          ce délai avant que le fondu vers la slide suivante ne commence.
+        </span>
+      </label>
+      <input type="number" name="transition_extra_delay_ms" min="0" max="600000"
+             value="{{ slideshow_settings.transition_extra_delay_ms }}" style="max-width:140px">
+    </div>
+
     <div class="field-row">
       <div class="field field-half">
         <label>Police</label>

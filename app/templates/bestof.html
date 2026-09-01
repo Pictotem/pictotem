@@ -208,6 +208,14 @@
   let idx = 0;
   let current = 'A';
   let settings = { delay: 5, order: 'chrono', refreshInterval: 300 };
+  // Délai supplémentaire avant CHAQUE transition (voir /admin/slideshow
+  // -> Paramètres, réglable, 500ms par défaut) : une fois le décompte
+  // tombe à 0 (ou la vidéo/l'image arrivée à échéance), le média reste
+  // affiché tel quel encore transitionExtraDelayMs avant que le fondu
+  // vers la slide suivante ne s'engage -- voir showNext()/
+  // showForcedPromo() plus bas, qui l'ajoutent à CROSSFADE_MS + la durée
+  // de la slide pour programmer `advance`.
+  let transitionExtraDelayMs = 500;
   let promoPages = [];
   let showMediaId = false;
   // Style du cartouche ID média (voir #slideMediaId ci-dessus et
@@ -570,21 +578,20 @@
   // encore visible à l'écran -- c'est le désync signalé. Le badge reste
   // masqué pendant ce délai (aucune valeur affichée n'aurait de sens)
   // plutôt que de garder affichée la dernière valeur de la slide
-  // précédente.
+  // précédente. `durationMs` est utilisé PLEIN (pas réduit) : le fondu
+  // est désormais absorbé dans la durée totale programmée par
+  // showNext()/showForcedPromo() (CROSSFADE_MS + durationMs +
+  // transitionExtraDelayMs), donc la valeur affichée correspond
+  // exactement au délai réglé côté admin, sans réduction de fait.
   function startCountdownFixedDelayed(durationMs) {
     stopCountdown();
     const el = document.getElementById('slideCountdown');
     if (el) el.classList.add('hidden');
     if (!countdownEnabled) return;
-    // Durée réduite du délai déjà écoulé, pour que le décompte atteigne 0
-    // pile au même instant que le minuteur d'avancement (`advance`,
-    // programmé lui SANS délai sur la durée COMPLÈTE -- inchangé, pour ne
-    // pas décaler le rythme réel du diaporama réglé depuis l'admin).
-    const startDelay = Math.min(CROSSFADE_MS, Math.max(0, durationMs));
     countdownStartTimer = setTimeout(() => {
       countdownStartTimer = null;
-      startCountdownFixed(durationMs - startDelay);
-    }, startDelay);
+      startCountdownFixed(durationMs);
+    }, CROSSFADE_MS);
   }
 
   // Vidéo : la lecture démarre bien dès t=0 (autoplay, inchangé) -- seul
@@ -626,7 +633,11 @@
     if (slide.type === 'promo') {
       buildPromoContent(nextEl, slide.page);
       const duration = (slide.page.pause_seconds || 8) * 1000;
-      const t = setTimeout(advance, duration);
+      // Fondu d'entrée + délai supplémentaire réglable ajoutés à la durée
+      // réglée : le média reste pleinement visible pendant TOUTE cette
+      // durée (voir startCountdownFixedDelayed), le fondu et la pause
+      // avant transition s'ajoutent en plus plutôt que de la rogner.
+      const t = setTimeout(advance, CROSSFADE_MS + duration + transitionExtraDelayMs);
       cleanup = () => clearTimeout(t);
       pauseVideoEl = null;
       pauseAdvanceFn = advance;
@@ -640,10 +651,12 @@
       v.muted = true;
       v.autoplay = true;
       v.playsInline = true;
-      v.addEventListener('ended', advance);
-      v.addEventListener('error', advance);
+      let endedTimer = null;
+      const onEnded = () => { endedTimer = setTimeout(advance, transitionExtraDelayMs); };
+      v.addEventListener('ended', onEnded);
+      v.addEventListener('error', advance); // vidéo cassée : on saute tout de suite, pas de pause à attendre
       const guard = setTimeout(advance, 120_000); // sécurité 2 min max
-      cleanup = () => { clearTimeout(guard); v.pause(); };
+      cleanup = () => { clearTimeout(guard); clearTimeout(endedTimer); v.pause(); };
       nextEl.appendChild(v);
       pauseVideoEl = v;
       pauseAdvanceFn = advance;
@@ -657,7 +670,7 @@
       el.onerror = advance;
       nextEl.appendChild(el);
       const duration = settings.delay * 1000;
-      const t = setTimeout(advance, duration);
+      const t = setTimeout(advance, CROSSFADE_MS + duration + transitionExtraDelayMs);
       cleanup = () => clearTimeout(t);
       pauseVideoEl = null;
       pauseAdvanceFn = advance;
@@ -729,12 +742,13 @@
 
     let called = false;
     const advance = () => { if (!called) { called = true; endForcedPromo(); } };
-    const t = setTimeout(advance, Math.max(0, remainingMs));
+    const dur = Math.max(0, remainingMs);
+    const t = setTimeout(advance, CROSSFADE_MS + dur + transitionExtraDelayMs);
     cleanup = () => clearTimeout(t);
     pauseVideoEl = null;
     pauseAdvanceFn = advance;
-    pauseDurationMs = Math.max(0, remainingMs);
-    startCountdownFixedDelayed(Math.max(0, remainingMs));
+    pauseDurationMs = dur;
+    startCountdownFixedDelayed(dur);
 
     requestAnimationFrame(() => {
       if (fadeOutTimers[next]) { clearTimeout(fadeOutTimers[next]); fadeOutTimers[next] = null; }
@@ -796,15 +810,29 @@
     if (!paused) return;
     paused = false;
     if (pauseVideoEl) {
-      pauseVideoEl.play().catch(() => {}); // 'ended'/'error' déjà écoutés depuis showNext(), pas à reposer
-      const guard = setTimeout(pauseAdvanceFn, 120_000);
       const v = pauseVideoEl;
-      cleanup = () => { clearTimeout(guard); v.pause(); };
-      startCountdownVideo(v); // reprend sur la position de lecture réelle, déjà à jour
+      if (v.ended) {
+        // La vidéo est déjà arrivée à sa fin naturelle avant la mise en
+        // pause (pause survenue PENDANT le délai supplémentaire avant
+        // transition, voir showNext()) -- ne pas relancer sa lecture
+        // depuis le début (.play() sur une <video> terminée repart à 0),
+        // juste reprogrammer la suite du délai.
+        const t = setTimeout(pauseAdvanceFn, transitionExtraDelayMs);
+        cleanup = () => clearTimeout(t);
+      } else {
+        v.play().catch(() => {}); // 'ended'/'error' déjà écoutés depuis showNext(), pas à reposer
+        const guard = setTimeout(pauseAdvanceFn, 120_000);
+        cleanup = () => { clearTimeout(guard); v.pause(); };
+        startCountdownVideo(v); // reprend sur la position de lecture réelle, déjà à jour
+      }
     } else if (pauseAdvanceFn) {
-      const t = setTimeout(pauseAdvanceFn, pauseDurationMs || 5000);
+      // Pas de fondu à la reprise (le média est déjà pleinement visible,
+      // aucune transition ne se redéclenche) -- seul le délai
+      // supplémentaire avant la prochaine transition reste à ajouter.
+      const dur = pauseDurationMs || 5000;
+      const t = setTimeout(pauseAdvanceFn, dur + transitionExtraDelayMs);
       cleanup = () => clearTimeout(t);
-      startCountdownFixed(pauseDurationMs || 5000); // même durée COMPLÈTE que le minuteur ci-dessus, voir showNext()
+      startCountdownFixed(dur); // même durée COMPLÈTE que le minuteur ci-dessus, voir showNext()
     }
     updatePauseUI();
   }
@@ -926,6 +954,7 @@
       applyCountdownStyle();
       settings.delay = data.delay || 5;
       settings.order = data.order || settings.order;
+      transitionExtraDelayMs = data.transition_extra_delay_ms ?? transitionExtraDelayMs;
       applySlides(buildSlides(data));
       syncRemotePause(data.paused);
       syncForcedPromo(data.forced_promo);
@@ -961,6 +990,7 @@
       order:           data.order || 'chrono',
       refreshInterval: data.refresh_interval ?? 300,
     };
+    transitionExtraDelayMs = data.transition_extra_delay_ms ?? transitionExtraDelayMs;
     promoPages = data.promo_pages || [];
     showMediaId = !!data.show_media_id;
     mediaIdStyle = data.media_id_style || mediaIdStyle;

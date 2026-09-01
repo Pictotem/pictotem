@@ -6031,6 +6031,12 @@ def _slideshow_settings():
         'countdown_position':    get_setting('countdown.position', '') or 'bottom-center',
         'countdown_margin_x':    int(get_setting('countdown.margin_x', '') or '24'),
         'countdown_margin_y':    int(get_setting('countdown.margin_y', '') or '24'),
+        # Délai supplémentaire avant CHAQUE transition (voir bestof.html ->
+        # transitionExtraDelayMs) : une fois le décompte/la slide arrivés à
+        # échéance, le média reste affiché tel quel encore ce délai avant que
+        # le fondu-enchaîné vers la slide suivante ne s'engage. Indépendant de
+        # countdown_enabled -- s'applique même décompte désactivé.
+        'transition_extra_delay_ms': int(get_setting('slideshow.transition_extra_delay_ms', '500')),
     }
 
 
@@ -6116,6 +6122,7 @@ def api_bestof_slides():
         'delay':            s['delay'],
         'order':            s['order'],
         'refresh_interval': s['refresh_interval'],
+        'transition_extra_delay_ms': s['transition_extra_delay_ms'],
         'promo_pages':       _active_promo_pages_public(),
         'paused':           s['paused'],
         'forced_promo':     _forced_promo_public(),
@@ -6273,6 +6280,8 @@ def admin_slideshow_set_settings():
                 str(max(0, min(500, int(request.form.get('countdown_margin_x', '24') or '24')))))
     set_setting('countdown.margin_y',
                 str(max(0, min(500, int(request.form.get('countdown_margin_y', '24') or '24')))))
+    set_setting('slideshow.transition_extra_delay_ms',
+                str(max(0, min(600_000, int(request.form.get('transition_extra_delay_ms', '500') or '500')))))
     return _admin_block_redirect('slideshow_settings', ok='Paramètres mis à jour.')
 
 
