@@ -520,6 +520,37 @@ def init_db():
         except Exception:
             pass  # colonne déjà présente
 
+        # URL dédiée hors diaporama (v2.0.9) -- chaque page promo peut
+        # optionnellement avoir un "slug" (ex. 'info-mariage') qui la rend
+        # accessible directement via /pages/<slug> (voir promo_page_view,
+        # app.py), INDÉPENDAMMENT de sa rotation dans /bestof (page.active
+        # n'est volontairement PAS vérifié par cette route -- un lien/QR
+        # code fixe imprimé doit continuer de fonctionner même si l'admin
+        # retire la page du diaporama). Vide par défaut : aucune page
+        # existante n'obtient de nouvelle URL publique tant que l'admin ne
+        # renseigne pas ce champ explicitement (voir admin_slideshow.html ->
+        # Pages promo, et le petit formulaire "+ Nouvelle page promo").
+        # Unicité imposée SEULEMENT pour les slugs non vides (index partiel
+        # WHERE slug != '') : plusieurs pages peuvent rester sans URL
+        # dédiée (valeur '' répétée) sans jamais entrer en conflit entre
+        # elles. La résolution des collisions (suffixe -2/-3... automatique,
+        # voir _unique_promo_slug plus bas) s'appuie sur une lecture avant
+        # écriture, pas sur cette contrainte -- cet index reste le filet de
+        # sécurité final (ex. écritures concurrentes).
+        try:
+            conn.execute("ALTER TABLE promo_pages ADD COLUMN slug TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        except Exception:
+            pass  # colonne déjà présente
+        try:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_promo_pages_slug "
+                "ON promo_pages(slug) WHERE slug != ''"
+            )
+            conn.commit()
+        except Exception:
+            pass  # index déjà présent
+
         # Actif/inactif par image d'écran de veille (v2.0.8) -- permet de
         # mettre en pause une image dans la rotation de l'écran de veille
         # sans la supprimer de la bibliothèque (elle reste disponible pour
@@ -1040,6 +1071,10 @@ _PROMO_PAGE_COLUMNS = (
     # v2.0.7 : aide visuelle à l'édition uniquement (voir la migration
     # ci-dessus) -- jamais lue par _promo_page_public()/bestof.html.
     'editor_bg_color',
+    # v2.0.9 : URL dédiée hors diaporama (voir la migration ci-dessus et
+    # promo_page_view, app.py) -- validée (normalisation + unicité) côté
+    # app.py avant d'arriver ici, jamais directement depuis request.form.
+    'slug',
 )
 
 
@@ -1072,20 +1107,63 @@ def get_promo_page(page_id):
     return _promo_page_row_to_dict(row, bg_by_id)
 
 
-def create_promo_page():
+def _unique_promo_slug(conn, base_slug, exclude_page_id=None):
+    """Garantit l'unicité d'un slug de page promo (voir la migration
+    ci-dessus, index partiel unique sur slug != '') en ajoutant au besoin un
+    suffixe -2, -3... -- même principe que create_custom_font
+    (custom_fonts.family) plus bas dans ce fichier. `base_slug` déjà
+    normalisé par l'appelant (app.py, voir _normalize_promo_slug) ; une
+    chaîne vide ressort telle quelle (jamais de collision possible entre
+    pages sans URL dédiée, voir la migration)."""
+    if not base_slug:
+        return ''
+    slug = base_slug
+    suffix = 2
+    while conn.execute(
+        'SELECT 1 FROM promo_pages WHERE slug = ? AND id != ?',
+        (slug, exclude_page_id if exclude_page_id is not None else -1),
+    ).fetchone():
+        slug = f'{base_slug}-{suffix}'
+        suffix += 1
+    return slug
+
+
+def get_promo_page_by_slug(slug):
+    """Page promo par son URL dédiée (voir promo_page_view, app.py) --
+    même forme de retour que get_promo_page ci-dessus. `slug` déjà
+    normalisé par l'appelant (comparaison stricte, la colonne n'est jamais
+    en NOCASE) ; une chaîne vide ne matche jamais (voir la migration
+    ci-dessus, plusieurs pages peuvent légitimement avoir slug = '')."""
+    if not slug:
+        return None
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM promo_pages WHERE slug = ?', (slug,)).fetchone()
+        if not row:
+            return None
+        bgs = conn.execute('SELECT * FROM promo_backgrounds').fetchall()
+    bg_by_id = {b['id']: dict(b) for b in bgs}
+    return _promo_page_row_to_dict(row, bg_by_id)
+
+
+def create_promo_page(slug=''):
     """Crée une page promo vide (inactive par défaut, à compléter dans
-    l'admin) en fin de rotation (sort_order = max + 1)."""
+    l'admin) en fin de rotation (sort_order = max + 1). `slug` optionnel :
+    URL dédiée /pages/<slug> à assigner dès la création (voir
+    admin_promo_page_create, app.py, qui l'a déjà validée/normalisée --
+    unicité déjà vérifiée là-bas, mais l'index partiel unique posé par la
+    migration ci-dessus reste le filet de sécurité final)."""
     created_at = datetime.now().isoformat(timespec='seconds')
     with closing(db_conn()) as conn:
         max_order = conn.execute('SELECT COALESCE(MAX(sort_order), -1) AS m FROM promo_pages').fetchone()['m']
+        final_slug = _unique_promo_slug(conn, slug)
         cur = conn.execute("""
             INSERT INTO promo_pages(
                 active, sort_order, frequency, pause_seconds, html_content,
                 background_id, overlay_enabled, text_font, text_size, text_color,
-                effect, qr_enabled, qr_text, qr_size, qr_position, qr_color, created_at
+                effect, qr_enabled, qr_text, qr_size, qr_position, qr_color, slug, created_at
             ) VALUES (0, ?, 6, 8, '', NULL, 1, 'system-ui, "Segoe UI", sans-serif', 28, '#ffffff',
-                      'fade', 1, '', 220, 'center', '#000000', ?)
-        """, (max_order + 1, created_at))
+                      'fade', 1, '', 220, 'center', '#000000', ?, ?)
+        """, (max_order + 1, final_slug, created_at))
         conn.commit()
         return cur.lastrowid
 
@@ -1093,13 +1171,21 @@ def create_promo_page():
 def update_promo_page(page_id, **fields):
     """Met à jour uniquement les colonnes listées dans _PROMO_PAGE_COLUMNS
     parmi celles fournies (déjà validées côté app.py) ; ignore silencieusement
-    toute clé inconnue plutôt que de planter."""
+    toute clé inconnue plutôt que de planter. Cas particulier de 'slug' (URL
+    dédiée, voir la migration ci-dessus) : réunicité systématiquement ici
+    (suffixe -2/-3... au besoin, voir _unique_promo_slug) plutôt que rejetée
+    -- l'admin garde toujours la main (elle peut renommer la page pour
+    obtenir le slug exact voulu), sans jamais essuyer d'échec silencieux de
+    tout le formulaire à cause d'une seule collision sur ce champ."""
     cols = [k for k in fields if k in _PROMO_PAGE_COLUMNS]
     if not cols:
         return
-    set_clause = ', '.join(f'{c} = ?' for c in cols)
-    values = [fields[c] for c in cols] + [page_id]
     with closing(db_conn()) as conn:
+        if 'slug' in fields:
+            fields = dict(fields)
+            fields['slug'] = _unique_promo_slug(conn, fields['slug'], exclude_page_id=page_id)
+        set_clause = ', '.join(f'{c} = ?' for c in cols)
+        values = [fields[c] for c in cols] + [page_id]
         conn.execute(f'UPDATE promo_pages SET {set_clause} WHERE id = ?', values)
         conn.commit()
 

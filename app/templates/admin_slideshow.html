@@ -513,6 +513,25 @@
             <label for="active-{{ page.id }}">Page active (diffusée dans le diaporama)</label>
           </div>
 
+          <div class="field">
+            <label>URL dédiée <span style="font-weight:400;color:var(--muted)">(hors diaporama, optionnel)</span></label>
+            <div class="field-row" style="align-items:center;gap:10px;flex-wrap:wrap">
+              <span style="color:var(--muted);font-size:14px;white-space:nowrap">{{ request.host_url }}pages/</span>
+              <input type="text" name="slug" value="{{ page.slug }}" placeholder="ma-page"
+                     maxlength="80" pattern="[a-z0-9]+(-[a-z0-9]+)*" style="max-width:240px">
+              {% if page.slug %}
+              <a class="preview-link" href="{{ url_for('promo_page_view', slug=page.slug) }}" target="_blank">↗ Ouvrir cette page</a>
+              {% endif %}
+            </div>
+            <p class="upload-hint">
+              Accessible directement par lien ou QR code, indépendamment de la rotation du diaporama
+              (fonctionne même si la page est inactive ou retirée du diaporama) — minuscules,
+              chiffres et tirets uniquement (accents et espaces convertis automatiquement).
+              Laissez vide pour désactiver cette URL dédiée. En cas de doublon avec une autre
+              page promo, un suffixe (-2, -3...) est ajouté automatiquement à l'enregistrement.
+            </p>
+          </div>
+
           <div class="field-row">
             <div class="field field-third">
               <label>Ordre de passage</label>
@@ -714,6 +733,11 @@
 
     <form method="post" action="{{ url_for('admin_promo_page_create') }}" style="margin-top:8px">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="field-row" style="align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+        <span style="color:var(--muted);font-size:14px;white-space:nowrap">URL dédiée (optionnel) : {{ request.host_url }}pages/</span>
+        <input type="text" name="slug" placeholder="ma-page" maxlength="80"
+               pattern="[a-z0-9]+(-[a-z0-9]+)*" style="max-width:220px">
+      </div>
       <button class="btn-primary" type="submit">+ Nouvelle page promo</button>
     </form>
   </div>

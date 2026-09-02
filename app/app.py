@@ -78,8 +78,8 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 purge_guest_codes_first_n, generate_guest_code, regenerate_guest_codes_by_filter,
                 list_custom_fonts, create_custom_font, delete_custom_font_db,
                 list_promo_backgrounds, add_promo_background, add_promo_gradient_background,
-                delete_promo_background_db, list_promo_pages, get_promo_page, create_promo_page,
-                update_promo_page, delete_promo_page_db, move_promo_page,
+                delete_promo_background_db, list_promo_pages, get_promo_page, get_promo_page_by_slug,
+                create_promo_page, update_promo_page, delete_promo_page_db, move_promo_page,
                 list_promo_content_images, add_promo_content_image, delete_promo_content_image_db,
                 list_promo_schedules, create_promo_schedule, update_promo_schedule,
                 delete_promo_schedule)
@@ -5773,6 +5773,24 @@ def _promo_capture_library(limit: int = 60) -> list:
     ]
 
 
+def _normalize_promo_slug(raw: str) -> str:
+    """Normalise la valeur saisie pour l'URL dédiée d'une page promo
+    (/pages/<slug>, voir promo_page_view et le champ 'slug' du formulaire
+    d'édition/de création, admin_slideshow.html) en un identifiant sûr pour
+    une URL : accents retirés, minuscules, tout ce qui n'est pas
+    lettre/chiffre ASCII devient un tiret, tirets superflus/en bord
+    supprimés -- même principe que _slugify_font_family ci-dessus pour les
+    polices personnalisées. Chaîne vide en entrée (ou ne contenant aucun
+    caractère alphanumérique) -> chaîne vide en sortie, qui désactive
+    simplement l'URL dédiée pour cette page (voir _PROMO_PAGE_COLUMNS/
+    update_promo_page, db.py -- plusieurs pages peuvent avoir slug = '').
+    L'unicité (suffixe -2/-3... en cas de collision) est résolue plus loin,
+    en base, par _unique_promo_slug (db.py) -- jamais ici."""
+    normalized = unicodedata.normalize('NFKD', raw or '').encode('ascii', 'ignore').decode('ascii')
+    slug = re.sub(r'[^a-zA-Z0-9]+', '-', normalized).strip('-').lower()
+    return slug[:80].strip('-')
+
+
 def _parse_hhmm(value: str):
     """Parse une heure 'HH:MM' (valeur d'un <input type=time>, ou 'HH:MM'
     calculé côté JS pour la timeline, voir static/promo-timeline.js) en
@@ -5982,6 +6000,37 @@ def _forced_promo_public():
     # plus) dans la rotation normale -- voir le <select> de
     # blocks/slideshow_settings.html, qui liste toutes les pages promo.
     return {'page': _promo_page_public(page), 'remaining_ms': remaining_ms}
+
+
+# ── Page promo — URL dédiée hors diaporama ───────────────────────────────────
+# v2.0.9 : chaque page promo peut avoir un "slug" (voir la migration slug,
+# db.py, et le champ "URL dédiée" du formulaire, admin_slideshow.html) qui
+# la rend consultable directement sur /pages/<slug>, HORS rotation du
+# diaporama /bestof -- utile pour un QR code ou un lien affiché en dehors du
+# photobox (invitation papier, réseaux sociaux...), qui doit continuer de
+# fonctionner même si l'admin retire ensuite la page de la rotation.
+
+@app.route('/pages/<slug>')
+def promo_page_view(slug):
+    """Affiche UNE SEULE page promo en plein écran, rendue entièrement côté
+    serveur (contrairement à /bestof, qui construit la slide en JS depuis
+    /api/bestof/slides -- ici pas de rotation ni de minuteur à gérer, un
+    rendu statique suffit). page['active'] volontairement PAS vérifié : voir
+    _forced_promo_public ci-dessus, même raisonnement -- l'URL dédiée est un
+    canal de diffusion indépendant du diaporama, pas un raccourci vers son
+    état. 404 standard (pas de page promo custom pour ce slug, ou champ
+    laissé vide -- get_promo_page_by_slug renvoie toujours None pour '')."""
+    page = get_promo_page_by_slug(_normalize_promo_slug(slug))
+    if not page:
+        abort(404)
+    resp = make_response(render_template(
+        'promo_page_view.html', config=CONFIG, page=_promo_page_public(page)))
+    # Même raison que /bestof (voir bestof()) : évite qu'un navigateur garde
+    # en cache une version obsolète de la page après une modification faite
+    # depuis l'admin.
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
 
 
 # Positions possibles pour un overlay coin/centre haut/bas de l'écran --
@@ -6346,7 +6395,14 @@ def admin_promo_force_stop():
 @require_admin_auth
 @csrf_protect
 def admin_promo_page_create():
-    create_promo_page()
+    # v2.0.9 : URL dédiée /pages/<slug> optionnelle, réglable dès la
+    # création (voir le petit champ à côté de "+ Nouvelle page promo",
+    # admin_slideshow.html) -- normalisée ici, unicité (suffixe -2/-3... si
+    # besoin) résolue par create_promo_page (db.py). Laissé vide, la page
+    # créée n'a simplement aucune URL dédiée tant que l'admin n'en renseigne
+    # pas une (ici ou dans le formulaire d'édition ci-dessous).
+    slug = _normalize_promo_slug(request.form.get('slug', ''))
+    create_promo_page(slug=slug)
     return redirect(url_for('admin_slideshow', ok='Page promo créée — complétez-la ci-dessous.'))
 
 
@@ -6360,6 +6416,15 @@ def admin_promo_page_update(page_id):
     fields = {
         'active':          1 if request.form.get('active') else 0,
         'overlay_enabled': 1 if request.form.get('overlay_enabled') else 0,
+        # v2.0.9 : URL dédiée /pages/<slug>, hors rotation du diaporama
+        # (voir promo_page_view, _normalize_promo_slug ci-dessus, et le
+        # champ "URL dédiée" du formulaire, admin_slideshow.html) --
+        # toujours mise à jour (contrairement aux champs numériques
+        # ci-dessous, ignorés si absents/invalides) : un champ vidé par
+        # l'admin doit bien désactiver l'URL dédiée plutôt que de garder
+        # l'ancienne valeur. Unicité (suffixe -2/-3... si besoin) résolue
+        # par update_promo_page (db.py), jamais ici.
+        'slug':            _normalize_promo_slug(request.form.get('slug', '')),
     }
 
     raw_order = (request.form.get('sort_order') or '').strip()
