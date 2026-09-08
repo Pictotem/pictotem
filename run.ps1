@@ -40,6 +40,18 @@ Write-Log "===================================================="
 Write-Log "Lancement de Pictotem"
 
 try {
+    # config\config.toml n'est plus suivi par git (peut contenir des mots de
+    # passe reels une fois personnalise -- voir config\config.example.toml et
+    # .gitignore) : sur un premier lancement / une copie fraiche du depot, le
+    # fichier n'existe donc pas encore -- on le cree ici a partir du gabarit,
+    # une seule fois, avant meme la preparation de Python portable.
+    $configPath = Join-Path $root "config\config.toml"
+    $configExamplePath = Join-Path $root "config\config.example.toml"
+    if ((-not (Test-Path $configPath)) -and (Test-Path $configExamplePath)) {
+        Copy-Item -Path $configExamplePath -Destination $configPath
+        Write-Log "config\config.toml absent -- cree a partir de config\config.example.toml (valeurs par defaut, a personnaliser)."
+    }
+
     $pythonExe = Join-Path $root "python-embed\python.exe"
 
     if (-not (Test-Path $pythonExe)) {

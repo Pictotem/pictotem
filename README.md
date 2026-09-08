@@ -16,7 +16,8 @@ Application pour borne pictotem : caméra USB/webcam, interface plein écran loc
 - `python-embed\` : Python + dépendances, généré au premier lancement (rien à committer/livrer manuellement)
 - `ffmpeg\` : ffmpeg.exe (+ ffprobe.exe si présent), généré au premier lancement
 - `app/` : code source Flask (templates, static, logique)
-- `config/config.toml` : configuration principale
+- `config/config.toml` : configuration principale (mots de passe, caméra, imprimante...) — non suivi par git (voir `.gitignore`), créé automatiquement au premier lancement de `run.bat` à partir de `config/config.example.toml` s'il n'existe pas encore
+- `config/config.example.toml` : gabarit de configuration sans secrets (valeurs par défaut), suivi par git — sert de référence et de point de départ pour `config.toml`
 - `config/message.txt` : message post-capture
 - `data/` : base de données, photos, vidéos, emails, exports (généré au premier lancement)
 - `pack/` (optionnel) : pack de cadres/accueil/démarrage chargé automatiquement à chaque lancement — voir « Pack de démarrage » ci-dessous
@@ -125,7 +126,7 @@ cd app
 Flask sert toujours une vraie interface HTTP normale en arrière-plan (la fenêtre native n'est qu'un client parmi d'autres) : vous pouvez donc aussi ouvrir `http://127.0.0.1/` dans un navigateur classique en parallèle si vous préférez ses outils de développement.
 
 ## Mise à jour
-`update.bat` (racine du dossier) automatise la mise à jour depuis GitHub : il arrête Pictotem s'il tourne, réinitialise le dossier sur la dernière version de la branche `main` (`git fetch` + `git reset --hard origin/main`, **sans jamais s'arrêter sur un message de conflit, quel que soit l'état local**), puis relance l'application via `run.bat`. Le détail de chaque étape est journalisé dans `logs\update.log`. `config\config.toml` (mots de passe, caméra, imprimante, ports...) fait exception : il est mis de côté avant la réinitialisation puis restauré juste après, donc **vos réglages locaux ne sont jamais écrasés** — si le fichier a changé entre-temps sur GitHub (nouvelle option ajoutée, etc.), comparez-le à l'occasion avec la version du dépôt pour la récupérer manuellement. Les dossiers non suivis par git (`data\`, `logs\`, `python-embed\`, `ffmpeg\` — voir `.gitignore`) ne sont de toute façon jamais affectés.
+`update.bat` (racine du dossier) automatise la mise à jour depuis GitHub : il arrête Pictotem s'il tourne, réinitialise le dossier sur la dernière version de la branche `main` (`git fetch` + `git reset --hard origin/main`, **sans jamais s'arrêter sur un message de conflit, quel que soit l'état local**), puis relance l'application via `run.bat`. Le détail de chaque étape est journalisé dans `logs\update.log`. `config\config.toml` (mots de passe, caméra, imprimante, ports...) fait exception : il est mis de côté avant la réinitialisation puis restauré juste après, donc **vos réglages locaux ne sont jamais écrasés** — si de nouvelles options ont été ajoutées entre-temps (voir `config/config.example.toml`, suivi par git et mis à jour avec le dépôt), comparez-le à l'occasion avec ce gabarit pour les récupérer manuellement. Les dossiers non suivis par git (`data\`, `logs\`, `python-embed\`, `ffmpeg\` — voir `.gitignore`) ne sont de toute façon jamais affectés.
 
 ## URLs
 - Borne locale : `http://127.0.0.1/` (ou `http://127.0.0.1:8080/` si le port 80 est indisponible)
