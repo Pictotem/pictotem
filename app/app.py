@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+import random
 import re
 import secrets
 import shutil
@@ -85,9 +86,13 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 delete_promo_schedule)
 from db import (list_retrospective_photos, get_retrospective_photo, add_retrospective_photo,
                 set_retrospective_photo_active, update_retrospective_photo_label,
+                update_retrospective_photo_text,
                 delete_retrospective_photo_db, list_retrospective_schedules,
                 add_retrospective_schedule, update_retrospective_schedule,
-                delete_retrospective_schedule_db)
+                delete_retrospective_schedule_db,
+                list_retrospective_backgrounds, get_retrospective_background,
+                add_retrospective_background, set_retrospective_background_active,
+                delete_retrospective_background_db)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, generate_qr_png_custom,
                    get_network_info, is_autostart_enabled, make_thumb, message_text,
@@ -6123,6 +6128,13 @@ _RETROSPECTIVE_SORTS = [
     ('alpha_desc', 'Alphabétique (Z \u2192 A)'),
 ]
 
+# Fonds d'écran de la Rétrospective (voir retrospective_backgrounds, db.py) :
+# images génériques (pas des photos de visiteurs) -- servies directement
+# depuis static/, comme les autres bibliothèques d'assets d'habillage
+# (SCREENSAVER_DIR, MEDIA_ID_BADGE_DIR...), contrairement à RETROSPECTIVE_DIR
+# ci-dessus (photos potentiellement personnelles, accès authentifié).
+RETROSPECTIVE_BG_DIR = BASE_DIR / 'app' / 'static' / 'retrospective_bg'
+
 
 def _retrospective_settings():
     return {
@@ -6139,6 +6151,32 @@ def _retrospective_settings():
         # uploads invités dans /bestof pour ne diffuser que ses photos (voir
         # api_bestof_slides()).
         'exclusive':         get_setting('retrospective.exclusive', '0') == '1',
+    }
+
+
+# Style du cartouche « Texte » affiché sur /bestof pour chaque photo de la
+# Rétrospective qui en porte un (voir retrospective_photos.text, db.py) --
+# réglage global, appliqué à toutes les photos, même principe que le
+# cartouche ID média (_media_id_settings ci-dessus) mais avec une taille de
+# cartouche FIXE explicite (largeur x hauteur, plutôt qu'un ajustement
+# automatique à la largeur du texte) : demandé tel quel, un texte plus long
+# que le cartouche est simplement tronqué (voir #slideRetroText,
+# bestof.html). Positions partagées avec le cartouche ID média/décompte,
+# voir _BADGE_POSITIONS ci-dessous.
+def _retrospective_text_style_settings():
+    return {
+        'show':          get_setting('retrospective.text_show', '0') == '1',
+        'font':          get_setting('retrospective.text_font', '') or _PROMO_FONTS[0][0],
+        'font_size':     int(get_setting('retrospective.text_font_size', '') or '22'),
+        'text_color':    get_setting('retrospective.text_color', '') or '#ffffff',
+        'bg_color':      get_setting('retrospective.text_bg_color', '') or '#000000',
+        'cartouche_width':  int(get_setting('retrospective.text_cartouche_width', '') or '480'),
+        'cartouche_height': int(get_setting('retrospective.text_cartouche_height', '') or '110'),
+        'position':      get_setting('retrospective.text_position', '') or 'bottom-center',
+        'margin_top':    int(get_setting('retrospective.text_margin_top', '') or '24'),
+        'margin_bottom': int(get_setting('retrospective.text_margin_bottom', '') or '24'),
+        'margin_left':   int(get_setting('retrospective.text_margin_left', '') or '24'),
+        'margin_right':  int(get_setting('retrospective.text_margin_right', '') or '24'),
     }
 
 
@@ -6193,6 +6231,7 @@ def api_bestof_slides():
     s = _slideshow_settings()
     tags_cfg = _tags_settings()
     media_id_cfg = _media_id_settings()
+    retro_text_style = _retrospective_text_style_settings()
 
     # Construire la requête captures
     conditions, params = ['1=1'], []
@@ -6259,8 +6298,20 @@ def api_bestof_slides():
     retro_photos = []
     if retro_cfg['enabled']:
         rs = _retrospective_settings()
+        # Fond d'écran : tiré au sort à chaque rafraîchissement complet parmi
+        # les fonds actifs (voir retrospective_backgrounds, db.py), affiché
+        # en plein écran DERRIÈRE la photo (object-fit: contain, voir
+        # showNext() dans bestof.html) -- '' si aucun fond actif, comportement
+        # inchangé (fond noir uni, comme les autres slides).
+        bg_urls = [url_for('static', filename='retrospective_bg/' + b['filename'])
+                   for b in list_retrospective_backgrounds(active_only=True)]
         retro_photos = [
-            {'type': 'retro', 'url': url_for('media_retrospective', filename=p['filename'])}
+            {
+                'type': 'retro',
+                'url':  url_for('media_retrospective', filename=p['filename']),
+                'text': p.get('text') or '',
+                'bg_url': random.choice(bg_urls) if bg_urls else '',
+            }
             for p in list_retrospective_photos(
                 sort=rs['sort'], active_only=True,
                 filter_date_from=rs['filter_date_from'], filter_date_to=rs['filter_date_to'],
@@ -6290,6 +6341,8 @@ def api_bestof_slides():
         'forced_promo':     _forced_promo_public(),
         'retro':            retro_cfg,
         'retro_photos':     retro_photos,
+        'show_retro_text':  retro_text_style['show'],
+        'retro_text_style': retro_text_style,
         'show_media_id':    media_id_cfg['show_on_bestof'],
         'media_id_style':   {
             'font':          media_id_cfg['font'],
@@ -6800,6 +6853,7 @@ def admin_retrospective():
         filter_date_from=s['filter_date_from'], filter_date_to=s['filter_date_to'],
         filter_alpha_from=s['filter_alpha_from'], filter_alpha_to=s['filter_alpha_to'],
     )
+    backgrounds = list_retrospective_backgrounds()
     return render_template(
         'admin_retrospective.html', config=CONFIG,
         blocks=blocks, current_page='retrospective', admin_pages=_admin_all_pages(),
@@ -6808,6 +6862,10 @@ def admin_retrospective():
         photos=photos, active_count=sum(1 for p in photos if p['active']),
         schedules=list_retrospective_schedules(),
         is_live=_retrospective_is_live(),
+        backgrounds=backgrounds, active_bg_count=sum(1 for b in backgrounds if b['active']),
+        text_style=_retrospective_text_style_settings(),
+        text_fonts=_PROMO_FONTS, text_positions=_BADGE_POSITIONS,
+        charte_colors=list_charte_colors(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -6834,6 +6892,56 @@ def admin_retrospective_set_settings():
     set_setting('retrospective.filter_alpha_from', request.form.get('filter_alpha_from', '').strip()[:1].upper())
     set_setting('retrospective.filter_alpha_to', request.form.get('filter_alpha_to', '').strip()[:1].upper())
     return redirect(url_for('admin_retrospective', ok='Paramètres mis à jour.'))
+
+
+def _clamp_int(raw, default, lo, hi):
+    try:
+        v = int((raw or '').strip())
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, v))
+
+
+_HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+@app.route('/admin/retrospective/text-style', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_set_text_style():
+    """Apparence du cartouche « Texte » affiché sur /bestof pour chaque photo
+    de la Rétrospective qui en porte un (voir _retrospective_text_style_settings()
+    ci-dessus, #slideRetroText/applyRetroTextStyle() dans bestof.html) --
+    formulaire séparé de admin_retrospective_set_settings ci-dessus (réglages
+    de diffusion), même principe que /admin/tags -> ID unique par média."""
+    set_setting('retrospective.text_show', '1' if request.form.get('show') else '0')
+    font = request.form.get('font', '')
+    if font in dict(_PROMO_FONTS):
+        set_setting('retrospective.text_font', font)
+    set_setting('retrospective.text_font_size',
+                str(_clamp_int(request.form.get('font_size'), 22, 8, 200)))
+    text_color = request.form.get('text_color', '').strip()
+    if _HEX_COLOR_RE.match(text_color):
+        set_setting('retrospective.text_color', text_color)
+    bg_color = request.form.get('bg_color', '').strip()
+    if _HEX_COLOR_RE.match(bg_color):
+        set_setting('retrospective.text_bg_color', bg_color)
+    set_setting('retrospective.text_cartouche_width',
+                str(_clamp_int(request.form.get('cartouche_width'), 480, 40, 1900)))
+    set_setting('retrospective.text_cartouche_height',
+                str(_clamp_int(request.form.get('cartouche_height'), 110, 20, 1000)))
+    position = request.form.get('position', '')
+    if position in dict(_BADGE_POSITIONS):
+        set_setting('retrospective.text_position', position)
+    set_setting('retrospective.text_margin_top',
+                str(_clamp_int(request.form.get('margin_top'), 24, 0, 500)))
+    set_setting('retrospective.text_margin_bottom',
+                str(_clamp_int(request.form.get('margin_bottom'), 24, 0, 500)))
+    set_setting('retrospective.text_margin_left',
+                str(_clamp_int(request.form.get('margin_left'), 24, 0, 500)))
+    set_setting('retrospective.text_margin_right',
+                str(_clamp_int(request.form.get('margin_right'), 24, 0, 500)))
+    return redirect(url_for('admin_retrospective', ok='Apparence du texte mise à jour.'))
 
 
 @app.route('/admin/retrospective/upload', methods=['POST'])
@@ -6889,6 +6997,20 @@ def admin_retrospective_rename(photo_id):
     return redirect(url_for('admin_retrospective', ok='Nom mis à jour.'))
 
 
+@app.route('/admin/retrospective/<int:photo_id>/text', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_set_photo_text(photo_id):
+    """Légende libre affichée en cartouche sur /bestof pour CETTE photo (voir
+    retrospective_photos.text, db.py, et 'Apparence du texte' plus haut pour
+    le style global partagé par toutes les photos)."""
+    if not get_retrospective_photo(photo_id):
+        return redirect(url_for('admin_retrospective', err='Photo introuvable.'))
+    text = request.form.get('text', '').strip()[:300]
+    update_retrospective_photo_text(photo_id, text)
+    return redirect(url_for('admin_retrospective', ok='Texte mis à jour.'))
+
+
 @app.route('/admin/retrospective/<int:photo_id>/delete', methods=['POST'])
 @require_admin_auth
 @csrf_protect
@@ -6900,6 +7022,60 @@ def admin_retrospective_delete(photo_id):
             (THUMBS_DIR / item['thumb_filename']).unlink(missing_ok=True)
         return redirect(url_for('admin_retrospective', ok='Photo supprimée.'))
     return redirect(url_for('admin_retrospective', err='Photo introuvable.'))
+
+
+# ── Rétrospective — fonds d'écran ────────────────────────────────────────────
+# CRUD (upload en masse, actif/inactif, suppression) -- pas de renommage, ces
+# fonds sont identifiés par leur vignette dans l'admin (voir
+# retrospective_backgrounds, db.py, et RETROSPECTIVE_BG_DIR ci-dessus).
+
+@app.route('/admin/retrospective/background/upload', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_background_upload():
+    files = [f for f in request.files.getlist('backgrounds') if f and f.filename]
+    if not files:
+        return redirect(url_for('admin_retrospective', err='Aucun fichier sélectionné.'))
+    RETROSPECTIVE_BG_DIR.mkdir(parents=True, exist_ok=True)
+    added, skipped = 0, 0
+    for file in files:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in _RETROSPECTIVE_ALLOWED_EXT:
+            skipped += 1
+            continue
+        stamp = current_stamp()
+        unique = secrets.token_hex(4)
+        safe = f'retro-bg-{stamp}-{unique}{ext}'
+        file.save(str(RETROSPECTIVE_BG_DIR / safe))
+        add_retrospective_background(safe)
+        added += 1
+    msg = f'{added} fond(s) ajouté(s).' if added else 'Aucun fond ajouté.'
+    if skipped:
+        msg += f' {skipped} fichier(s) ignoré(s) (format non supporté).'
+    return redirect(url_for('admin_retrospective', ok=msg))
+
+
+@app.route('/admin/retrospective/background/<int:bg_id>/toggle', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_background_toggle(bg_id):
+    item = get_retrospective_background(bg_id)
+    if not item:
+        return redirect(url_for('admin_retrospective', err='Fond introuvable.'))
+    set_retrospective_background_active(bg_id, not item['active'])
+    return redirect(url_for('admin_retrospective',
+                            ok=('Fond réactivé.' if not item['active'] else 'Fond désactivé.')))
+
+
+@app.route('/admin/retrospective/background/<int:bg_id>/delete', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_background_delete(bg_id):
+    item = delete_retrospective_background_db(bg_id)
+    if item:
+        (RETROSPECTIVE_BG_DIR / item['filename']).unlink(missing_ok=True)
+        return redirect(url_for('admin_retrospective', ok='Fond supprimé.'))
+    return redirect(url_for('admin_retrospective', err='Fond introuvable.'))
 
 
 @app.route('/admin/retrospective/schedule/create', methods=['POST'])

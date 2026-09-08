@@ -82,6 +82,22 @@
       font-weight: 700; backdrop-filter: blur(4px);
       border: 1px solid rgba(255,255,255,.15);
     }
+    /* Cartouche « Texte » de la photo Rétrospective en cours (voir
+       retrospective_photos.text, /admin/retrospective → Apparence du texte),
+       visible uniquement sur les slides type 'retro' qui en portent un.
+       Taille FIXE (largeur/hauteur, contrairement aux autres cartouches qui
+       s'ajustent au contenu) -- police/couleurs/taille/position/marges
+       entièrement réglables depuis l'admin (voir applyRetroTextStyle() plus
+       bas, JS), seules les propriétés indépendantes des réglages restent en
+       dur ici. */
+    #slideRetroText {
+      position: absolute; z-index: 5;
+      display: flex; align-items: center; justify-content: center;
+      text-align: center; overflow: hidden; padding: 10px 16px;
+      border-radius: 14px; font-weight: 600; line-height: 1.25;
+      backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,.15);
+    }
+    #slideRetroText.hidden { display: none; }
 
     /* Bouton pause : fige le diaporama sur la slide en cours (voir
        pauseSlideshow/resumeSlideshow ci-dessous) -- coin haut-droit, seul
@@ -197,6 +213,7 @@
   <div id="slideBadge" class="hidden">Invité</div>
   <div id="slideMediaId" class="hidden"></div>
   <div id="slideTags" class="hidden"></div>
+  <div id="slideRetroText" class="hidden"></div>
   <div id="slideCountdown" class="hidden"></div>
   <button id="pauseBtn" type="button" aria-label="Mettre en pause" title="Pause (espace)">❚❚</button>
   <div id="empty" style="display:none">Aucun média à afficher.</div>
@@ -232,6 +249,18 @@
   };
   let showTags = false;
   let tagsStyle = { font: 'system-ui, sans-serif', bg_color: '#0d8b8f', text_color: '#ffffff', font_size: 14 };
+  // Cartouche « Texte » de la Rétrospective (voir #slideRetroText ci-dessus
+  // et applyRetroTextStyle() plus bas) : réglé depuis /admin/retrospective
+  // → Apparence du texte, même principe que mediaIdStyle ci-dessus mais
+  // avec une taille de cartouche FIXE (cartouche_width/height, plutôt qu'un
+  // badge_size auto-ajusté). Défauts = valeurs par défaut de
+  // _retrospective_text_style_settings() (app.py).
+  let showRetroText = false;
+  let retroTextStyle = {
+    font: 'system-ui, sans-serif', font_size: 22, text_color: '#ffffff', bg_color: '#000000',
+    cartouche_width: 480, cartouche_height: 110, position: 'bottom-center',
+    margin_top: 24, margin_bottom: 24, margin_left: 24, margin_right: 24,
+  };
   // Décompte en secondes (voir /admin/slideshow → Paramètres, #slideCountdown
   // ci-dessus et startCountdownFixed/startCountdownVideo plus bas) : actif/
   // inactif + apparence, réglés depuis l'admin comme tagsStyle ci-dessus.
@@ -517,6 +546,38 @@
     }
   }
 
+  // ── Style du cartouche « Texte » Rétrospective (voir #slideRetroText
+  // ci-dessus et /admin/retrospective → Apparence du texte) ──────────────
+  // Même schéma position + 4 marges indépendantes que applyMediaIdStyle()
+  // ci-dessus, mais taille de cartouche FIXE (largeur ET hauteur réglées
+  // explicitement, pas d'auto-ajustement au texte) : un texte trop long
+  // pour y tenir est simplement tronqué (overflow: hidden, voir CSS).
+  function applyRetroTextStyle() {
+    const el = document.getElementById('slideRetroText');
+    if (!el) return;
+    const st = retroTextStyle;
+    el.style.fontFamily = st.font;
+    el.style.fontSize = st.font_size + 'px';
+    el.style.color = st.text_color;
+    el.style.backgroundColor = st.bg_color;
+    el.style.width = st.cartouche_width + 'px';
+    el.style.height = st.cartouche_height + 'px';
+
+    el.style.top = el.style.bottom = el.style.left = el.style.right = '';
+    el.style.transform = '';
+    const pos = st.position || 'bottom-center';
+    if (pos.startsWith('top')) el.style.top = st.margin_top + 'px';
+    else el.style.bottom = st.margin_bottom + 'px';
+    if (pos.endsWith('left')) {
+      el.style.left = st.margin_left + 'px';
+    } else if (pos.endsWith('right')) {
+      el.style.right = st.margin_right + 'px';
+    } else {
+      el.style.left = '50%';
+      el.style.transform = 'translateX(-50%)';
+    }
+  }
+
   // ── Décompte en secondes (voir /admin/slideshow → Paramètres) ──────────
   // Overlay affiché sur CHAQUE slide (photo, vidéo, page promo -- y compris
   // forcée hors cycle), montrant le temps restant réellement affiché pour
@@ -670,6 +731,20 @@
     const nextEl = document.getElementById('slide' + next);
 
     nextEl.className = 'slide' + (slide.type === 'promo' ? ` slide-promo effect-${slide.page.effect || 'fade'}` : '');
+    // Fond plein écran derrière la photo (voir retrospective_backgrounds,
+    // /admin/retrospective → Fonds d'écran) : uniquement pour les slides
+    // 'retro' qui en tirent un (voir api_bestof_slides, app.py) -- reset
+    // systématique ici pour ne jamais laisser le fond d'une slide retro
+    // précédente sur nextEl, réutilisé en alternance (A/B) par tous les
+    // autres types de slide.
+    nextEl.style.backgroundImage = '';
+    nextEl.style.backgroundSize = '';
+    nextEl.style.backgroundPosition = '';
+    if (slide.type === 'retro' && slide.bg_url) {
+      nextEl.style.backgroundImage = `url("${slide.bg_url}")`;
+      nextEl.style.backgroundSize = 'cover';
+      nextEl.style.backgroundPosition = 'center';
+    }
 
     let called = false;
     const advance = () => { if (!called) { called = true; showNext(); } };
@@ -763,6 +838,16 @@
         tagsBox.classList.add('hidden');
       }
     }
+
+    const retroTextEl = document.getElementById('slideRetroText');
+    if (retroTextEl) {
+      if (slide.type === 'retro' && showRetroText && slide.text) {
+        retroTextEl.textContent = slide.text;
+        retroTextEl.classList.remove('hidden');
+      } else {
+        retroTextEl.classList.add('hidden');
+      }
+    }
   }
 
   // ── Affichage forcé hors cycle ────────────────────────────────────────
@@ -782,6 +867,9 @@
     const curEl  = document.getElementById('slide' + current);
     const nextEl = document.getElementById('slide' + next);
     nextEl.className = `slide slide-promo effect-${page.effect || 'fade'}`;
+    nextEl.style.backgroundImage = '';
+    nextEl.style.backgroundSize = '';
+    nextEl.style.backgroundPosition = '';
     buildPromoContent(nextEl, page);
 
     let called = false;
@@ -813,6 +901,8 @@
     if (idBadge) idBadge.classList.add('hidden');
     const tagsBox = document.getElementById('slideTags');
     if (tagsBox) tagsBox.classList.add('hidden');
+    const retroTextEl = document.getElementById('slideRetroText');
+    if (retroTextEl) retroTextEl.classList.add('hidden');
   }
 
   // Fin naturelle de l'affichage forcé (durée écoulée) : reprend le cycle
@@ -993,6 +1083,9 @@
       showMediaId = !!data.show_media_id;
       mediaIdStyle = data.media_id_style || mediaIdStyle;
       applyMediaIdStyle();
+      showRetroText = !!data.show_retro_text;
+      retroTextStyle = data.retro_text_style || retroTextStyle;
+      applyRetroTextStyle();
       showTags = !!data.show_tags;
       tagsStyle = data.tags_style || tagsStyle;
       countdownEnabled = !!(data.countdown && data.countdown.enabled);
@@ -1056,6 +1149,9 @@
     showMediaId = !!data.show_media_id;
     mediaIdStyle = data.media_id_style || mediaIdStyle;
     applyMediaIdStyle();
+    showRetroText = !!data.show_retro_text;
+    retroTextStyle = data.retro_text_style || retroTextStyle;
+    applyRetroTextStyle();
     showTags = !!data.show_tags;
     tagsStyle = data.tags_style || tagsStyle;
     countdownEnabled = !!(data.countdown && data.countdown.enabled);

@@ -655,6 +655,37 @@ def init_db():
         conn.execute('CREATE INDEX IF NOT EXISTS idx_retrospective_photos_created_at ON retrospective_photos(created_at)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_retrospective_photos_label      ON retrospective_photos(label)')
 
+        # Texte libre par photo (v2.1) : légende affichée en cartouche sur
+        # /bestof (voir _retrospective_text_style_settings() / api_bestof_slides
+        # dans app.py) -- distinct de 'label' ci-dessus, qui ne sert qu'au
+        # tri/filtre alphabétique côté admin et n'est jamais montré sur
+        # /bestof. Vide par défaut : aucune photo existante n'affiche de
+        # texte tant que l'admin ne le renseigne pas explicitement.
+        try:
+            conn.execute("ALTER TABLE retrospective_photos ADD COLUMN text TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        except Exception:
+            pass  # colonne déjà présente
+
+        # Fonds d'écran (v2.1) : bibliothèque d'images utilisées comme fond
+        # plein écran derrière les photos de la Rétrospective sur /bestof
+        # (object-fit: contain laisse des bandes vides sinon, voir
+        # api_bestof_slides/showNext() dans bestof.html). CRUD depuis
+        # /admin/retrospective, même principe actif/inactif que
+        # retrospective_photos ci-dessus -- un fond inactif est exclu du
+        # tirage sans être supprimé. Pas de champ 'label' éditable (identifié
+        # par sa vignette dans l'admin) ni de tri particulier : l'ordre
+        # d'ajout suffit.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS retrospective_backgrounds ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "filename TEXT NOT NULL, "
+            "active INTEGER NOT NULL DEFAULT 1, "
+            "created_at TEXT NOT NULL"
+            ")"
+        )
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_retrospective_backgrounds_active ON retrospective_backgrounds(active)')
+
         # Créneaux de programmation (diffusion automatique de la Rétrospective
         # restreinte à des plages date/heure) : liste à CRUD complet depuis
         # /admin/retrospective. Aucun créneau = pas de restriction horaire
@@ -2264,6 +2295,15 @@ def update_retrospective_photo_label(photo_id, label):
         conn.commit()
 
 
+def update_retrospective_photo_text(photo_id, text):
+    """Légende libre affichée en cartouche sur /bestof (voir
+    _retrospective_text_style_settings(), app.py) -- distincte de 'label'
+    ci-dessus, qui reste réservé au tri/filtre alphabétique admin."""
+    with closing(db_conn()) as conn:
+        conn.execute('UPDATE retrospective_photos SET text = ? WHERE id = ?', (text, photo_id))
+        conn.commit()
+
+
 def delete_retrospective_photo_db(photo_id):
     with closing(db_conn()) as conn:
         row = conn.execute('SELECT * FROM retrospective_photos WHERE id = ?', (photo_id,)).fetchone()
@@ -2271,6 +2311,55 @@ def delete_retrospective_photo_db(photo_id):
             return None
         item = dict(row)
         conn.execute('DELETE FROM retrospective_photos WHERE id = ?', (photo_id,))
+        conn.commit()
+    return item
+
+
+# ── Rétrospective — fonds d'écran ────────────────────────────────────────────
+# Bibliothèque d'images utilisées comme fond plein écran derrière les photos
+# de la Rétrospective sur /bestof (voir retrospective_backgrounds, migration
+# ci-dessus, et api_bestof_slides/showNext() dans app.py/bestof.html).
+
+def list_retrospective_backgrounds(active_only=False):
+    sql = 'SELECT * FROM retrospective_backgrounds'
+    if active_only:
+        sql += ' WHERE active = 1'
+    sql += ' ORDER BY created_at DESC'
+    with closing(db_conn()) as conn:
+        rows = conn.execute(sql).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_retrospective_background(bg_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM retrospective_backgrounds WHERE id = ?', (bg_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_retrospective_background(filename):
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            'INSERT INTO retrospective_backgrounds(filename, active, created_at) VALUES(?,1,?)',
+            (filename, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def set_retrospective_background_active(bg_id, active):
+    with closing(db_conn()) as conn:
+        conn.execute('UPDATE retrospective_backgrounds SET active = ? WHERE id = ?', (1 if active else 0, bg_id))
+        conn.commit()
+
+
+def delete_retrospective_background_db(bg_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM retrospective_backgrounds WHERE id = ?', (bg_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        conn.execute('DELETE FROM retrospective_backgrounds WHERE id = ?', (bg_id,))
         conn.commit()
     return item
 

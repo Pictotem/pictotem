@@ -81,6 +81,27 @@
     }
     .size-btn:hover { border-color: var(--accent); color: var(--text); }
     .size-btn.active { background: var(--accent); border-color: transparent; color: #000; }
+
+    /* Couleurs présélectionnées (charte graphique / DA, voir /admin/charte) */
+    .da-swatches { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .da-swatch {
+      width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border);
+      cursor: pointer; padding: 0;
+    }
+    .da-swatch:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .da-swatches-hint { font-size: 11px; color: var(--muted); width: 100%; margin-top: 2px; }
+
+    /* Champ Texte par photo (légende affichée sur /bestof) */
+    .text-form { display: flex; gap: 6px; }
+    .text-form textarea {
+      flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 5px 8px; font-size: 12px;
+      font-family: inherit; resize: vertical; min-height: 40px;
+    }
+    .text-form button {
+      background: rgba(255,255,255,.06); border: 1px solid var(--border); color: var(--text);
+      border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer; align-self: flex-end;
+    }
     .img-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
                 overflow: hidden; }
     .img-card.inactive { opacity: .5; }
@@ -311,6 +332,55 @@
     </div>
   </section>
 
+  <!-- Fonds d'écran -->
+  <section class="admin-section">
+    <h2>Fonds d'écran
+      <span class="note">{{ active_bg_count }} actif(s) sur {{ backgrounds|length }} — affiché en plein écran derrière chaque photo Rétrospective sur /bestof</span>
+    </h2>
+
+    <form method="post" action="{{ url_for('admin_retrospective_background_upload') }}" enctype="multipart/form-data" style="margin-bottom:24px">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="upload-zone">
+        <label class="upload-label" for="retro-bg-input">Choisir un ou plusieurs fonds…</label>
+        <input type="file" id="retro-bg-input" name="backgrounds" multiple
+               accept=".png,.jpg,.jpeg,.webp"
+               onchange="document.getElementById('bg-upload-name').textContent = this.files.length ? this.files.length + ' fichier(s) sélectionné(s)' : ''">
+        <span id="bg-upload-name"></span>
+        <p class="upload-hint">PNG, JPG, WEBP — sélection multiple possible. Un fond actif est tiré au sort à chaque affichage d'une photo Rétrospective ; sans fond actif, le fond reste noir (comportement actuel).</p>
+        <div style="margin-top:14px">
+          <button class="btn-primary" type="submit">Ajouter</button>
+        </div>
+      </div>
+    </form>
+
+    {% if backgrounds %}
+    <div class="img-grid">
+      {% for bg in backgrounds %}
+      <div class="img-card {% if not bg.active %}inactive{% endif %}">
+        <img src="{{ url_for('static', filename='retrospective_bg/' + bg.filename) }}" alt="Fond d'écran" loading="lazy">
+        <div class="img-card-body">
+          {% if not bg.active %}<div class="img-card-badge">Inactif</div>{% endif %}
+          <span class="card-date">{{ bg.created_at | format_dt }}</span>
+          <div class="card-actions">
+            <form method="post" action="{{ url_for('admin_retrospective_background_toggle', bg_id=bg.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button class="btn-ok btn-sm" type="submit">{{ 'Désactiver' if bg.active else 'Activer' }}</button>
+            </form>
+            <form method="post" action="{{ url_for('admin_retrospective_background_delete', bg_id=bg.id) }}"
+                  onsubmit="return confirm('Supprimer définitivement ce fond ?')">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button class="btn-danger btn-sm" type="submit">Supprimer</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-hint">Aucun fond d'écran — les photos Rétrospective s'affichent sur fond noir.</p>
+    {% endif %}
+  </section>
+
   <!-- Photos -->
   <section class="admin-section">
     <h2>Photos</h2>
@@ -352,6 +422,11 @@
             <input type="text" name="label" value="{{ p.label }}" maxlength="180">
             <button type="submit">OK</button>
           </form>
+          <form method="post" action="{{ url_for('admin_retrospective_set_photo_text', photo_id=p.id) }}" class="text-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <textarea name="text" maxlength="300" placeholder="Texte affiché sur /bestof (optionnel)">{{ p.text or '' }}</textarea>
+            <button type="submit">OK</button>
+          </form>
           <span class="card-date">{{ p.created_at | format_dt }}</span>
           <div class="card-actions">
             <form method="post" action="{{ url_for('admin_retrospective_toggle', photo_id=p.id) }}">
@@ -371,6 +446,139 @@
     {% else %}
     <p class="empty-hint">Aucune photo dans la Rétrospective — ou aucune ne correspond aux filtres réglés plus haut.</p>
     {% endif %}
+  </section>
+
+  <!-- Apparence du texte -->
+  <section class="admin-section">
+    <h2>Apparence du texte <span class="note">Style commun à toutes les légendes saisies ci-dessus, affichées en cartouche sur /bestof</span></h2>
+    <div class="form-card">
+      <form method="post" action="{{ url_for('admin_retrospective_set_text_style') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+        <label class="checkbox-row">
+          <input type="checkbox" name="show" {% if text_style.show %}checked{% endif %}>
+          <span>
+            <span class="cb-label">Afficher le texte sur /bestof</span>
+            <span class="cb-desc">Seules les photos dont le champ Texte n'est pas vide affichent un cartouche.</span>
+          </span>
+        </label>
+
+        <div class="field-row">
+          <div class="field field-half">
+            <label>Police</label>
+            <select name="font" id="rt_font" onchange="retroTextUpdatePreview()">
+              {% for value, label in text_fonts %}
+              <option value="{{ value }}" {% if text_style.font == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field field-half">
+            <label>Taille du texte (px)</label>
+            <input type="number" name="font_size" id="rt_font_size" min="8" max="200"
+                   value="{{ text_style.font_size }}" style="max-width:140px" oninput="retroTextUpdatePreview()">
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field field-half">
+            <label>Couleur du texte</label>
+            <div class="color-row">
+              <input type="color" id="rt_cp_text" value="{{ text_style.text_color }}"
+                     oninput="document.getElementById('rt_text_color').value=this.value; retroTextUpdatePreview()">
+              <input type="text" id="rt_text_color" name="text_color" class="color-hex"
+                     value="{{ text_style.text_color }}" maxlength="7"
+                     oninput="document.getElementById('rt_cp_text').value=this.value; retroTextUpdatePreview()">
+            </div>
+            {% if charte_colors %}
+            <div class="da-swatches">
+              {% for c in charte_colors %}
+              <button type="button" class="da-swatch" style="background:{{ c.hex_color }}" title="{{ c.label }}"
+                      onclick="retroTextSetColor('text', '{{ c.hex_color }}')"></button>
+              {% endfor %}
+            </div>
+            <p class="da-swatches-hint">Couleurs présélectionnées (charte graphique, voir /admin/charte)</p>
+            {% endif %}
+          </div>
+          <div class="field field-half">
+            <label>Couleur du cartouche</label>
+            <div class="color-row">
+              <input type="color" id="rt_cp_bg" value="{{ text_style.bg_color }}"
+                     oninput="document.getElementById('rt_bg_color').value=this.value; retroTextUpdatePreview()">
+              <input type="text" id="rt_bg_color" name="bg_color" class="color-hex"
+                     value="{{ text_style.bg_color }}" maxlength="7"
+                     oninput="document.getElementById('rt_cp_bg').value=this.value; retroTextUpdatePreview()">
+            </div>
+            {% if charte_colors %}
+            <div class="da-swatches">
+              {% for c in charte_colors %}
+              <button type="button" class="da-swatch" style="background:{{ c.hex_color }}" title="{{ c.label }}"
+                      onclick="retroTextSetColor('bg', '{{ c.hex_color }}')"></button>
+              {% endfor %}
+            </div>
+            <p class="da-swatches-hint">Couleurs présélectionnées (charte graphique, voir /admin/charte)</p>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field field-half">
+            <label>Largeur du cartouche (px)</label>
+            <input type="number" name="cartouche_width" id="rt_cartouche_width" min="40" max="1900"
+                   value="{{ text_style.cartouche_width }}" style="max-width:140px" oninput="retroTextUpdatePreview()">
+          </div>
+          <div class="field field-half">
+            <label>Hauteur du cartouche (px)</label>
+            <input type="number" name="cartouche_height" id="rt_cartouche_height" min="20" max="1000"
+                   value="{{ text_style.cartouche_height }}" style="max-width:140px" oninput="retroTextUpdatePreview()">
+          </div>
+        </div>
+        <p class="field-hint" style="margin:-10px 0 18px">Taille fixe — un texte trop long pour y tenir est simplement tronqué.</p>
+
+        <div class="field">
+          <label>Position à l'écran</label>
+          <select name="position" style="max-width:320px">
+            {% for value, label in text_positions %}
+            <option value="{{ value }}" {% if text_style.position == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field-row">
+          <div class="field field-half">
+            <label>Marge haute (px)</label>
+            <input type="number" name="margin_top" min="0" max="500" value="{{ text_style.margin_top }}" style="max-width:140px">
+          </div>
+          <div class="field field-half">
+            <label>Marge basse (px)</label>
+            <input type="number" name="margin_bottom" min="0" max="500" value="{{ text_style.margin_bottom }}" style="max-width:140px">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field field-half">
+            <label>Marge gauche (px)</label>
+            <input type="number" name="margin_left" min="0" max="500" value="{{ text_style.margin_left }}" style="max-width:140px">
+          </div>
+          <div class="field field-half">
+            <label>Marge droite (px)</label>
+            <input type="number" name="margin_right" min="0" max="500" value="{{ text_style.margin_right }}" style="max-width:140px">
+          </div>
+        </div>
+        <p class="field-hint" style="margin-top:-6px">
+          Seules les 2 marges du côté vers lequel colle la position choisie ci-dessus s'appliquent
+          (ex. « Bas centre » : marge basse) — les 2 autres restent enregistrées, prêtes à resservir
+          si vous changez de position plus tard.
+        </p>
+
+        <div class="tags-preview-wrap">
+          <p class="tags-preview-label">Aperçu (police/taille/couleurs/taille de cartouche — position et fond d'écran visibles uniquement sur /bestof)</p>
+          <div class="tags-preview-box">
+            <span class="tag-preview-chip" id="rtPreviewChip" style="display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden">Texte de la photo</span>
+          </div>
+        </div>
+
+        <button class="btn-primary" type="submit" style="margin-top:18px">Enregistrer</button>
+      </form>
+    </div>
   </section>
 
 </div>
@@ -394,6 +602,42 @@
     var saved = 'md';
     try { saved = localStorage.getItem('retro_gallery_size') || 'md'; } catch (e) {}
     setRetroGridSize(saved);
+  })();
+</script>
+
+<script>
+  // Aperçu en direct du cartouche « Texte » (même principe que
+  // mediaIdUpdatePreview, voir blocks/tags_media_id.html) : mime police/
+  // taille/couleurs/taille de cartouche — position/marges/fond d'écran ne
+  // sont visibles que sur /bestof lui-même (voir le texte au-dessus de
+  // l'aperçu).
+  (function () {
+    function retroTextUpdatePreviewImpl() {
+      const chip = document.getElementById('rtPreviewChip');
+      const fontEl = document.getElementById('rt_font');
+      if (!chip || !fontEl) return;
+      chip.style.fontFamily = fontEl.value;
+      chip.style.fontSize = (document.getElementById('rt_font_size').value || 22) + 'px';
+      chip.style.color = document.getElementById('rt_text_color').value || '#ffffff';
+      chip.style.background = document.getElementById('rt_bg_color').value || '#000000';
+      chip.style.width = (parseInt(document.getElementById('rt_cartouche_width').value, 10) || 480) + 'px';
+      chip.style.height = (parseInt(document.getElementById('rt_cartouche_height').value, 10) || 110) + 'px';
+      chip.style.borderRadius = '14px';
+    }
+    window.retroTextUpdatePreview = retroTextUpdatePreviewImpl;
+
+    // Couleurs présélectionnées (charte graphique) : renseigne à la fois le
+    // picker et le champ hexa du champ visé ('text' ou 'bg'), même principe
+    // que charteSyncHex/charteSyncPicker (admin_charte.html).
+    window.retroTextSetColor = function (field, hex) {
+      const picker = document.getElementById('rt_cp_' + field);
+      const hexInput = document.getElementById('rt_' + field + '_color');
+      if (picker) picker.value = hex;
+      if (hexInput) hexInput.value = hex;
+      retroTextUpdatePreviewImpl();
+    };
+
+    retroTextUpdatePreviewImpl();
   })();
 </script>
 </body>
