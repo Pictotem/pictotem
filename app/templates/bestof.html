@@ -1088,11 +1088,40 @@
     return res.json();
   }
 
+  // Identité stable d'une slide, indépendante de sa position dans le
+  // tableau (voir applySlides ci-dessous) : l'URL du média pour une photo,
+  // vidéo, image intermédiaire ou photo Rétrospective, l'id de la page pour
+  // une slide promo (pas d'URL propre).
+  function slideKey(s) {
+    if (!s) return null;
+    if (s.type === 'promo') return 'promo:' + (s.page && s.page.id);
+    return (s.type || 'media') + ':' + (s.url || '');
+  }
+
   // Applique une nouvelle liste de slides sans interrompre le slide en cours.
+  // `slides` est entièrement reconstruit à chaque rafraîchissement -- pages
+  // promo et réglages Rétrospective légers toutes les 15s (voir
+  // refreshPromoPages/refreshRetrospectiveSettings plus bas), captures/
+  // images tous les slideshow.refresh_interval -- y compris quand rien de
+  // visible n'a changé. Un simple `idx % slides.length` retombait alors sur
+  // une position sans rapport avec l'ancienne dès que la liste changeait de
+  // forme (nouvelle capture insérée en cours de liste, page promo ajoutée/
+  // retirée, ordre aléatoire rebattu par buildSlides...), rejouant parfois
+  // aussitôt la photo tout juste montrée (bug remonté : des captures
+  // affichées en double à la suite). On retrouve donc la slide actuellement
+  // affichée dans la nouvelle liste par son identité stable (voir slideKey
+  // ci-dessus) et on reprend juste après elle, plutôt que sur un idx
+  // numérique devenu arbitraire.
   function applySlides(newSlides) {
     if (!newSlides.length) return; // garder la liste actuelle si vide
+    const currentKey = slides.length ? slideKey(slides[(idx - 1 + slides.length) % slides.length]) : null;
     slides = newSlides;
-    idx = idx % slides.length;
+    if (currentKey) {
+      const pos = slides.findIndex((s) => slideKey(s) === currentKey);
+      idx = pos >= 0 ? (pos + 1) % slides.length : idx % slides.length;
+    } else {
+      idx = idx % slides.length;
+    }
     if (document.getElementById('empty').style.display !== 'none') {
       document.getElementById('empty').style.display = 'none';
       showNext();
