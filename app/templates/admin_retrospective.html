@@ -68,6 +68,19 @@
     /* Grille photos */
     .img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px;
                 margin-bottom: 24px; }
+    .img-grid.size-sm { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+    .img-grid.size-md { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+    .img-grid.size-lg { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+    .size-toggle { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .size-toggle .size-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+    .size-toggle .size-group { display: flex; gap: 4px; }
+    .size-btn {
+      background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+      border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 700;
+      cursor: pointer; transition: .15s;
+    }
+    .size-btn:hover { border-color: var(--accent); color: var(--text); }
+    .size-btn.active { background: var(--accent); border-color: transparent; color: #000; }
     .img-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
                 overflow: hidden; }
     .img-card.inactive { opacity: .5; }
@@ -186,6 +199,14 @@
           <span>
             <span class="cb-label">Activer la Rétrospective dans /bestof</span>
             <span class="cb-desc">Interrupteur global. Peut être davantage restreint par une programmation (créneaux) ci-dessous.</span>
+          </span>
+        </label>
+
+        <label class="checkbox-row">
+          <input type="checkbox" name="exclusive" {% if settings.exclusive %}checked{% endif %}>
+          <span>
+            <span class="cb-label">Diffusion exclusive (masquer les captures et les uploads invités)</span>
+            <span class="cb-desc">Quand la Rétrospective est active (interrupteur ci-dessus + programmation), /bestof n'affiche plus que ses photos — aucune capture du photobox ni upload invité.</span>
           </span>
         </label>
 
@@ -311,7 +332,15 @@
     </form>
 
     {% if photos %}
-    <div class="img-grid">
+    <div class="size-toggle">
+      <span class="size-label">Taille affichage vignette</span>
+      <div class="size-group">
+        <button type="button" class="size-btn" data-size="sm" onclick="setRetroGridSize('sm')">S</button>
+        <button type="button" class="size-btn" data-size="md" onclick="setRetroGridSize('md')">M</button>
+        <button type="button" class="size-btn" data-size="lg" onclick="setRetroGridSize('lg')">L</button>
+      </div>
+    </div>
+    <div class="img-grid" id="retroGrid">
       {% for p in photos %}
       <div class="img-card {% if not p.active %}inactive{% endif %}">
         <img src="{{ url_for('media_thumb', filename=p.thumb_filename) if p.thumb_filename else url_for('media_retrospective', filename=p.filename) }}"
@@ -345,5 +374,27 @@
   </section>
 
 </div>
+
+<script>
+  // Taille des vignettes de la galerie Rétrospective — préférence
+  // d'affichage locale à cette page admin (indépendante de celle de
+  // /gallery, voir gallery.html), non liée à la diffusion dans /bestof.
+  (function () {
+    var grid = document.getElementById('retroGrid');
+    if (!grid) return;
+    function setRetroGridSize(size) {
+      ['size-sm', 'size-md', 'size-lg'].forEach(function (c) { grid.classList.remove(c); });
+      grid.classList.add('size-' + size);
+      try { localStorage.setItem('retro_gallery_size', size); } catch (e) {}
+      document.querySelectorAll('.size-btn').forEach(function (b) {
+        b.classList.toggle('active', b.dataset.size === size);
+      });
+    }
+    window.setRetroGridSize = setRetroGridSize;
+    var saved = 'md';
+    try { saved = localStorage.getItem('retro_gallery_size') || 'md'; } catch (e) {}
+    setRetroGridSize(saved);
+  })();
+</script>
 </body>
 </html>

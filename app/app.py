@@ -6134,6 +6134,11 @@ def _retrospective_settings():
         'filter_date_to':    get_setting('retrospective.filter_date_to', ''),
         'filter_alpha_from': get_setting('retrospective.filter_alpha_from', ''),
         'filter_alpha_to':   get_setting('retrospective.filter_alpha_to', ''),
+        # Diffusion exclusive : quand la Rétrospective est active (voir
+        # _retrospective_is_live()), masque les captures du photobox et les
+        # uploads invités dans /bestof pour ne diffuser que ses photos (voir
+        # api_bestof_slides()).
+        'exclusive':         get_setting('retrospective.exclusive', '0') == '1',
     }
 
 
@@ -6262,6 +6267,16 @@ def api_bestof_slides():
                 filter_alpha_from=rs['filter_alpha_from'], filter_alpha_to=rs['filter_alpha_to'],
             )
         ]
+        if rs['exclusive']:
+            # Diffusion exclusive (voir /admin/retrospective — case « Diffusion
+            # exclusive ») : la Rétrospective est active, on masque donc les
+            # captures du photobox et les uploads invités de /bestof, sans
+            # toucher aux images intermédiaires ni aux pages promo (voir
+            # insertRetro()/buildSlides() dans bestof.html : sans capture, sans
+            # image intermédiaire et sans page promo active, le diaporama
+            # retombe sur les seules photos de la Rétrospective).
+            captures = []
+            slideshow_imgs = [img for img in slideshow_imgs if img.get('source') != 'guest']
 
     return jsonify({
         'captures':         captures,
@@ -6804,6 +6819,7 @@ def admin_retrospective():
 @csrf_protect
 def admin_retrospective_set_settings():
     set_setting('retrospective.enabled', '1' if request.form.get('enabled') else '0')
+    set_setting('retrospective.exclusive', '1' if request.form.get('exclusive') else '0')
     raw_freq = (request.form.get('frequency') or '').strip()
     if raw_freq.isdigit() and int(raw_freq) > 0:
         set_setting('retrospective.frequency', raw_freq)
