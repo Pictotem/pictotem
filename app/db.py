@@ -635,6 +635,43 @@ def init_db():
         except Exception:
             logger.exception('Migration page promo v1 -> v2 échouée (ignorée, CRUD reste utilisable vide)')
 
+        # Rétrospective (tuile dédiée) : galerie de photos gérée uniquement
+        # depuis /admin/retrospective, mélangée périodiquement dans le
+        # diaporama /bestof (voir _retrospective_settings() / api_bestof_slides
+        # dans app.py). 'active' permet d'exclure une photo de la diffusion
+        # sans la supprimer ; 'label' sert au tri/filtre alphabétique (nom du
+        # fichier original par défaut, modifiable depuis l'admin).
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS retrospective_photos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            thumb_filename TEXT,
+            label TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_retrospective_photos_active     ON retrospective_photos(active)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_retrospective_photos_created_at ON retrospective_photos(created_at)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_retrospective_photos_label      ON retrospective_photos(label)')
+
+        # Créneaux de programmation (diffusion automatique de la Rétrospective
+        # restreinte à des plages date/heure) : liste à CRUD complet depuis
+        # /admin/retrospective. Aucun créneau = pas de restriction horaire
+        # (seul le réglage retrospective.enabled fait foi) — voir
+        # _retrospective_is_live() dans app.py.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS retrospective_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL DEFAULT '',
+            start_at TEXT NOT NULL,
+            end_at TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_retrospective_schedules_range ON retrospective_schedules(start_at, end_at)')
+
         conn.commit()
 
 
@@ -2160,3 +2197,121 @@ def search_media_by_tag(label):
         {'id': r['media_uid'] or None, 'capture_id': r['capture_id'], 'tag_created_at': r['tag_created_at']}
         for r in rows
     ]
+
+
+
+# ── Rétrospective (tuile dédiée) — photos ────────────────────────────────────
+
+def list_retrospective_photos(sort='date_desc', active_only=False,
+                               filter_date_from='', filter_date_to='',
+                               filter_alpha_from='', filter_alpha_to=''):
+    conditions, params = ['1=1'], []
+    if active_only:
+        conditions.append('active = 1')
+    if filter_date_from:
+        conditions.append('created_at >= ?')
+        params.append(filter_date_from)
+    if filter_date_to:
+        conditions.append('created_at <= ?')
+        params.append(filter_date_to + 'T23:59:59')
+    if filter_alpha_from:
+        conditions.append('UPPER(SUBSTR(label,1,1)) >= ?')
+        params.append(filter_alpha_from[:1].upper())
+    if filter_alpha_to:
+        conditions.append('UPPER(SUBSTR(label,1,1)) <= ?')
+        params.append(filter_alpha_to[:1].upper())
+
+    order_clause = {
+        'alpha_asc':  'label COLLATE NOCASE ASC, created_at ASC',
+        'alpha_desc': 'label COLLATE NOCASE DESC, created_at DESC',
+        'date_asc':   'created_at ASC',
+        'date_desc':  'created_at DESC',
+    }.get(sort, 'created_at DESC')
+
+    sql = f"SELECT * FROM retrospective_photos WHERE {' AND '.join(conditions)} ORDER BY {order_clause}"
+    with closing(db_conn()) as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_retrospective_photo(photo_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM retrospective_photos WHERE id = ?', (photo_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_retrospective_photo(filename, thumb_filename, label):
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            'INSERT INTO retrospective_photos(filename, thumb_filename, label, active, created_at) '
+            'VALUES(?,?,?,1,?)',
+            (filename, thumb_filename, label, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def set_retrospective_photo_active(photo_id, active):
+    with closing(db_conn()) as conn:
+        conn.execute('UPDATE retrospective_photos SET active = ? WHERE id = ?', (1 if active else 0, photo_id))
+        conn.commit()
+
+
+def update_retrospective_photo_label(photo_id, label):
+    with closing(db_conn()) as conn:
+        conn.execute('UPDATE retrospective_photos SET label = ? WHERE id = ?', (label, photo_id))
+        conn.commit()
+
+
+def delete_retrospective_photo_db(photo_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM retrospective_photos WHERE id = ?', (photo_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        conn.execute('DELETE FROM retrospective_photos WHERE id = ?', (photo_id,))
+        conn.commit()
+    return item
+
+
+# ── Rétrospective — créneaux de programmation ────────────────────────────────
+
+def list_retrospective_schedules():
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            'SELECT * FROM retrospective_schedules ORDER BY start_at ASC'
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_retrospective_schedule(label, start_at, end_at, enabled=True):
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            'INSERT INTO retrospective_schedules(label, start_at, end_at, enabled, created_at) '
+            'VALUES(?,?,?,?,?)',
+            (label, start_at, end_at, 1 if enabled else 0, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def update_retrospective_schedule(schedule_id, label, start_at, end_at, enabled=True):
+    with closing(db_conn()) as conn:
+        conn.execute(
+            'UPDATE retrospective_schedules SET label=?, start_at=?, end_at=?, enabled=? WHERE id=?',
+            (label, start_at, end_at, 1 if enabled else 0, schedule_id)
+        )
+        conn.commit()
+
+
+def delete_retrospective_schedule_db(schedule_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM retrospective_schedules WHERE id = ?', (schedule_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        conn.execute('DELETE FROM retrospective_schedules WHERE id = ?', (schedule_id,))
+        conn.commit()
+    return item

@@ -83,6 +83,11 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_promo_content_images, add_promo_content_image, delete_promo_content_image_db,
                 list_promo_schedules, create_promo_schedule, update_promo_schedule,
                 delete_promo_schedule)
+from db import (list_retrospective_photos, get_retrospective_photo, add_retrospective_photo,
+                set_retrospective_photo_active, update_retrospective_photo_label,
+                delete_retrospective_photo_db, list_retrospective_schedules,
+                add_retrospective_schedule, update_retrospective_schedule,
+                delete_retrospective_schedule_db)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, generate_qr_png_custom,
                    get_network_info, is_autostart_enabled, make_thumb, message_text,
@@ -3065,6 +3070,7 @@ _ADMIN_PAGES = [
     ('tags',        'Tags & ID média',      'admin_tags'),
     ('media',       'Médiathèque',          'admin_media'),
     ('slideshow',   'Slideshow Best Of',    'admin_slideshow'),
+    ('retrospective', 'Rétrospective',      'admin_retrospective'),
     ('screensaver', 'Écran de veille',      'admin_screensaver'),
     ('guest_uploads', 'Upload invités',     'admin_guest_uploads'),
     ('guest_codes',   'Codes invités',      'admin_guest_codes'),
@@ -3089,6 +3095,7 @@ _ADMIN_PAGE_DESCRIPTIONS = {
     'tags':           "Tags prédéfinis/libre sur les captures, ID unique recherchable et affichable",
     'media':          "Fond d'écran Windows, images intermédiaires du diaporama, images de l'écran de veille",
     'slideshow':      "Diaporama public /bestof — type, délai, ordre, dates, pages promo",
+    'retrospective':  "Galerie de photos dédiée diffusée dans le Best Of — actif/inactif, fréquence, tri, programmation",
     'screensaver':    "Diaporama plein écran après inactivité sur l'accueil — délai",
     'guest_uploads':  "Lien de partage /share, modération, quota — alimente le best-of et/ou la galerie",
     'guest_codes':    "Codes numériques associés à un texte ; détection, apparence et incrustation QR-code",
@@ -3103,7 +3110,7 @@ _ADMIN_PAGE_DESCRIPTIONS = {
 # pages de contenu pur, hors système de blocs et hors CRUD de tuiles,
 # comme pour le reste de la migration blocs.
 _ADMIN_NATIVE_ALWAYS_NONEMPTY = {
-    'texts', 'frames', 'tags', 'slideshow', 'media',
+    'texts', 'frames', 'tags', 'slideshow', 'media', 'retrospective',
     'guest_uploads', 'guest_codes', 'charte',
 }
 
@@ -6089,6 +6096,80 @@ def _slideshow_settings():
     }
 
 
+# ── Rétrospective (tuile dédiée) ─────────────────────────────────────────────
+# Galerie de photos indépendante des captures du photobox, gérée uniquement
+# depuis /admin/retrospective (CRUD photo, unitaire ou en masse). Chaque
+# photo peut être passée "inactive" pour l'exclure de la diffusion sans la
+# supprimer. Stockage dans data/ (comme les captures/uploads invités, accès
+# authentifié via /media/retrospective) et non dans static/, ces photos
+# étant potentiellement personnelles.
+#
+# Les photos actives sont insérées périodiquement dans le diaporama /bestof
+# (voir api_bestof_slides / bestof.html : insertRetro()), même principe que
+# insertPromo() ci-contre (fréquence = 1 insertion toutes les N slides
+# réelles, avec répétition de la base si besoin pour ne jamais être
+# "affamée" par un faible nombre de captures — voir le commentaire
+# d'insertPromo dans bestof.html), avec son propre délai d'affichage
+# ("temps de pause"). La diffusion peut en plus être restreinte à des
+# créneaux programmés (retrospective_schedules, CRUD complet depuis
+# l'admin) : sans créneau défini, seul le réglage 'enabled' fait foi.
+
+RETROSPECTIVE_DIR = BASE_DIR / 'data' / 'retrospective'
+_RETROSPECTIVE_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp'}
+_RETROSPECTIVE_SORTS = [
+    ('date_desc',  "Date (plus récent d'abord)"),
+    ('date_asc',   "Date (plus ancien d'abord)"),
+    ('alpha_asc',  'Alphabétique (A \u2192 Z)'),
+    ('alpha_desc', 'Alphabétique (Z \u2192 A)'),
+]
+
+
+def _retrospective_settings():
+    return {
+        'enabled':           get_setting('retrospective.enabled', '0') == '1',
+        'frequency':         max(1, int(get_setting('retrospective.frequency', '8') or '8')),
+        'delay':             max(1, int(get_setting('retrospective.delay', '5') or '5')),
+        'sort':              get_setting('retrospective.sort', 'date_desc'),
+        'filter_date_from':  get_setting('retrospective.filter_date_from', ''),
+        'filter_date_to':    get_setting('retrospective.filter_date_to', ''),
+        'filter_alpha_from': get_setting('retrospective.filter_alpha_from', ''),
+        'filter_alpha_to':   get_setting('retrospective.filter_alpha_to', ''),
+    }
+
+
+def _retrospective_schedule_active(schedules) -> bool:
+    """Sans créneau activé défini, aucune restriction horaire (True). Avec au
+    moins un créneau activé, la diffusion n'est permise que si l'instant
+    présent tombe dans l'un d'eux (comparaison lexicographique de chaînes
+    ISO, cohérente avec le reste de la base — voir slideshow.date_from/to)."""
+    slots = [sch for sch in schedules if sch['enabled']]
+    if not slots:
+        return True
+    now = datetime.now().isoformat(timespec='seconds')
+    return any(sch['start_at'] <= now <= sch['end_at'] for sch in slots)
+
+
+def _retrospective_is_live() -> bool:
+    s = _retrospective_settings()
+    if not s['enabled']:
+        return False
+    return _retrospective_schedule_active(list_retrospective_schedules())
+
+
+def _retrospective_public_data() -> dict:
+    """Réglages légers (activé effectif + fréquence + délai), interrogés à
+    cadence fixe par le kiosque déjà ouvert (voir bestof.html) pour qu'un
+    créneau programmé s'applique sans attendre slideshow.refresh_interval —
+    même principe que la logique de rafraîchissement rapide des pages promo
+    (/api/bestof/promo-pages)."""
+    s = _retrospective_settings()
+    return {
+        'enabled':   _retrospective_is_live(),
+        'frequency': s['frequency'],
+        'delay':     s['delay'],
+    }
+
+
 @app.route('/bestof')
 def bestof():
     resp = make_response(render_template('bestof.html', config=CONFIG))
@@ -6165,6 +6246,23 @@ def api_bestof_slides():
             for g in list_approved_guest_uploads()
         ]
 
+    # Rétrospective (tuile dédiée) : pool de photos actives, inséré côté
+    # client à fréquence régulière (voir insertRetro() dans bestof.html) —
+    # même principe que les pages promo. 'enabled' ici reflète déjà la
+    # programmation (créneaux horaires), voir _retrospective_public_data().
+    retro_cfg = _retrospective_public_data()
+    retro_photos = []
+    if retro_cfg['enabled']:
+        rs = _retrospective_settings()
+        retro_photos = [
+            {'type': 'retro', 'url': url_for('media_retrospective', filename=p['filename'])}
+            for p in list_retrospective_photos(
+                sort=rs['sort'], active_only=True,
+                filter_date_from=rs['filter_date_from'], filter_date_to=rs['filter_date_to'],
+                filter_alpha_from=rs['filter_alpha_from'], filter_alpha_to=rs['filter_alpha_to'],
+            )
+        ]
+
     return jsonify({
         'captures':         captures,
         'slideshow_images': slideshow_imgs,
@@ -6175,6 +6273,8 @@ def api_bestof_slides():
         'promo_pages':       _active_promo_pages_public(),
         'paused':           s['paused'],
         'forced_promo':     _forced_promo_public(),
+        'retro':            retro_cfg,
+        'retro_photos':     retro_photos,
         'show_media_id':    media_id_cfg['show_on_bestof'],
         'media_id_style':   {
             'font':          media_id_cfg['font'],
@@ -6228,6 +6328,16 @@ def api_bestof_promo_pages():
     return jsonify({'pages': _active_promo_pages_public(),
                      'paused': get_setting('slideshow.paused', '0') == '1',
                      'forced_promo': _forced_promo_public()})
+
+
+@app.route('/api/bestof/retrospective-settings')
+def api_bestof_retrospective_settings():
+    """Réglages légers (activé effectif/fréquence/délai) de la Rétrospective,
+    interrogés à cadence fixe par le kiosque déjà ouvert — même principe que
+    /api/bestof/promo-pages ci-dessus — pour qu'un créneau programmé (voir
+    /admin/retrospective) active ou désactive la diffusion sans attendre le
+    rafraîchissement complet."""
+    return jsonify(_retrospective_public_data())
 
 
 @app.route('/api/bestof/pause', methods=['POST'])
@@ -6652,6 +6762,174 @@ def admin_promo_content_image_delete(image_id):
     return redirect(url_for('admin_slideshow', err='Image introuvable.'))
 
 
+# ── Rétrospective (tuile dédiée) ─────────────────────────────────────────────
+# Tuile « Rétrospective ». Contenu CRUD (photos + créneaux de programmation),
+# hors système de blocs — même logique que « Cadres »/« Captures » : une
+# route dédiée par action plutôt qu'un dispatch par paramètre 'action', pour
+# rester cohérent avec le reste de cette version (voir admin_frame_create/
+# _edit/_delete, admin_promo_page_schedule_create/_update/_delete...).
+
+@app.route('/admin/retrospective')
+@require_admin_auth
+def admin_retrospective():
+    """Tuile « Rétrospective ». Comme « Cadres »/« Slideshow Best Of », le
+    contenu (photos + créneaux) reste hors du système de blocs — gestion de
+    contenu, pas un réglage — mais la page joue quand même le jeu des blocs
+    (voir _admin_render_blocks) pour rester une cible valide du menu
+    « Déplacer vers » et bénéficier du même chrome (nav, csrf, drag) que le
+    reste de l'admin."""
+    blocks, block_context = _admin_render_blocks('retrospective')
+    s = _retrospective_settings()
+    photos = list_retrospective_photos(
+        sort=s['sort'],
+        filter_date_from=s['filter_date_from'], filter_date_to=s['filter_date_to'],
+        filter_alpha_from=s['filter_alpha_from'], filter_alpha_to=s['filter_alpha_to'],
+    )
+    return render_template(
+        'admin_retrospective.html', config=CONFIG,
+        blocks=blocks, current_page='retrospective', admin_pages=_admin_all_pages(),
+        page_label=_admin_page_label('retrospective', 'Rétrospective'),
+        settings=s, sorts=_RETROSPECTIVE_SORTS,
+        photos=photos, active_count=sum(1 for p in photos if p['active']),
+        schedules=list_retrospective_schedules(),
+        is_live=_retrospective_is_live(),
+        alert_success=request.args.get('ok'),
+        alert_error=request.args.get('err'),
+        **block_context,
+    )
+
+
+@app.route('/admin/retrospective/settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_set_settings():
+    set_setting('retrospective.enabled', '1' if request.form.get('enabled') else '0')
+    raw_freq = (request.form.get('frequency') or '').strip()
+    if raw_freq.isdigit() and int(raw_freq) > 0:
+        set_setting('retrospective.frequency', raw_freq)
+    raw_delay = (request.form.get('delay') or '').strip()
+    if raw_delay.isdigit() and int(raw_delay) > 0:
+        set_setting('retrospective.delay', raw_delay)
+    sort_value = request.form.get('sort', 'date_desc')
+    if sort_value in dict(_RETROSPECTIVE_SORTS):
+        set_setting('retrospective.sort', sort_value)
+    set_setting('retrospective.filter_date_from', request.form.get('filter_date_from', '').strip())
+    set_setting('retrospective.filter_date_to', request.form.get('filter_date_to', '').strip())
+    set_setting('retrospective.filter_alpha_from', request.form.get('filter_alpha_from', '').strip()[:1].upper())
+    set_setting('retrospective.filter_alpha_to', request.form.get('filter_alpha_to', '').strip()[:1].upper())
+    return redirect(url_for('admin_retrospective', ok='Paramètres mis à jour.'))
+
+
+@app.route('/admin/retrospective/upload', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_upload():
+    files = [f for f in request.files.getlist('photos') if f and f.filename]
+    if not files:
+        return redirect(url_for('admin_retrospective', err='Aucun fichier sélectionné.'))
+    RETROSPECTIVE_DIR.mkdir(parents=True, exist_ok=True)
+    added, skipped = 0, 0
+    for file in files:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in _RETROSPECTIVE_ALLOWED_EXT:
+            skipped += 1
+            continue
+        stamp = current_stamp()
+        unique = secrets.token_hex(4)
+        safe = f'retro-{stamp}-{unique}{ext}'
+        filepath = RETROSPECTIVE_DIR / safe
+        file.save(str(filepath))
+        thumb_name = f'retro-thumb-{stamp}-{unique}.jpg'
+        make_thumb(filepath, THUMBS_DIR / thumb_name)
+        label = Path(file.filename).stem[:180] or safe
+        add_retrospective_photo(safe, thumb_name, label)
+        added += 1
+    msg = f'{added} photo(s) ajoutée(s).' if added else 'Aucune photo ajoutée.'
+    if skipped:
+        msg += f' {skipped} fichier(s) ignoré(s) (format non supporté).'
+    return redirect(url_for('admin_retrospective', ok=msg))
+
+
+@app.route('/admin/retrospective/<int:photo_id>/toggle', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_toggle(photo_id):
+    item = get_retrospective_photo(photo_id)
+    if not item:
+        return redirect(url_for('admin_retrospective', err='Photo introuvable.'))
+    set_retrospective_photo_active(photo_id, not item['active'])
+    return redirect(url_for('admin_retrospective',
+                            ok=('Photo réactivée.' if not item['active'] else 'Photo désactivée.')))
+
+
+@app.route('/admin/retrospective/<int:photo_id>/rename', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_rename(photo_id):
+    label = request.form.get('label', '').strip()[:180]
+    if not label:
+        return redirect(url_for('admin_retrospective', err='Le nom ne peut pas être vide.'))
+    update_retrospective_photo_label(photo_id, label)
+    return redirect(url_for('admin_retrospective', ok='Nom mis à jour.'))
+
+
+@app.route('/admin/retrospective/<int:photo_id>/delete', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_delete(photo_id):
+    item = delete_retrospective_photo_db(photo_id)
+    if item:
+        (RETROSPECTIVE_DIR / item['filename']).unlink(missing_ok=True)
+        if item.get('thumb_filename'):
+            (THUMBS_DIR / item['thumb_filename']).unlink(missing_ok=True)
+        return redirect(url_for('admin_retrospective', ok='Photo supprimée.'))
+    return redirect(url_for('admin_retrospective', err='Photo introuvable.'))
+
+
+@app.route('/admin/retrospective/schedule/create', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_schedule_create():
+    start_at = request.form.get('start_at', '').strip()
+    end_at = request.form.get('end_at', '').strip()
+    if not start_at or not end_at:
+        return redirect(url_for('admin_retrospective', err='Dates de début et de fin requises.'))
+    if end_at <= start_at:
+        return redirect(url_for('admin_retrospective', err='La fin doit être après le début.'))
+    add_retrospective_schedule(
+        request.form.get('label', '').strip()[:120], start_at, end_at,
+        enabled=bool(request.form.get('enabled'))
+    )
+    return redirect(url_for('admin_retrospective', ok='Créneau ajouté.'))
+
+
+@app.route('/admin/retrospective/schedule/<int:schedule_id>/update', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_schedule_update(schedule_id):
+    start_at = request.form.get('start_at', '').strip()
+    end_at = request.form.get('end_at', '').strip()
+    if not start_at or not end_at:
+        return redirect(url_for('admin_retrospective', err='Dates de début et de fin requises.'))
+    if end_at <= start_at:
+        return redirect(url_for('admin_retrospective', err='La fin doit être après le début.'))
+    update_retrospective_schedule(
+        schedule_id, request.form.get('label', '').strip()[:120], start_at, end_at,
+        enabled=bool(request.form.get('enabled'))
+    )
+    return redirect(url_for('admin_retrospective', ok='Créneau mis à jour.'))
+
+
+@app.route('/admin/retrospective/schedule/<int:schedule_id>/delete', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_schedule_delete(schedule_id):
+    item = delete_retrospective_schedule_db(schedule_id)
+    if item:
+        return redirect(url_for('admin_retrospective', ok='Créneau supprimé.'))
+    return redirect(url_for('admin_retrospective', err='Créneau introuvable.'))
+
+
 # ── Écran de veille (interface principale) ──────────────────────────────────
 # Diaporama plein écran déclenché côté client (voir static/app.js) après N
 # minutes d'inactivité sur l'accueil du kiosque. Images dédiées, gérées ici
@@ -6885,6 +7163,12 @@ def guest_upload_submit(token):
 @require_media_auth
 def media_guest(filename):
     return send_from_directory(GUEST_UPLOAD_DIR, filename)
+
+
+@app.route('/media/retrospective/<path:filename>')
+@require_media_auth
+def media_retrospective(filename):
+    return send_from_directory(RETROSPECTIVE_DIR, filename)
 
 
 @app.route('/admin/guest-uploads', methods=['GET', 'POST'])

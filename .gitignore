@@ -4,6 +4,12 @@ ffmpeg/
 data/
 logs/
 
+# Contient potentiellement des mots de passe/tokens réels (auth, admin,
+# guest_api, media_api, upload_token) une fois personnalisé pour un
+# événement — jamais à committer. Voir config/config.example.toml pour un
+# gabarit sans secrets, à copier en config.toml lors de l'installation.
+config/config.toml
+
 
 # Python
 __pycache__/

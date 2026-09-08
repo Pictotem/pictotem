@@ -217,6 +217,8 @@
   // de la slide pour programmer `advance`.
   let transitionExtraDelayMs = 500;
   let promoPages = [];
+  let retroCfg = { enabled: false, frequency: 8, delay: 5 };
+  let retroPhotos = [];
   let showMediaId = false;
   // Style du cartouche ID média (voir #slideMediaId ci-dessus et
   // applyMediaIdStyle() plus bas) : réglé depuis /admin/tags → ID unique
@@ -326,6 +328,28 @@
   // fréquente ait l'occasion d'apparaître au moins une fois : les pages
   // promo restent ainsi cadencées uniquement par leur propre réglage de
   // fréquence, jamais par les critères propres aux captures.
+  // Insère une photo de la Rétrospective toutes les N slides "réelles",
+  // en tournant sur le pool de photos actives (voir /admin/retrospective) —
+  // même technique de répétition de la base qu'insertPromo() ci-dessous
+  // (voir son commentaire), pour ne jamais être "affamée" par un faible
+  // nombre de captures/images intermédiaires.
+  function insertRetro(base) {
+    if (!retroCfg.enabled || !retroCfg.frequency || !retroPhotos.length || !base.length) return base;
+    const repeatCount = Math.max(1, Math.ceil(retroCfg.frequency / base.length));
+    const repeatedBase = [];
+    for (let r = 0; r < repeatCount; r++) repeatedBase.push(...base);
+    const result = [];
+    let ri = 0;
+    repeatedBase.forEach((s, i) => {
+      result.push(s);
+      if ((i + 1) % retroCfg.frequency === 0) {
+        result.push(retroPhotos[ri % retroPhotos.length]);
+        ri++;
+      }
+    });
+    return result;
+  }
+
   function insertPromo(base) {
     const active = promoPages.filter((p) => p.frequency > 0);
     if (!active.length || !base.length) return base;
@@ -354,12 +378,15 @@
       // chrono, votes_desc, votes_asc : captures déjà triées côté serveur
       base = interleave(data.captures, data.slideshow_images);
     }
-    const withPromo = insertPromo(base);
-    // Aucun média, mais au moins une page promo active : on les diffuse
-    // seules en boucle plutôt que d'afficher "Aucun média à afficher.".
+    const withRetro = insertRetro(base);
+    const withPromo = insertPromo(withRetro);
+    // Aucun média, mais au moins une page promo active (ou la Rétrospective
+    // active) : on les diffuse seules en boucle plutôt que d'afficher
+    // "Aucun média à afficher.".
     if (!withPromo.length) {
       const active = promoPages.filter((p) => p.frequency > 0);
       if (active.length) return active.map((p) => ({ type: 'promo', page: p }));
+      if (retroCfg.enabled && retroPhotos.length) return [...retroPhotos];
     }
     return withPromo;
   }
@@ -686,7 +713,7 @@
       el.src = slide.url;
       el.onerror = advance;
       nextEl.appendChild(el);
-      const duration = settings.delay * 1000;
+      const duration = (slide.type === 'retro' && retroCfg.delay ? retroCfg.delay : settings.delay) * 1000;
       const t = setTimeout(advance, CROSSFADE_MS + duration + transitionExtraDelayMs);
       cleanup = () => clearTimeout(t);
       pauseVideoEl = null;
@@ -961,6 +988,8 @@
       const data = await fetchSlides();
       lastData = data;
       promoPages = data.promo_pages || promoPages;
+      retroCfg = data.retro || retroCfg;
+      retroPhotos = data.retro_photos || retroPhotos;
       showMediaId = !!data.show_media_id;
       mediaIdStyle = data.media_id_style || mediaIdStyle;
       applyMediaIdStyle();
@@ -999,6 +1028,19 @@
   }
   setInterval(refreshPromoPages, 15000);
 
+  // Réglages légers de la Rétrospective (activé effectif/fréquence/délai),
+  // interrogés à la même cadence que les pages promo ci-dessus — pour qu'un
+  // créneau programmé (voir /admin/retrospective) active/désactive la
+  // diffusion sans attendre le rafraîchissement complet.
+  async function refreshRetrospectiveSettings() {
+    try {
+      const res = await fetch('/api/bestof/retrospective-settings');
+      retroCfg = { ...retroCfg, ...(await res.json()) };
+      if (lastData) applySlides(buildSlides(lastData));
+    } catch (e) { /* on garde les réglages actuels */ }
+  }
+  setInterval(refreshRetrospectiveSettings, 15000);
+
   try {
     const data = await fetchSlides();
     lastData = data;
@@ -1009,6 +1051,8 @@
     };
     transitionExtraDelayMs = data.transition_extra_delay_ms ?? transitionExtraDelayMs;
     promoPages = data.promo_pages || [];
+    retroCfg = data.retro || retroCfg;
+    retroPhotos = data.retro_photos || retroPhotos;
     showMediaId = !!data.show_media_id;
     mediaIdStyle = data.media_id_style || mediaIdStyle;
     applyMediaIdStyle();
