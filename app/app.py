@@ -92,7 +92,10 @@ from db import (list_retrospective_photos, get_retrospective_photo, add_retrospe
                 delete_retrospective_schedule_db,
                 list_retrospective_backgrounds, get_retrospective_background,
                 add_retrospective_background, set_retrospective_background_active,
-                delete_retrospective_background_db)
+                delete_retrospective_background_db,
+                list_retrospective_overlays, get_retrospective_overlay,
+                add_retrospective_overlay, set_retrospective_overlay_active,
+                delete_retrospective_overlay_db, move_retrospective_overlay)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, generate_qr_png_custom,
                    get_network_info, is_autostart_enabled, make_thumb, message_text,
@@ -6135,6 +6138,13 @@ _RETROSPECTIVE_SORTS = [
 # ci-dessus (photos potentiellement personnelles, accès authentifié).
 RETROSPECTIVE_BG_DIR = BASE_DIR / 'app' / 'static' / 'retrospective_bg'
 
+# Images en premier plan (superposition) de la Rétrospective (voir
+# retrospective_overlays, db.py) : affichées EN AVANT de chaque photo sur
+# /bestof (voir api_bestof_slides ci-dessous et showNext() dans
+# bestof.html) -- images génériques servies depuis static/, même
+# principe de stockage que RETROSPECTIVE_BG_DIR ci-dessus.
+RETROSPECTIVE_OVERLAY_DIR = BASE_DIR / 'app' / 'static' / 'retrospective_overlay'
+
 
 def _retrospective_settings():
     return {
@@ -6305,18 +6315,30 @@ def api_bestof_slides():
         # inchangé (fond noir uni, comme les autres slides).
         bg_urls = [url_for('static', filename='retrospective_bg/' + b['filename'])
                    for b in list_retrospective_backgrounds(active_only=True)]
+        # Image de premier plan (superposition, voir retrospective_overlays,
+        # db.py) : contrairement au fond ci-dessus (tiré au sort à chaque
+        # rafraîchissement), assignée en tournant sur le pool actif dans
+        # l'ordre défini par l'admin (sort_order, boutons ▲▼ — voir
+        # /admin/retrospective → Images en premier plan) : la Nème photo
+        # Rétrospective du lot récupère l'image (N modulo nombre d'images
+        # actives), ce qui donne un « ordre de passage » stable plutôt
+        # qu'un tirage aléatoire -- '' si aucune image active (comportement
+        # inchangé, aucune superposition).
+        overlay_urls = [url_for('static', filename='retrospective_overlay/' + o['filename'])
+                        for o in list_retrospective_overlays(active_only=True)]
         retro_photos = [
             {
                 'type': 'retro',
                 'url':  url_for('media_retrospective', filename=p['filename']),
                 'text': p.get('text') or '',
                 'bg_url': random.choice(bg_urls) if bg_urls else '',
+                'fg_url': overlay_urls[i % len(overlay_urls)] if overlay_urls else '',
             }
-            for p in list_retrospective_photos(
+            for i, p in enumerate(list_retrospective_photos(
                 sort=rs['sort'], active_only=True,
                 filter_date_from=rs['filter_date_from'], filter_date_to=rs['filter_date_to'],
                 filter_alpha_from=rs['filter_alpha_from'], filter_alpha_to=rs['filter_alpha_to'],
-            )
+            ))
         ]
         if rs['exclusive']:
             # Diffusion exclusive (voir /admin/retrospective — case « Diffusion
@@ -6854,6 +6876,7 @@ def admin_retrospective():
         filter_alpha_from=s['filter_alpha_from'], filter_alpha_to=s['filter_alpha_to'],
     )
     backgrounds = list_retrospective_backgrounds()
+    overlays = list_retrospective_overlays()
     return render_template(
         'admin_retrospective.html', config=CONFIG,
         blocks=blocks, current_page='retrospective', admin_pages=_admin_all_pages(),
@@ -6863,6 +6886,7 @@ def admin_retrospective():
         schedules=list_retrospective_schedules(),
         is_live=_retrospective_is_live(),
         backgrounds=backgrounds, active_bg_count=sum(1 for b in backgrounds if b['active']),
+        overlays=overlays, active_overlay_count=sum(1 for o in overlays if o['active']),
         text_style=_retrospective_text_style_settings(),
         text_fonts=_PROMO_FONTS, text_positions=_BADGE_POSITIONS,
         charte_colors=list_charte_colors(),
@@ -7076,6 +7100,73 @@ def admin_retrospective_background_delete(bg_id):
         (RETROSPECTIVE_BG_DIR / item['filename']).unlink(missing_ok=True)
         return redirect(url_for('admin_retrospective', ok='Fond supprimé.'))
     return redirect(url_for('admin_retrospective', err='Fond introuvable.'))
+
+
+# ── Rétrospective — images en premier plan (superposition) ──────────────────
+# CRUD (upload en masse, actif/inactif, suppression, réordonnancement) — même
+# principe que les fonds d'écran ci-dessus, avec en plus un ordre explicite
+# (sort_order, boutons ▲▼, voir move_retrospective_overlay, db.py) : ces
+# images sont assignées aux photos Rétrospective en tournant sur ce pool
+# actif dans l'ordre défini plutôt que tirées au sort (voir
+# api_bestof_slides ci-dessus et RETROSPECTIVE_OVERLAY_DIR).
+
+@app.route('/admin/retrospective/overlay/upload', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_overlay_upload():
+    files = [f for f in request.files.getlist('overlays') if f and f.filename]
+    if not files:
+        return redirect(url_for('admin_retrospective', err='Aucun fichier sélectionné.'))
+    RETROSPECTIVE_OVERLAY_DIR.mkdir(parents=True, exist_ok=True)
+    added, skipped = 0, 0
+    for file in files:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in _RETROSPECTIVE_ALLOWED_EXT:
+            skipped += 1
+            continue
+        stamp = current_stamp()
+        unique = secrets.token_hex(4)
+        safe = f'retro-fg-{stamp}-{unique}{ext}'
+        file.save(str(RETROSPECTIVE_OVERLAY_DIR / safe))
+        add_retrospective_overlay(safe)
+        added += 1
+    msg = f'{added} image(s) ajoutée(s).' if added else 'Aucune image ajoutée.'
+    if skipped:
+        msg += f' {skipped} fichier(s) ignoré(s) (format non supporté).'
+    return redirect(url_for('admin_retrospective', ok=msg))
+
+
+@app.route('/admin/retrospective/overlay/<int:overlay_id>/toggle', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_overlay_toggle(overlay_id):
+    item = get_retrospective_overlay(overlay_id)
+    if not item:
+        return redirect(url_for('admin_retrospective', err='Image introuvable.'))
+    set_retrospective_overlay_active(overlay_id, not item['active'])
+    return redirect(url_for('admin_retrospective',
+                            ok=('Image réactivée.' if not item['active'] else 'Image désactivée.')))
+
+
+@app.route('/admin/retrospective/overlay/<int:overlay_id>/move', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_overlay_move(overlay_id):
+    direction = request.form.get('direction', '')
+    if direction in ('up', 'down'):
+        move_retrospective_overlay(overlay_id, direction)
+    return redirect(url_for('admin_retrospective', ok='Ordre mis à jour.'))
+
+
+@app.route('/admin/retrospective/overlay/<int:overlay_id>/delete', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_overlay_delete(overlay_id):
+    item = delete_retrospective_overlay_db(overlay_id)
+    if item:
+        (RETROSPECTIVE_OVERLAY_DIR / item['filename']).unlink(missing_ok=True)
+        return redirect(url_for('admin_retrospective', ok='Image supprimée.'))
+    return redirect(url_for('admin_retrospective', err='Image introuvable.'))
 
 
 @app.route('/admin/retrospective/schedule/create', methods=['POST'])

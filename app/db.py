@@ -686,6 +686,28 @@ def init_db():
         )
         conn.execute('CREATE INDEX IF NOT EXISTS idx_retrospective_backgrounds_active ON retrospective_backgrounds(active)')
 
+        # Images en premier plan (superposition) : bibliotheque d'images
+        # affichees EN AVANT de chaque photo de la Retrospective sur /bestof
+        # (voir retrospective_overlays ci-dessous, RETROSPECTIVE_OVERLAY_DIR
+        # et api_bestof_slides() dans app.py) -- meme principe actif/inactif
+        # que retrospective_backgrounds ci-dessus, mais avec en plus un ordre
+        # explicite (sort_order) : contrairement aux fonds (tires au sort a
+        # chaque affichage), les images de premier plan sont assignees aux
+        # photos en tournant sur ce pool actif dans l'ordre defini (boutons
+        # up/down, voir move_retrospective_overlay ci-dessous -- meme
+        # mecanique que move_promo_page).
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS retrospective_overlays ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "filename TEXT NOT NULL, "
+            "active INTEGER NOT NULL DEFAULT 1, "
+            "sort_order INTEGER NOT NULL DEFAULT 0, "
+            "created_at TEXT NOT NULL"
+            ")"
+        )
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_retrospective_overlays_active ON retrospective_overlays(active)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_retrospective_overlays_sort_order ON retrospective_overlays(sort_order)')
+
         # Créneaux de programmation (diffusion automatique de la Rétrospective
         # restreinte à des plages date/heure) : liste à CRUD complet depuis
         # /admin/retrospective. Aucun créneau = pas de restriction horaire
@@ -2362,6 +2384,76 @@ def delete_retrospective_background_db(bg_id):
         conn.execute('DELETE FROM retrospective_backgrounds WHERE id = ?', (bg_id,))
         conn.commit()
     return item
+
+# ── Rétrospective — images en premier plan (superposition) ──────────────────
+# Bibliothèque d'images affichées EN AVANT (au-dessus) de chaque photo de la
+# Rétrospective sur /bestof -- voir retrospective_overlays, migration
+# ci-dessus, et api_bestof_slides()/showNext() dans app.py/bestof.html.
+
+def list_retrospective_overlays(active_only=False):
+    sql = 'SELECT * FROM retrospective_overlays'
+    if active_only:
+        sql += ' WHERE active = 1'
+    sql += ' ORDER BY sort_order ASC, id ASC'
+    with closing(db_conn()) as conn:
+        rows = conn.execute(sql).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_retrospective_overlay(overlay_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM retrospective_overlays WHERE id = ?', (overlay_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_retrospective_overlay(filename):
+    """Ajoutée en fin de rotation (sort_order = max + 1), comme
+    create_promo_page ci-dessus."""
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        max_order = conn.execute('SELECT COALESCE(MAX(sort_order), -1) AS m FROM retrospective_overlays').fetchone()['m']
+        cur = conn.execute(
+            'INSERT INTO retrospective_overlays(filename, active, sort_order, created_at) VALUES(?,1,?,?)',
+            (filename, max_order + 1, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def set_retrospective_overlay_active(overlay_id, active):
+    with closing(db_conn()) as conn:
+        conn.execute('UPDATE retrospective_overlays SET active = ? WHERE id = ?', (1 if active else 0, overlay_id))
+        conn.commit()
+
+
+def delete_retrospective_overlay_db(overlay_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM retrospective_overlays WHERE id = ?', (overlay_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        conn.execute('DELETE FROM retrospective_overlays WHERE id = ?', (overlay_id,))
+        conn.commit()
+    return item
+
+
+def move_retrospective_overlay(overlay_id, direction):
+    """Échange sort_order avec le voisin immédiat ('up' ou 'down') -- mêmes
+    boutons ▲▼ et même mécanique que move_promo_page ci-dessus."""
+    with closing(db_conn()) as conn:
+        rows = conn.execute('SELECT id, sort_order FROM retrospective_overlays ORDER BY sort_order ASC, id ASC').fetchall()
+        ids = [r['id'] for r in rows]
+        if overlay_id not in ids:
+            return
+        i = ids.index(overlay_id)
+        j = i - 1 if direction == 'up' else i + 1
+        if j < 0 or j >= len(ids):
+            return
+        a, b = rows[i], rows[j]
+        conn.execute('UPDATE retrospective_overlays SET sort_order = ? WHERE id = ?', (b['sort_order'], a['id']))
+        conn.execute('UPDATE retrospective_overlays SET sort_order = ? WHERE id = ?', (a['sort_order'], b['id']))
+        conn.commit()
+
 
 
 # ── Rétrospective — créneaux de programmation ────────────────────────────────

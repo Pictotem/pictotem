@@ -381,6 +381,67 @@
     {% endif %}
   </section>
 
+  <!-- Images en premier plan -->
+  <section class="admin-section">
+    <h2>Images en premier plan
+      <span class="note">{{ active_overlay_count }} actif(s) sur {{ overlays|length }} — affichée en surimpression devant chaque photo Rétrospective sur /bestof, dans l'ordre de passage ci-dessous</span>
+    </h2>
+
+    <form method="post" action="{{ url_for('admin_retrospective_overlay_upload') }}" enctype="multipart/form-data" style="margin-bottom:24px">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="upload-zone">
+        <label class="upload-label" for="retro-overlay-input">Choisir une ou plusieurs images…</label>
+        <input type="file" id="retro-overlay-input" name="overlays" multiple
+               accept=".png,.jpg,.jpeg,.webp"
+               onchange="document.getElementById('overlay-upload-name').textContent = this.files.length ? this.files.length + ' fichier(s) sélectionné(s)' : ''">
+        <span id="overlay-upload-name"></span>
+        <p class="upload-hint">PNG, JPG, WEBP — sélection multiple possible, fond transparent conseillé (PNG). Chaque photo Rétrospective diffusée reçoit l'image active suivante dans l'ordre de passage (▲▼), en boucle ; sans image active, aucune superposition (comportement actuel).</p>
+        <div style="margin-top:14px">
+          <button class="btn-primary" type="submit">Ajouter</button>
+        </div>
+      </div>
+    </form>
+
+    {% if overlays %}
+    <div class="img-grid">
+      {% for ov in overlays %}
+      <div class="img-card {% if not ov.active %}inactive{% endif %}">
+        <img src="{{ url_for('static', filename='retrospective_overlay/' + ov.filename) }}" alt="Image en premier plan" loading="lazy">
+        <div class="img-card-body">
+          {% if not ov.active %}<div class="img-card-badge">Inactif</div>{% endif %}
+          <span class="card-date">Ordre {{ loop.index }} · {{ ov.created_at | format_dt }}</span>
+          <div class="card-actions">
+            <form method="post" action="{{ url_for('admin_retrospective_overlay_move', overlay_id=ov.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="direction" value="up">
+              <button class="btn-ghost btn-sm" type="submit" title="Monter dans l'ordre de passage">▲</button>
+            </form>
+            <form method="post" action="{{ url_for('admin_retrospective_overlay_move', overlay_id=ov.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="direction" value="down">
+              <button class="btn-ghost btn-sm" type="submit" title="Descendre dans l'ordre de passage">▼</button>
+            </form>
+          </div>
+          <div class="card-actions">
+            <form method="post" action="{{ url_for('admin_retrospective_overlay_toggle', overlay_id=ov.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button class="btn-ok btn-sm" type="submit">{{ 'Désactiver' if ov.active else 'Activer' }}</button>
+            </form>
+            <form method="post" action="{{ url_for('admin_retrospective_overlay_delete', overlay_id=ov.id) }}"
+                  onsubmit="return confirm('Supprimer définitivement cette image ?')">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button class="btn-danger btn-sm" type="submit">Supprimer</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-hint">Aucune image en premier plan — les photos Rétrospective s'affichent sans superposition.</p>
+    {% endif %}
+  </section>
+
   <!-- Photos -->
   <section class="admin-section">
     <h2>Photos</h2>

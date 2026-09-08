@@ -27,6 +27,20 @@
        la mise en page de la slide promo (voir buildPromoContent ci-dessous). */
     .slide-media { width: 100%; height: 100%; object-fit: contain; display: block; }
     video.slide-media { background: #000; }
+    /* Image de premier plan (superposition, voir retrospective_overlays,
+       /admin/retrospective → Images en premier plan) : posée par-dessus la
+       photo Rétrospective en cours (voir showNext() plus bas) -- position
+       absolute + inset:0 pour se caler exactement sur le même cadre que
+       .slide-media ci-dessus (object-fit: contain identique, pas de
+       déformation), z-index local suffisant : ajoutée APRÈS l'image
+       principale dans le DOM, elle s'affiche déjà au-dessus d'elle sans
+       même avoir besoin de z-index, mais posé ici par robustesse. Ne capte
+       jamais le clic/tactile (pointer-events: none), pour ne pas bloquer
+       les interactions avec le diaporama (pause, etc.). */
+    .slide-retro-fg {
+      position: absolute; inset: 0; z-index: 1;
+      object-fit: contain; pointer-events: none;
+    }
     #empty {
       position: absolute; inset: 0; display: flex;
       align-items: center; justify-content: center;
@@ -788,6 +802,18 @@
       el.src = slide.url;
       el.onerror = advance;
       nextEl.appendChild(el);
+      // Image de premier plan (voir retrospective_overlays, db.py, et la
+      // règle .slide-retro-fg ci-dessus) : uniquement pour les slides
+      // 'retro' qui en tirent une (voir api_bestof_slides, app.py) -- pas
+      // de reset explicite nécessaire comme pour bg_url (CSS
+      // background-image de nextEl) : nextEl.innerHTML = '' plus haut
+      // repart déjà d'un conteneur vide à chaque appel.
+      if (slide.type === 'retro' && slide.fg_url) {
+        const fg = document.createElement('img');
+        fg.className = 'slide-retro-fg';
+        fg.src = slide.fg_url;
+        nextEl.appendChild(fg);
+      }
       const duration = (slide.type === 'retro' && retroCfg.delay ? retroCfg.delay : settings.delay) * 1000;
       const t = setTimeout(advance, CROSSFADE_MS + duration + transitionExtraDelayMs);
       cleanup = () => clearTimeout(t);
