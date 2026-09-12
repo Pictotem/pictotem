@@ -1,0 +1,70 @@
+<div class="form-card">
+  <p class="section-hint">
+    Flux Server-Sent Events réel (pas de simulation) : un event est poussé automatiquement
+    dès qu'une capture (photo, vidéo ou photo strip) est enregistrée, avec sa date/heure, son nom
+    de fichier, ses tags et les « participants » identifiés parmi ces tags (un tag dont le texte
+    correspond à celui d'un code invité actuellement configuré — voir <code>/admin/guest_codes</code>).
+    Un seul event par capture, envoyé au moment de la prise ; les tags ajoutés ensuite sur l'écran
+    de relecture ne redéclenchent pas d'event.
+  </p>
+
+  <div class="field-row" style="align-items:center;gap:10px;margin-bottom:10px">
+    <button type="button" class="action-btn primary" id="sseCapturesStart">Démarrer</button>
+    <button type="button" class="action-btn" id="sseCapturesStop" disabled>Arrêter</button>
+    <span id="sseCapturesStatus" style="color:var(--muted);font-size:13px">Inactif</span>
+  </div>
+  <pre id="sseCapturesLog" style="max-height:260px;overflow:auto;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:10px;font-size:12px;margin:0">En attente de la prochaine capture…</pre>
+</div>
+
+<script>
+(function () {
+  let source = null;
+  let hasReceivedEvent = false;
+  const startBtn = document.getElementById('sseCapturesStart');
+  const stopBtn = document.getElementById('sseCapturesStop');
+  const status = document.getElementById('sseCapturesStatus');
+  const log = document.getElementById('sseCapturesLog');
+
+  function appendLog(line) {
+    if (!hasReceivedEvent) {
+      log.textContent = '';
+      hasReceivedEvent = true;
+    }
+    log.textContent += line + '\n';
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function stop() {
+    if (source) {
+      source.close();
+      source = null;
+    }
+    status.textContent = 'Inactif';
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+
+  startBtn?.addEventListener('click', () => {
+    if (source) return;
+    hasReceivedEvent = false;
+    log.textContent = 'En attente de la prochaine capture…';
+    source = new EventSource('/api/sse/captures');
+    status.textContent = 'Connecté';
+    source.onopen = () => { status.textContent = 'Connecté'; };
+    source.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        appendLog(`[${data.date} ${data.heure}] ${data.kind} — ${data.filename} — tags: [${data.tags.join(', ')}] — participants: [${data.participants.join(', ')}]`);
+      } catch (err) {
+        appendLog(e.data);
+      }
+    };
+    source.onerror = () => { status.textContent = 'Erreur / reconnexion…'; };
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+  });
+
+  stopBtn?.addEventListener('click', stop);
+  window.addEventListener('beforeunload', stop);
+})();
+</script>

@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+import queue
 import random
 import re
 import secrets
@@ -467,6 +468,137 @@ def stream_mjpg():
     return Response(stream_generator(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+# ── SSE de simulation (dev) ──────────────────────────────────────────────────
+# Outil de préparation/test pour un futur flux temps réel : diffuse en boucle
+# un payload JSON "dummy" réglé depuis /admin/application (bloc « Flux SSE de
+# simulation »), aucun consommateur métier réel pour l'instant. Réglages
+# relus à CHAQUE itération (pas une fois à l'ouverture de la connexion) pour
+# que payload/intervalle/activation soient modifiables à chaud sans avoir à
+# rouvrir la connexion EventSource déjà en cours.
+
+def _sse_dummy_generator():
+    seq = 0
+    while True:
+        enabled = get_setting('sse_dummy.enabled', '0') == '1'
+        if not enabled:
+            # Commentaire SSE (ligne commençant par ':') : garde la connexion
+            # ouverte sans déclencher onmessage côté client, pour une
+            # réactivation instantanée sans reconnexion EventSource.
+            yield ': disabled\n\n'
+            time.sleep(1.0)
+            continue
+        try:
+            payload = json.loads(get_setting('sse_dummy.payload', '') or '{}')
+        except (ValueError, TypeError):
+            payload = None
+        raw_interval = get_setting('sse_dummy.interval_ms', '') or '2000'
+        interval_ms = max(200, min(60000, int(raw_interval) if raw_interval.isdigit() else 2000))
+        seq += 1
+        event = {'seq': seq, 'ts': time.time(), 'payload': payload}
+        yield f'data: {json.dumps(event)}\n\n'
+        time.sleep(interval_ms / 1000)
+
+
+@app.route('/api/sse/dummy')
+@require_admin_auth
+def api_sse_dummy():
+    return Response(_sse_dummy_generator(), mimetype='text/event-stream',
+                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
+# ── SSE de captures (flux événementiel réel) ─────────────────────────────────
+# Contrairement au module dummy ci-dessus (polling à intervalle fixe sur des
+# réglages), ce flux POUSSE un event dès qu'une capture réelle est enregistrée
+# (voir _sse_broadcast_capture, appelée depuis capture_photo/capture_video/
+# capture_photostrip_finish) — un event par capture, pas de mise à jour
+# ultérieure si des tags manuels sont ajoutés/retirés après coup sur l'écran
+# de relecture. Un abonné = une queue.Queue dédiée (une par connexion
+# EventSource ouverte), remplie par le(s) thread(s) de requête de capture et
+# consommée par le thread de la connexion SSE correspondante — nécessaire
+# puisque Flask (mode dev threaded=True) n'a pas de bus d'événements natif.
+
+_sse_capture_subscribers = set()
+_sse_capture_subscribers_lock = threading.Lock()
+
+
+def _sse_capture_subscribe():
+    q = queue.Queue(maxsize=50)
+    with _sse_capture_subscribers_lock:
+        _sse_capture_subscribers.add(q)
+    return q
+
+
+def _sse_capture_unsubscribe(q):
+    with _sse_capture_subscribers_lock:
+        _sse_capture_subscribers.discard(q)
+
+
+def _sse_capture_broadcast(event: dict):
+    with _sse_capture_subscribers_lock:
+        subscribers = list(_sse_capture_subscribers)
+    for q in subscribers:
+        try:
+            q.put_nowait(event)
+        except queue.Full:
+            # Abonné trop lent (connexion EventSource qui ne consomme plus) :
+            # on ignore l'event pour lui plutôt que de bloquer le thread de
+            # capture qui a déclenché ce broadcast — jamais de perte de
+            # réactivité côté visiteur pour un problème côté consommateur SSE.
+            logger.warning('SSE captures : abonné trop lent (queue pleine), event ignoré pour lui.')
+
+
+def _sse_broadcast_capture(capture_id, media_uid, kind, filename, created_at):
+    """Construit et diffuse l'event SSE d'une capture qui vient d'être
+    enregistrée : date/heure (dérivées du created_at de record_capture, donc
+    identiques à la valeur en base), nom de fichier, et tags de la capture
+    séparés en deux listes — « participants » (tags dont le texte correspond
+    à celui d'un code invité actuellement configuré, voir /admin/guest_codes
+    : un admin peut préconfigurer un code/badge avec le nom d'un participant
+    comme texte associé) et « tags » (tout le reste, libres ou prédéfinis).
+    Le projet n'a pas de reconnaissance faciale ni de champ dédié « nom de
+    participant » : cette distinction réutilise le mécanisme de tags/codes
+    invités existant plutôt que d'en ajouter un nouveau."""
+    tag_labels = [t['label'] for t in list_capture_tags(capture_id)]
+    guest_texts = {
+        resolve_dynamic_placeholders(gc['texte'])
+        for gc in list_guest_codes() if gc.get('texte')
+    }
+    participants = [label for label in tag_labels if label in guest_texts]
+    tags = [label for label in tag_labels if label not in guest_texts]
+    date_str, _, time_str = (created_at or '').partition('T')
+    _sse_capture_broadcast({
+        'event': 'capture',
+        'id': capture_id,
+        'media_uid': media_uid,
+        'kind': kind,
+        'filename': filename,
+        'date': date_str,
+        'heure': time_str,
+        'tags': tags,
+        'participants': participants,
+    })
+
+
+def _sse_captures_generator():
+    q = _sse_capture_subscribe()
+    try:
+        while True:
+            try:
+                event = q.get(timeout=15)
+                yield f'data: {json.dumps(event)}\n\n'
+            except queue.Empty:
+                yield ': keep-alive\n\n'
+    finally:
+        _sse_capture_unsubscribe(q)
+
+
+@app.route('/api/sse/captures')
+@require_admin_auth
+def api_sse_captures():
+    return Response(_sse_captures_generator(), mimetype='text/event-stream',
+                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
 # ── Routes capture ────────────────────────────────────────────────────────────
 
 @app.route('/api/capture/photo', methods=['POST'])
@@ -505,9 +637,10 @@ def capture_photo():
     filepath.write_bytes(encode_jpeg(display_frame))
     thumb_name = f'thumb-{stamp}.jpg'
     make_thumb(filepath, THUMBS_DIR / thumb_name)
-    capture_id, media_uid = record_capture('photo', filename, thumb_name)
+    capture_id, media_uid, created_at = record_capture('photo', filename, thumb_name)
     logger.info('Photo capturée %s (cadre=%s)', filename, frame_id)
     qr_tags = _qr_tag_detections(capture_id, detections)
+    _sse_broadcast_capture(capture_id, media_uid, 'photo', filename, created_at)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
                     'filename': filename, 'qr_tags': qr_tags,
                     'url': f'/media/photo/{filename}', 'message': resolve_dynamic_placeholders(message_text())})
@@ -707,7 +840,7 @@ def capture_video():
                 except Exception:
                     logger.exception('QR live : échec incrustation sur la miniature vidéo.')
 
-    capture_id, media_uid = record_capture('video', final_filename, thumb_name)
+    capture_id, media_uid, created_at = record_capture('video', final_filename, thumb_name)
     logger.info('Vidéo capturée %s', final_filename)
     # Tag automatique (comme la photo/le photo strip, voir _qr_tag_detections)
     # à partir des textes décodés pendant le suivi ci-dessus — dédoublonnés
@@ -720,6 +853,7 @@ def capture_video():
             if text not in seen_texts:
                 seen_texts.append(text)
         qr_tags = _qr_tag_detections(capture_id, [{'text': t} for t in seen_texts])
+    _sse_broadcast_capture(capture_id, media_uid, 'video', final_filename, created_at)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'video',
                     'filename': final_filename, 'qr_tags': qr_tags,
                     'url': f'/media/video/{final_filename}', 'message': resolve_dynamic_placeholders(message_text())})
@@ -2142,9 +2276,10 @@ def capture_photostrip_finish():
 
     thumb_name = f'thumb-{stamp}.jpg'
     make_thumb(filepath, THUMBS_DIR / thumb_name)
-    capture_id, media_uid = record_capture('photo', filename, thumb_name)
+    capture_id, media_uid, created_at = record_capture('photo', filename, thumb_name)
     logger.info('Photo strip capturé %s (%d prises, cadre=%s)', filename, len(frames), session['frame_id'])
     qr_tags = _qr_tag_detections(capture_id, detections)
+    _sse_broadcast_capture(capture_id, media_uid, 'photo', filename, created_at)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
                     'filename': filename, 'qr_tags': qr_tags,
                     'url': f'/media/photo/{filename}', 'message': resolve_dynamic_placeholders(message_text())})
@@ -3048,6 +3183,8 @@ _ADMIN_BLOCKS = {
     'tags_media_api':      {'title': "API REST — accès aux ID média & tags",     'default_page': 'tags',        'template': 'blocks/tags_media_api.html',      'context_fn': '_block_ctx_tags_media_api'},
     'slideshow_settings':      {'title': "Paramètres",                          'default_page': 'slideshow',   'template': 'blocks/slideshow_settings.html',      'context_fn': '_block_ctx_slideshow_settings'},
     'screensaver_settings':    {'title': "Paramètres",                          'default_page': 'screensaver', 'template': 'blocks/screensaver_settings.html',    'context_fn': '_block_ctx_screensaver_settings'},
+    'sse_dummy_settings':      {'title': "Flux SSE de simulation (dev)",       'default_page': 'application', 'template': 'blocks/sse_dummy_settings.html',       'context_fn': '_block_ctx_sse_dummy_settings'},
+    'sse_captures_monitor':    {'title': "Flux SSE des captures",              'default_page': 'application', 'template': 'blocks/sse_captures_monitor.html', 'context_fn': None},
     'guest_uploads_settings':   {'title': "Paramètres",                         'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_settings.html',   'context_fn': '_block_ctx_guest_uploads_settings'},
     'guest_uploads_share_link': {'title': "Lien de partage",                    'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_share_link.html', 'context_fn': '_block_ctx_guest_uploads_share_link'},
     'guest_codes_code_settings':    {'title': "Réglages",                                    'default_page': 'guest_codes', 'template': 'blocks/guest_codes_code_settings.html',    'context_fn': '_block_ctx_guest_codes_code_settings'},
@@ -3437,6 +3574,18 @@ def _block_ctx_slideshow_settings() -> dict:
 
 def _block_ctx_screensaver_settings() -> dict:
     return {'screensaver_settings': _screensaver_settings()}
+
+
+def _sse_dummy_settings():
+    return {
+        'enabled':      get_setting('sse_dummy.enabled', '0') == '1',
+        'payload':      get_setting('sse_dummy.payload', '') or '{"message": "hello pictotem"}',
+        'interval_ms':  int(get_setting('sse_dummy.interval_ms', '') or '2000'),
+    }
+
+
+def _block_ctx_sse_dummy_settings() -> dict:
+    return {'sse_dummy_settings': _sse_dummy_settings()}
 
 
 def _block_ctx_guest_uploads_settings() -> dict:
@@ -3830,6 +3979,29 @@ def admin_set_idle_timer():
         raw = (request.form.get(key) or default).strip()
         set_setting(key, str(max(1, int(raw))) if raw.isdigit() else default)
     return _admin_block_redirect('app_idle_timer', ok='Mise en veille automatique mise à jour.')
+
+
+@app.route('/admin/application/sse_dummy', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_set_sse_dummy_settings():
+    """Réglages du flux SSE de simulation (voir _sse_dummy_generator) : le
+    payload JSON dummy et l'intervalle sont relus à chaque itération par le
+    générateur, donc pris en compte à chaud sur une connexion déjà ouverte,
+    sans avoir besoin de la rouvrir."""
+    raw_payload = (request.form.get('payload') or '').strip()
+    try:
+        json.loads(raw_payload)
+    except (ValueError, TypeError):
+        return _admin_block_redirect('sse_dummy_settings', err='JSON invalide.')
+    set_setting('sse_dummy.payload', raw_payload)
+
+    raw_interval = (request.form.get('interval_ms') or '').strip()
+    if raw_interval.isdigit() and 200 <= int(raw_interval) <= 60000:
+        set_setting('sse_dummy.interval_ms', raw_interval)
+
+    set_setting('sse_dummy.enabled', '1' if request.form.get('enabled') else '0')
+    return _admin_block_redirect('sse_dummy_settings', ok='Réglages du flux de simulation enregistrés.')
 
 
 @app.route('/admin/access')

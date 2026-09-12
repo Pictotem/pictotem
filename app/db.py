@@ -758,7 +758,7 @@ def record_capture(kind, filename, thumb_filename=None):
             (kind, filename, thumb_filename, created_at, media_uid)
         )
         conn.commit()
-        return cur.lastrowid, media_uid
+        return cur.lastrowid, media_uid, created_at
 
 
 def list_captures(sort='desc', kind='', page=1, page_size=None, media_uid='', tag='', capture_id=None):

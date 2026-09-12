@@ -1,0 +1,83 @@
+<div class="form-card">
+  <p class="section-hint">
+    Diffuse en boucle, via Server-Sent Events, le même payload JSON avec un compteur (<code>seq</code>)
+    et un timestamp (<code>ts</code>) ajoutés automatiquement à chaque envoi — outil de simulation pour
+    préparer/tester un futur flux temps réel côté frontend (aucun consommateur réel pour l'instant).
+  </p>
+
+  <form method="post" action="{{ url_for('admin_set_sse_dummy_settings') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field">
+      <label class="checkbox-row">
+        <input type="checkbox" name="enabled" value="1" {% if sse_dummy_settings.enabled %}checked{% endif %}>
+        Activer le flux de simulation
+      </label>
+    </div>
+
+    <div class="field">
+      <label>Payload JSON (répété à chaque envoi)</label>
+      <textarea name="payload" rows="6"
+                style="width:100%;font-family:monospace;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:10px 14px;font-size:14px">{{ sse_dummy_settings.payload }}</textarea>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Intervalle entre chaque envoi (millisecondes)</label>
+        <input type="number" name="interval_ms" min="200" max="60000" step="100" value="{{ sse_dummy_settings.interval_ms }}">
+      </div>
+    </div>
+
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+</div>
+
+<div class="form-card" style="margin-top:16px">
+  <p class="section-title" style="margin:0 0 10px">Test en direct</p>
+  <div class="field-row" style="align-items:center;gap:10px;margin-bottom:10px">
+    <button type="button" class="action-btn primary" id="sseDummyStart">Démarrer</button>
+    <button type="button" class="action-btn" id="sseDummyStop" disabled>Arrêter</button>
+    <span id="sseDummyStatus" style="color:var(--muted);font-size:13px">Inactif</span>
+  </div>
+  <pre id="sseDummyLog" style="max-height:220px;overflow:auto;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:10px;font-size:12px;margin:0"></pre>
+</div>
+
+<script>
+(function () {
+  let source = null;
+  const startBtn = document.getElementById('sseDummyStart');
+  const stopBtn = document.getElementById('sseDummyStop');
+  const status = document.getElementById('sseDummyStatus');
+  const log = document.getElementById('sseDummyLog');
+
+  function appendLog(line) {
+    log.textContent += line + '\n';
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function stop() {
+    if (source) {
+      source.close();
+      source = null;
+    }
+    status.textContent = 'Inactif';
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+
+  startBtn?.addEventListener('click', () => {
+    if (source) return;
+    log.textContent = '';
+    source = new EventSource('/api/sse/dummy');
+    status.textContent = 'Connexion…';
+    source.onopen = () => { status.textContent = 'Connecté'; };
+    source.onmessage = (e) => appendLog(e.data);
+    source.onerror = () => { status.textContent = 'Erreur / reconnexion…'; };
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+  });
+
+  stopBtn?.addEventListener('click', stop);
+  window.addEventListener('beforeunload', stop);
+})();
+</script>
