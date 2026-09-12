@@ -1,8 +1,11 @@
 <div class="form-card">
   <p class="section-hint">
-    Diffuse en boucle, via Server-Sent Events, le même payload JSON avec un compteur (<code>seq</code>)
-    et un timestamp (<code>ts</code>) ajoutés automatiquement à chaque envoi — outil de simulation pour
-    préparer/tester un futur flux temps réel côté frontend (aucun consommateur réel pour l'instant).
+    Diffuse en boucle, via Server-Sent Events, le même payload JSON — conforme au spec
+    <code>sse-server-spec.md</code> d'App_screen-publisher : trames <code>id:</code>/<code>event:
+    display</code>/<code>data:</code>, avec un <code>id:</code> croissant, et un <code>event:
+    heartbeat</code> automatique toutes les 20s si l'intervalle réglé est plus long. Le JSON édité
+    ci-dessous est envoyé tel quel comme <code>data</code> (pas d'enveloppe ajoutée) — utile aussi
+    pour tester volontairement un payload non conforme au schéma attendu.
   </p>
 
   <form method="post" action="{{ url_for('admin_set_sse_dummy_settings') }}">
@@ -71,8 +74,15 @@
     source = new EventSource('/api/sse/dummy');
     status.textContent = 'Connexion…';
     source.onopen = () => { status.textContent = 'Connecté'; };
-    source.onmessage = (e) => appendLog(e.data);
     source.onerror = () => { status.textContent = 'Erreur / reconnexion…'; };
+
+    // Events typés (event: display / heartbeat) : onmessage ne les reçoit
+    // PAS (il ne capte que les events par défaut, sans nom).
+    source.addEventListener('display', (e) => appendLog(`#${e.lastEventId} display — ${e.data}`));
+    source.addEventListener('heartbeat', (e) => {
+      status.textContent = `Connecté (heartbeat #${e.lastEventId})`;
+    });
+
     startBtn.disabled = true;
     stopBtn.disabled = false;
   });

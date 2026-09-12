@@ -550,21 +550,43 @@ def require_admin_or_sse_auth(f):
 # ── SSE de simulation (dev) ──────────────────────────────────────────────────
 # Outil de préparation/test pour un futur flux temps réel : diffuse en boucle
 # un payload JSON "dummy" réglé depuis /admin/application (bloc « Flux SSE de
-# simulation »), aucun consommateur métier réel pour l'instant. Réglages
-# relus à CHAQUE itération (pas une fois à l'ouverture de la connexion) pour
-# que payload/intervalle/activation soient modifiables à chaud sans avoir à
-# rouvrir la connexion EventSource déjà en cours.
+# simulation »). Réglages relus à CHAQUE itération (pas une fois à
+# l'ouverture de la connexion) pour que payload/intervalle/activation soient
+# modifiables à chaud sans avoir à rouvrir la connexion EventSource déjà en
+# cours.
+#
+# Conforme à DEX/sse-server-spec.md (App_screen-publisher), même principe
+# que /api/sse/captures (voir plus bas) mais avec son propre compteur id: —
+# ce sont deux flux/sources indépendants. Le payload JSON édité en admin est
+# envoyé TEL QUEL comme data: d'un event « display » (pas d'enveloppe
+# seq/ts ajoutée) : c'est un simulateur du format attendu par le client,
+# donc utile aussi pour tester volontairement un payload non conforme.
+
+_sse_dummy_id_counter = 0
+_sse_dummy_id_lock = threading.Lock()
+_SSE_HEARTBEAT_INTERVAL_S = 20.0
+
+
+def _sse_dummy_next_id() -> int:
+    global _sse_dummy_id_counter
+    with _sse_dummy_id_lock:
+        _sse_dummy_id_counter += 1
+        return _sse_dummy_id_counter
+
+
+def _sse_frame(event_id: int, event_type: str, data) -> str:
+    return f'id: {event_id}\nevent: {event_type}\ndata: {json.dumps(data)}\n\n'
+
 
 def _sse_dummy_generator():
-    seq = 0
     while True:
         enabled = get_setting('sse_dummy.enabled', '0') == '1'
         if not enabled:
-            # Commentaire SSE (ligne commençant par ':') : garde la connexion
-            # ouverte sans déclencher onmessage côté client, pour une
+            # Heartbeat même désactivé : garde la connexion ouverte et
+            # conforme (signal de vie 15-30s obligatoire), pour une
             # réactivation instantanée sans reconnexion EventSource.
-            yield ': disabled\n\n'
-            time.sleep(1.0)
+            yield _sse_frame(_sse_dummy_next_id(), 'heartbeat', {})
+            time.sleep(_SSE_HEARTBEAT_INTERVAL_S)
             continue
         try:
             payload = json.loads(get_setting('sse_dummy.payload', '') or '{}')
@@ -572,17 +594,28 @@ def _sse_dummy_generator():
             payload = None
         raw_interval = get_setting('sse_dummy.interval_ms', '') or '2000'
         interval_ms = max(200, min(60000, int(raw_interval) if raw_interval.isdigit() else 2000))
-        seq += 1
-        event = {'seq': seq, 'ts': time.time(), 'payload': payload}
-        yield f'data: {json.dumps(event)}\n\n'
-        time.sleep(interval_ms / 1000)
+        yield _sse_frame(_sse_dummy_next_id(), 'display', payload)
+
+        # Découpe l'attente en tranches <= _SSE_HEARTBEAT_INTERVAL_S pour
+        # garantir un signal de vie toutes les 15-30s même si l'intervalle
+        # réglé dépasse ce seuil (jusqu'à 60s autorisés) — réévalue aussi
+        # 'enabled' à chaque tranche pour réagir sans délai à une
+        # désactivation survenue en cours d'attente.
+        remaining_s = interval_ms / 1000
+        while remaining_s > 0:
+            chunk = min(_SSE_HEARTBEAT_INTERVAL_S, remaining_s)
+            time.sleep(chunk)
+            remaining_s -= chunk
+            if remaining_s <= 0 or get_setting('sse_dummy.enabled', '0') != '1':
+                break
+            yield _sse_frame(_sse_dummy_next_id(), 'heartbeat', {})
 
 
 @app.route('/api/sse/dummy')
 @require_admin_or_sse_auth
 def api_sse_dummy():
-    return Response(_sse_dummy_generator(), mimetype='text/event-stream',
-                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+    return Response(_sse_dummy_generator(), content_type='text/event-stream; charset=utf-8',
+                     headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
 
 
 # ── SSE de captures (flux événementiel réel) ─────────────────────────────────
@@ -716,13 +749,13 @@ def _sse_captures_generator():
     try:
         while True:
             try:
-                message = q.get(timeout=20)
+                message = q.get(timeout=_SSE_HEARTBEAT_INTERVAL_S)
             except queue.Empty:
                 # Heartbeat typé (event: heartbeat), toutes les 20s d'inactivité
                 # — dans la fourchette 15-30s exigée par le spec, avec un id:
                 # qui reste croissant comme tout autre message.
                 message = {'id': _sse_capture_next_id(), 'event': 'heartbeat', 'data': {}}
-            yield f"id: {message['id']}\nevent: {message['event']}\ndata: {json.dumps(message['data'])}\n\n"
+            yield _sse_frame(message['id'], message['event'], message['data'])
     finally:
         _sse_capture_unsubscribe(q)
 
@@ -3715,7 +3748,11 @@ def _block_ctx_screensaver_settings() -> dict:
 def _sse_dummy_settings():
     return {
         'enabled':      get_setting('sse_dummy.enabled', '0') == '1',
-        'payload':      get_setting('sse_dummy.payload', '') or '{"message": "hello pictotem"}',
+        'payload':      get_setting('sse_dummy.payload', '') or json.dumps({
+                            'importance': 3, 'ttlMs': 8000,
+                            'title': 'Alerte simulée', 'reason': 'Test de simulation',
+                            'contentUrl': '',
+                        }),
         'interval_ms':  int(get_setting('sse_dummy.interval_ms', '') or '2000'),
     }
 
