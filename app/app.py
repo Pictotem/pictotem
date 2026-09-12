@@ -595,9 +595,31 @@ def api_sse_dummy():
 # EventSource ouverte), remplie par le(s) thread(s) de requête de capture et
 # consommée par le thread de la connexion SSE correspondante — nécessaire
 # puisque Flask (mode dev threaded=True) n'a pas de bus d'événements natif.
+#
+# Format conforme à DEX/sse-server-spec.md du projet App_screen-publisher
+# (client d'arbitrage de priorité d'affichage multi-sources) : chaque message
+# porte un id: unique et croissant (global, partagé par tous les abonnés —
+# _sse_capture_next_id), un event: typé (« display » pour une capture,
+# « heartbeat » pour le signal de vie périodique), et un data: JSON avec le
+# schéma importance/ttlMs/title/reason/contentUrl attendu par ce client pour
+# décider quand prendre la main sur le Moniteur partagé — voir
+# _sse_captures_settings() pour importance/ttlMs (réglables en admin, mêmes
+# valeurs pour toutes les captures). Pas de rejeu sur Last-Event-ID (aucun
+# historique conservé) : autorisé par le spec à défaut ("l'ignorer
+# proprement"), un ttlMs systématique évite qu'un event manqué ne bloque
+# l'arbitrage indéfiniment côté client.
 
 _sse_capture_subscribers = set()
 _sse_capture_subscribers_lock = threading.Lock()
+_sse_capture_id_counter = 0
+_sse_capture_id_lock = threading.Lock()
+
+
+def _sse_capture_next_id() -> int:
+    global _sse_capture_id_counter
+    with _sse_capture_id_lock:
+        _sse_capture_id_counter += 1
+        return _sse_capture_id_counter
 
 
 def _sse_capture_subscribe():
@@ -612,12 +634,13 @@ def _sse_capture_unsubscribe(q):
         _sse_capture_subscribers.discard(q)
 
 
-def _sse_capture_broadcast(event: dict):
+def _sse_capture_broadcast(event_type: str, data: dict):
+    message = {'id': _sse_capture_next_id(), 'event': event_type, 'data': data}
     with _sse_capture_subscribers_lock:
         subscribers = list(_sse_capture_subscribers)
     for q in subscribers:
         try:
-            q.put_nowait(event)
+            q.put_nowait(message)
         except queue.Full:
             # Abonné trop lent (connexion EventSource qui ne consomme plus) :
             # on ignore l'event pour lui plutôt que de bloquer le thread de
@@ -626,17 +649,34 @@ def _sse_capture_broadcast(event: dict):
             logger.warning('SSE captures : abonné trop lent (queue pleine), event ignoré pour lui.')
 
 
+def _sse_captures_settings() -> dict:
+    raw_importance = get_setting('sse_captures.importance', '') or '3'
+    try:
+        importance = max(1, min(5, int(raw_importance)))
+    except (TypeError, ValueError):
+        importance = 3
+    raw_ttl = get_setting('sse_captures.ttl_ms', '') or '8000'
+    try:
+        ttl_ms = max(0, int(raw_ttl))
+    except (TypeError, ValueError):
+        ttl_ms = 8000
+    return {'importance': importance, 'ttl_ms': ttl_ms}
+
+
 def _sse_broadcast_capture(capture_id, media_uid, kind, filename, created_at):
-    """Construit et diffuse l'event SSE d'une capture qui vient d'être
-    enregistrée : date/heure (dérivées du created_at de record_capture, donc
-    identiques à la valeur en base), nom de fichier, et tags de la capture
-    séparés en deux listes — « participants » (tags dont le texte correspond
-    à celui d'un code invité actuellement configuré, voir /admin/guest_codes
-    : un admin peut préconfigurer un code/badge avec le nom d'un participant
-    comme texte associé) et « tags » (tout le reste, libres ou prédéfinis).
-    Le projet n'a pas de reconnaissance faciale ni de champ dédié « nom de
-    participant » : cette distinction réutilise le mécanisme de tags/codes
-    invités existant plutôt que d'en ajouter un nouveau."""
+    """Construit et diffuse l'event « display » d'une capture qui vient
+    d'être enregistrée (voir schéma spec en tête de section). tags/
+    participants restent calculés comme avant : « participants » = tags dont
+    le texte correspond à celui d'un code invité actuellement configuré
+    (voir /admin/guest_codes : un admin peut préconfigurer un code/badge
+    avec le nom d'un participant comme texte associé), « tags » = tout le
+    reste. contentUrl pointe vers le média servi publiquement (voir
+    /media/photo, /media/video : déjà accessible sans authentification pour
+    une requête non locale — c'est le même lien que celui utilisé par la
+    galerie publique côté visiteurs, voir require_media_auth/
+    is_gallery_authenticated dans auth.py), construit avec l'IP réseau
+    courante (get_network_info, même détection que build_gallery_url) plutôt
+    que 127.0.0.1 pour rester joignable depuis un autre poste."""
     tag_labels = [t['label'] for t in list_capture_tags(capture_id)]
     guest_texts = {
         resolve_dynamic_placeholders(gc['texte'])
@@ -645,9 +685,22 @@ def _sse_broadcast_capture(capture_id, media_uid, kind, filename, created_at):
     participants = [label for label in tag_labels if label in guest_texts]
     tags = [label for label in tag_labels if label not in guest_texts]
     date_str, _, time_str = (created_at or '').partition('T')
-    _sse_capture_broadcast({
-        'event': 'capture',
-        'id': capture_id,
+
+    settings = _sse_captures_settings()
+    net = get_network_info()
+    media_path = f'/media/photo/{filename}' if kind == 'photo' else f'/media/video/{filename}'
+    content_url = f"http://{net['ip']}:{net['port']}{media_path}"
+    reason = f"tags : {', '.join(tags) or 'aucun'} — participants : {', '.join(participants) or 'aucun'}"
+
+    _sse_capture_broadcast('display', {
+        'importance': settings['importance'],
+        'ttlMs': settings['ttl_ms'],
+        'title': f'Nouvelle capture — {kind}',
+        'reason': reason,
+        'contentUrl': content_url,
+        # Métadonnées complémentaires, hors schéma minimal du spec mais
+        # utiles à un consommateur qui voudrait plus de détail.
+        'captureId': capture_id,
         'media_uid': media_uid,
         'kind': kind,
         'filename': filename,
@@ -663,10 +716,13 @@ def _sse_captures_generator():
     try:
         while True:
             try:
-                event = q.get(timeout=15)
-                yield f'data: {json.dumps(event)}\n\n'
+                message = q.get(timeout=20)
             except queue.Empty:
-                yield ': keep-alive\n\n'
+                # Heartbeat typé (event: heartbeat), toutes les 20s d'inactivité
+                # — dans la fourchette 15-30s exigée par le spec, avec un id:
+                # qui reste croissant comme tout autre message.
+                message = {'id': _sse_capture_next_id(), 'event': 'heartbeat', 'data': {}}
+            yield f"id: {message['id']}\nevent: {message['event']}\ndata: {json.dumps(message['data'])}\n\n"
     finally:
         _sse_capture_unsubscribe(q)
 
@@ -674,8 +730,8 @@ def _sse_captures_generator():
 @app.route('/api/sse/captures')
 @require_admin_or_sse_auth
 def api_sse_captures():
-    return Response(_sse_captures_generator(), mimetype='text/event-stream',
-                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+    return Response(_sse_captures_generator(), content_type='text/event-stream; charset=utf-8',
+                     headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
 
 
 # ── Routes capture ────────────────────────────────────────────────────────────
@@ -3263,7 +3319,7 @@ _ADMIN_BLOCKS = {
     'slideshow_settings':      {'title': "Paramètres",                          'default_page': 'slideshow',   'template': 'blocks/slideshow_settings.html',      'context_fn': '_block_ctx_slideshow_settings'},
     'screensaver_settings':    {'title': "Paramètres",                          'default_page': 'screensaver', 'template': 'blocks/screensaver_settings.html',    'context_fn': '_block_ctx_screensaver_settings'},
     'sse_dummy_settings':      {'title': "Flux SSE de simulation (dev)",       'default_page': 'application', 'template': 'blocks/sse_dummy_settings.html',       'context_fn': '_block_ctx_sse_dummy_settings'},
-    'sse_captures_monitor':    {'title': "Flux SSE des captures",              'default_page': 'application', 'template': 'blocks/sse_captures_monitor.html', 'context_fn': None},
+    'sse_captures_monitor':    {'title': "Flux SSE des captures",              'default_page': 'application', 'template': 'blocks/sse_captures_monitor.html', 'context_fn': '_block_ctx_sse_captures_monitor'},
     'sse_api_auth':            {'title': "Accès externe aux flux SSE (identifiants)", 'default_page': 'application', 'template': 'blocks/sse_api_auth.html', 'context_fn': '_block_ctx_sse_api_auth'},
     'guest_uploads_settings':   {'title': "Paramètres",                         'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_settings.html',   'context_fn': '_block_ctx_guest_uploads_settings'},
     'guest_uploads_share_link': {'title': "Lien de partage",                    'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_share_link.html', 'context_fn': '_block_ctx_guest_uploads_share_link'},
@@ -3666,6 +3722,10 @@ def _sse_dummy_settings():
 
 def _block_ctx_sse_dummy_settings() -> dict:
     return {'sse_dummy_settings': _sse_dummy_settings()}
+
+
+def _block_ctx_sse_captures_monitor() -> dict:
+    return {'sse_captures_settings': _sse_captures_settings()}
 
 
 def _block_ctx_sse_api_auth() -> dict:
@@ -4089,6 +4149,30 @@ def admin_set_sse_dummy_settings():
 
     set_setting('sse_dummy.enabled', '1' if request.form.get('enabled') else '0')
     return _admin_block_redirect('sse_dummy_settings', ok='Réglages du flux de simulation enregistrés.')
+
+
+@app.route('/admin/application/sse_captures_settings', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_set_sse_captures_settings():
+    """Importance (1-5) et ttlMs communs à tous les events « display »
+    diffusés sur /api/sse/captures (voir _sse_captures_settings /
+    _sse_broadcast_capture) — combinés côté App_screen-publisher à la
+    priorité de base réglée pour cette source dans son propre dashboard."""
+    errors = []
+    raw_importance = (request.form.get('importance') or '').strip()
+    if raw_importance.isdigit() and 1 <= int(raw_importance) <= 5:
+        set_setting('sse_captures.importance', raw_importance)
+    else:
+        errors.append('importance invalide (doit être entre 1 et 5)')
+    raw_ttl = (request.form.get('ttl_ms') or '').strip()
+    if raw_ttl.isdigit() and int(raw_ttl) >= 0:
+        set_setting('sse_captures.ttl_ms', raw_ttl)
+    else:
+        errors.append('durée invalide (doit être un entier positif)')
+    if errors:
+        return _admin_block_redirect('sse_captures_monitor', err='Non enregistré : ' + ', '.join(errors) + '.')
+    return _admin_block_redirect('sse_captures_monitor', ok='Réglages du flux de captures enregistrés.')
 
 
 @app.route('/admin/application/sse_auth', methods=['POST'])
