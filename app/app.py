@@ -25,6 +25,7 @@ import unicodedata
 import zipfile
 from contextlib import closing
 from datetime import datetime, timedelta
+from functools import wraps
 from html import unescape as html_unescape
 
 import cv2
@@ -468,6 +469,84 @@ def stream_mjpg():
     return Response(stream_generator(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+# ── Authentification dédiée aux flux SSE (accès externe hors session admin) ──
+# Les deux routes SSE ci-dessous restent accessibles avec la session admin
+# habituelle (navigateur, voir require_admin_auth) — c'est ce qu'utilisent
+# les widgets "Test en direct"/"Démarrer" des blocs admin, via EventSource,
+# qui ne peut pas envoyer d'en-tête Authorization personnalisé. Mais un
+# consommateur externe non-navigateur (script, autre appli) n'a pas de
+# session : il s'authentifie via HTTP Basic avec un identifiant/mot de passe
+# DÉDIÉ à ces flux, indépendant du mot de passe admin — même principe et même
+# priorité (variable d'environnement > réglage en base > défaut) que
+# media_api._get_api_login/_get_api_password (voir media_api.py), repris ici
+# à l'identique plutôt que de coupler ce module à media_api.py.
+
+_SSE_AUTH_DEFAULTS = {'login': 'sse', 'password': 'changeme-sse-password'}
+_SSE_AUTH_UNSET = object()
+
+
+def _get_sse_api_login() -> str:
+    env = os.environ.get('PICTOTEM_SSE_LOGIN')
+    if env:
+        return env
+    db_value = get_setting('sse_api.login', '')
+    if db_value:
+        return db_value
+    return _SSE_AUTH_DEFAULTS['login']
+
+
+def set_sse_api_login(login: str) -> None:
+    set_setting('sse_api.login', (login or '').strip())
+
+
+def _get_sse_api_password() -> str:
+    env = os.environ.get('PICTOTEM_SSE_PASSWORD')
+    if env:
+        return env
+    db_value = get_setting('sse_api.password', _SSE_AUTH_UNSET)
+    if db_value is not _SSE_AUTH_UNSET:
+        return db_value
+    return _SSE_AUTH_DEFAULTS['password']
+
+
+def set_sse_api_password(password: str) -> None:
+    set_setting('sse_api.password', (password or '').strip())
+
+
+def _sse_api_credentials_status() -> dict:
+    """Origine des identifiants actuellement actifs, pour affichage
+    informatif côté back office (jamais le mot de passe en clair) — même
+    principe que auth.admin_password_status()/media_api.media_api_credentials_status()."""
+    if os.environ.get('PICTOTEM_SSE_LOGIN') or os.environ.get('PICTOTEM_SSE_PASSWORD'):
+        return {'source': 'env'}
+    if get_setting('sse_api.login', '') or get_setting('sse_api.password', _SSE_AUTH_UNSET) is not _SSE_AUTH_UNSET:
+        return {'source': 'db'}
+    return {'source': 'default'}
+
+
+def _sse_basic_auth_ok() -> bool:
+    auth = request.authorization
+    if not auth:
+        return False
+    login_ok = secrets.compare_digest(auth.username or '', _get_sse_api_login())
+    password_ok = secrets.compare_digest(auth.password or '', _get_sse_api_password())
+    return login_ok and password_ok
+
+
+def require_admin_or_sse_auth(f):
+    """Autorise soit la session admin habituelle (voir require_admin_auth),
+    soit des identifiants HTTP Basic dédiés (voir _sse_basic_auth_ok) — pour
+    les deux routes /api/sse/dummy et /api/sse/captures uniquement."""
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if is_admin_authenticated() or _sse_basic_auth_ok():
+            return f(*args, **kwargs)
+        resp = Response('Authentification requise.', status=401)
+        resp.headers['WWW-Authenticate'] = 'Basic realm="Pictotem - Flux SSE"'
+        return resp
+    return wrapped
+
+
 # ── SSE de simulation (dev) ──────────────────────────────────────────────────
 # Outil de préparation/test pour un futur flux temps réel : diffuse en boucle
 # un payload JSON "dummy" réglé depuis /admin/application (bloc « Flux SSE de
@@ -500,7 +579,7 @@ def _sse_dummy_generator():
 
 
 @app.route('/api/sse/dummy')
-@require_admin_auth
+@require_admin_or_sse_auth
 def api_sse_dummy():
     return Response(_sse_dummy_generator(), mimetype='text/event-stream',
                      headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
@@ -593,7 +672,7 @@ def _sse_captures_generator():
 
 
 @app.route('/api/sse/captures')
-@require_admin_auth
+@require_admin_or_sse_auth
 def api_sse_captures():
     return Response(_sse_captures_generator(), mimetype='text/event-stream',
                      headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
@@ -3185,6 +3264,7 @@ _ADMIN_BLOCKS = {
     'screensaver_settings':    {'title': "Paramètres",                          'default_page': 'screensaver', 'template': 'blocks/screensaver_settings.html',    'context_fn': '_block_ctx_screensaver_settings'},
     'sse_dummy_settings':      {'title': "Flux SSE de simulation (dev)",       'default_page': 'application', 'template': 'blocks/sse_dummy_settings.html',       'context_fn': '_block_ctx_sse_dummy_settings'},
     'sse_captures_monitor':    {'title': "Flux SSE des captures",              'default_page': 'application', 'template': 'blocks/sse_captures_monitor.html', 'context_fn': None},
+    'sse_api_auth':            {'title': "Accès externe aux flux SSE (identifiants)", 'default_page': 'application', 'template': 'blocks/sse_api_auth.html', 'context_fn': '_block_ctx_sse_api_auth'},
     'guest_uploads_settings':   {'title': "Paramètres",                         'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_settings.html',   'context_fn': '_block_ctx_guest_uploads_settings'},
     'guest_uploads_share_link': {'title': "Lien de partage",                    'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_share_link.html', 'context_fn': '_block_ctx_guest_uploads_share_link'},
     'guest_codes_code_settings':    {'title': "Réglages",                                    'default_page': 'guest_codes', 'template': 'blocks/guest_codes_code_settings.html',    'context_fn': '_block_ctx_guest_codes_code_settings'},
@@ -3586,6 +3666,13 @@ def _sse_dummy_settings():
 
 def _block_ctx_sse_dummy_settings() -> dict:
     return {'sse_dummy_settings': _sse_dummy_settings()}
+
+
+def _block_ctx_sse_api_auth() -> dict:
+    return {'sse_api_auth': {
+        'login': _get_sse_api_login(),
+        'source': _sse_api_credentials_status()['source'],
+    }}
 
 
 def _block_ctx_guest_uploads_settings() -> dict:
@@ -4002,6 +4089,23 @@ def admin_set_sse_dummy_settings():
 
     set_setting('sse_dummy.enabled', '1' if request.form.get('enabled') else '0')
     return _admin_block_redirect('sse_dummy_settings', ok='Réglages du flux de simulation enregistrés.')
+
+
+@app.route('/admin/application/sse_auth', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_set_sse_api_auth():
+    """Identifiants HTTP Basic dédiés aux flux SSE (/api/sse/dummy,
+    /api/sse/captures) pour un accès externe hors session admin — voir
+    require_admin_or_sse_auth. Mot de passe laissé vide = inchangé, même
+    principe que admin_tags_media_api_settings (media_api.py)."""
+    login = (request.form.get('login') or '').strip()
+    if login:
+        set_sse_api_login(login)
+    password = request.form.get('password') or ''
+    if password:
+        set_sse_api_password(password)
+    return _admin_block_redirect('sse_api_auth', ok='Identifiants du flux SSE enregistrés.')
 
 
 @app.route('/admin/access')
