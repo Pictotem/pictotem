@@ -696,33 +696,44 @@ def _sse_captures_settings() -> dict:
     return {'importance': importance, 'ttl_ms': ttl_ms}
 
 
-def _sse_broadcast_capture(capture_id, media_uid, kind, filename, created_at):
-    """Construit et diffuse l'event « display » d'une capture qui vient
-    d'être enregistrée (voir schéma spec en tête de section). tags/
-    participants restent calculés comme avant : « participants » = tags dont
-    le texte correspond à celui d'un code invité actuellement configuré
-    (voir /admin/guest_codes : un admin peut préconfigurer un code/badge
-    avec le nom d'un participant comme texte associé), « tags » = tout le
-    reste. contentUrl pointe vers le média servi publiquement (voir
-    /media/photo, /media/video : déjà accessible sans authentification pour
-    une requête non locale — c'est le même lien que celui utilisé par la
-    galerie publique côté visiteurs, voir require_media_auth/
-    is_gallery_authenticated dans auth.py), construit avec l'IP réseau
-    courante (get_network_info, même détection que build_gallery_url) plutôt
-    que 127.0.0.1 pour rester joignable depuis un autre poste."""
-    tag_labels = [t['label'] for t in list_capture_tags(capture_id)]
+def _split_tags_participants(tag_labels: list) -> tuple:
+    """Sépare des libellés de tags entre « participants » (le texte
+    correspond à celui d'un code invité actuellement configuré — voir
+    /admin/guest_codes : un admin peut préconfigurer un code/badge avec le
+    nom d'un participant comme texte associé) et « tags » (tout le reste).
+    Partagé entre _sse_broadcast_capture et /screen/capture/<media_uid>
+    (screen_capture_display) pour que le flux SSE et la page d'overlay
+    affichent exactement la même répartition."""
     guest_texts = {
         resolve_dynamic_placeholders(gc['texte'])
         for gc in list_guest_codes() if gc.get('texte')
     }
     participants = [label for label in tag_labels if label in guest_texts]
     tags = [label for label in tag_labels if label not in guest_texts]
+    return tags, participants
+
+
+def _sse_broadcast_capture(capture_id, media_uid, kind, filename, created_at):
+    """Construit et diffuse l'event « display » d'une capture qui vient
+    d'être enregistrée (voir schéma spec en tête de section). contentUrl
+    pointe vers /screen/capture/<media_uid> (screen_capture_display) — une
+    page HTML dédiée, avec son propre design réglable en admin (bloc
+    « Overlay écran partagé »), plutôt que directement vers le fichier média
+    brut : le spec sépare volontairement l'arbitrage (SSE) du rendu visuel
+    détaillé, qui reste la responsabilité d'une page web autonome. Cette
+    page est protégée par require_media_auth, déjà accessible sans
+    authentification pour une requête non locale (même mécanisme que la
+    galerie publique côté visiteurs, voir is_gallery_authenticated dans
+    auth.py) — donc joignable par App_screen-publisher depuis un autre
+    poste. URL construite avec l'IP réseau courante (get_network_info, même
+    détection que build_gallery_url) plutôt que 127.0.0.1."""
+    tag_labels = [t['label'] for t in list_capture_tags(capture_id)]
+    tags, participants = _split_tags_participants(tag_labels)
     date_str, _, time_str = (created_at or '').partition('T')
 
     settings = _sse_captures_settings()
     net = get_network_info()
-    media_path = f'/media/photo/{filename}' if kind == 'photo' else f'/media/video/{filename}'
-    content_url = f"http://{net['ip']}:{net['port']}{media_path}"
+    content_url = f"http://{net['ip']}:{net['port']}/screen/capture/{media_uid}"
     reason = f"tags : {', '.join(tags) or 'aucun'} — participants : {', '.join(participants) or 'aucun'}"
 
     _sse_capture_broadcast('display', {
@@ -765,6 +776,90 @@ def _sse_captures_generator():
 def api_sse_captures():
     return Response(_sse_captures_generator(), content_type='text/event-stream; charset=utf-8',
                      headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
+
+
+# ── Page d'overlay écran partagé (contentUrl de /api/sse/captures) ──────────
+# Page HTML autonome (voir §1 du spec : « la page web reste seule
+# responsable de son contenu ») affichant une capture précise sous forme
+# d'un petit bloc en overlay (miniature + données), design réglable depuis
+# /admin/application (bloc « Overlay écran partagé ») — position à l'écran,
+# côté miniature/texte, largeur, couleurs, police, choix des champs. Ne fait
+# aucun appel réseau supplémentaire une fois chargée (tout est injecté côté
+# serveur au rendu) : App_screen-publisher recharge de toute façon cette URL
+# à chaque nouvel event display, une page « vivante » n'aurait aucun intérêt
+# ici.
+
+def _hex_to_rgba_css(hex_color: str, opacity_pct: int) -> str:
+    """Convertit une couleur hex (#rrggbb, avec ou sans #) + une opacité en
+    pourcentage (0-100) en chaîne CSS rgba(...) — évite de faire ce calcul
+    en Jinja côté template. Repli sur noir semi-transparent si hex_color
+    n'est pas un hex à 6 chiffres valide (ex. réglage corrompu à la main)."""
+    hex_color = (hex_color or '').lstrip('#')
+    if len(hex_color) != 6:
+        return 'rgba(0, 0, 0, 0.8)'
+    try:
+        r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return 'rgba(0, 0, 0, 0.8)'
+    alpha = max(0, min(100, opacity_pct)) / 100
+    return f'rgba({r}, {g}, {b}, {alpha})'
+
+
+def _screen_display_settings() -> dict:
+    raw_width = get_setting('screen_display.width_pct', '') or '15'
+    try:
+        width_pct = max(5, min(100, int(raw_width)))
+    except (TypeError, ValueError):
+        width_pct = 15
+    raw_font_size = get_setting('screen_display.font_size_px', '') or '16'
+    try:
+        font_size_px = max(8, min(72, int(raw_font_size)))
+    except (TypeError, ValueError):
+        font_size_px = 16
+    position = get_setting('screen_display.position', '') or 'bottom-right'
+    if position not in ('top-left', 'top-right', 'bottom-left', 'bottom-right'):
+        position = 'bottom-right'
+    media_side = get_setting('screen_display.media_side', '') or 'left'
+    if media_side not in ('left', 'right'):
+        media_side = 'left'
+    bg_color = get_setting('screen_display.bg_color', '') or '#000000'
+    raw_opacity = get_setting('screen_display.bg_opacity', '') or '80'
+    try:
+        bg_opacity = max(0, min(100, int(raw_opacity)))
+    except (TypeError, ValueError):
+        bg_opacity = 80
+    return {
+        'position': position,
+        'media_side': media_side,
+        'width_pct': width_pct,
+        'bg_color': bg_color,
+        'bg_opacity': bg_opacity,
+        'bg_color_css': _hex_to_rgba_css(bg_color, bg_opacity),
+        'text_color': get_setting('screen_display.text_color', '') or '#ffffff',
+        'font_family': get_setting('screen_display.font_family', '') or 'system-ui, sans-serif',
+        'font_size_px': font_size_px,
+        'show_media': get_setting('screen_display.show_media', '1') == '1',
+        'show_tags': get_setting('screen_display.show_tags', '1') == '1',
+        'show_participants': get_setting('screen_display.show_participants', '1') == '1',
+        'show_datetime': get_setting('screen_display.show_datetime', '1') == '1',
+    }
+
+
+@app.route('/screen/capture/<media_uid>')
+@require_media_auth
+def screen_capture_display(media_uid):
+    media = get_media_by_uid(media_uid)
+    if not media or media.get('source') != 'official':
+        abort(404)
+    tag_labels = [t['label'] for t in list_capture_tags(media['id'])]
+    tags, participants = _split_tags_participants(tag_labels)
+    date_str, _, time_str = (media.get('created_at') or '').partition('T')
+    return render_template(
+        'screen_capture.html',
+        settings=_screen_display_settings(),
+        thumb_url=url_for('media_thumb', filename=media['thumb_filename']) if media.get('thumb_filename') else '',
+        date=date_str, heure=time_str, tags=tags, participants=participants,
+    )
 
 
 # ── Routes capture ────────────────────────────────────────────────────────────
@@ -3354,6 +3449,7 @@ _ADMIN_BLOCKS = {
     'sse_dummy_settings':      {'title': "Flux SSE de simulation (dev)",       'default_page': 'application', 'template': 'blocks/sse_dummy_settings.html',       'context_fn': '_block_ctx_sse_dummy_settings'},
     'sse_captures_monitor':    {'title': "Flux SSE des captures",              'default_page': 'application', 'template': 'blocks/sse_captures_monitor.html', 'context_fn': '_block_ctx_sse_captures_monitor'},
     'sse_api_auth':            {'title': "Accès externe aux flux SSE (identifiants)", 'default_page': 'application', 'template': 'blocks/sse_api_auth.html', 'context_fn': '_block_ctx_sse_api_auth'},
+    'screen_display_settings': {'title': "Overlay écran partagé",              'default_page': 'application', 'template': 'blocks/screen_display_settings.html', 'context_fn': '_block_ctx_screen_display_settings'},
     'guest_uploads_settings':   {'title': "Paramètres",                         'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_settings.html',   'context_fn': '_block_ctx_guest_uploads_settings'},
     'guest_uploads_share_link': {'title': "Lien de partage",                    'default_page': 'guest_uploads', 'template': 'blocks/guest_uploads_share_link.html', 'context_fn': '_block_ctx_guest_uploads_share_link'},
     'guest_codes_code_settings':    {'title': "Réglages",                                    'default_page': 'guest_codes', 'template': 'blocks/guest_codes_code_settings.html',    'context_fn': '_block_ctx_guest_codes_code_settings'},
@@ -3770,6 +3866,15 @@ def _block_ctx_sse_api_auth() -> dict:
         'login': _get_sse_api_login(),
         'source': _sse_api_credentials_status()['source'],
     }}
+
+
+def _block_ctx_screen_display_settings() -> dict:
+    latest, _total = list_captures(sort='desc', page=1, page_size=1)
+    preview_media_uid = latest[0]['media_uid'] if latest and latest[0].get('media_uid') else ''
+    return {
+        'screen_display_settings': _screen_display_settings(),
+        'screen_display_preview_media_uid': preview_media_uid,
+    }
 
 
 def _block_ctx_guest_uploads_settings() -> dict:
@@ -4227,6 +4332,73 @@ def admin_set_sse_api_auth():
     if password:
         set_sse_api_password(password)
     return _admin_block_redirect('sse_api_auth', ok='Identifiants du flux SSE enregistrés.')
+
+
+@app.route('/admin/application/screen_display', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_set_screen_display_settings():
+    """Design de la page /screen/capture/<media_uid> (voir
+    _screen_display_settings/screen_capture_display) : position à l'écran,
+    côté miniature/texte, largeur, couleurs, police, choix des champs.
+    Aucun champ invalide ne bloque l'enregistrement des autres (même
+    principe que admin_tags_media_api_settings)."""
+    errors = []
+
+    position = request.form.get('position') or ''
+    if position in ('top-left', 'top-right', 'bottom-left', 'bottom-right'):
+        set_setting('screen_display.position', position)
+    else:
+        errors.append('position invalide')
+
+    media_side = request.form.get('media_side') or ''
+    if media_side in ('left', 'right'):
+        set_setting('screen_display.media_side', media_side)
+    else:
+        errors.append('côté média invalide')
+
+    raw_width = (request.form.get('width_pct') or '').strip()
+    if raw_width.isdigit() and 5 <= int(raw_width) <= 100:
+        set_setting('screen_display.width_pct', raw_width)
+    else:
+        errors.append('largeur invalide (doit être entre 5 et 100)')
+
+    raw_font_size = (request.form.get('font_size_px') or '').strip()
+    if raw_font_size.isdigit() and 8 <= int(raw_font_size) <= 72:
+        set_setting('screen_display.font_size_px', raw_font_size)
+    else:
+        errors.append('taille de police invalide (doit être entre 8 et 72)')
+
+    bg_color = (request.form.get('bg_color') or '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', bg_color):
+        set_setting('screen_display.bg_color', bg_color)
+    else:
+        errors.append('couleur de fond invalide')
+
+    raw_opacity = (request.form.get('bg_opacity') or '').strip()
+    if raw_opacity.isdigit() and 0 <= int(raw_opacity) <= 100:
+        set_setting('screen_display.bg_opacity', raw_opacity)
+    else:
+        errors.append('opacité invalide (doit être entre 0 et 100)')
+
+    text_color = (request.form.get('text_color') or '').strip()
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', text_color):
+        set_setting('screen_display.text_color', text_color)
+    else:
+        errors.append('couleur de texte invalide')
+
+    font_family = (request.form.get('font_family') or '').strip()
+    if font_family:
+        set_setting('screen_display.font_family', font_family)
+
+    set_setting('screen_display.show_media', '1' if request.form.get('show_media') else '0')
+    set_setting('screen_display.show_tags', '1' if request.form.get('show_tags') else '0')
+    set_setting('screen_display.show_participants', '1' if request.form.get('show_participants') else '0')
+    set_setting('screen_display.show_datetime', '1' if request.form.get('show_datetime') else '0')
+
+    if errors:
+        return _admin_block_redirect('screen_display_settings', err='Non enregistré : ' + ', '.join(errors) + '.')
+    return _admin_block_redirect('screen_display_settings', ok="Réglages de l'overlay enregistrés.")
 
 
 @app.route('/admin/access')

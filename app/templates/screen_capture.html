@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Pictotem — overlay capture</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+  }
+  .overlay {
+    position: fixed;
+    {% if 'top' in settings.position %}top: 16px;{% else %}bottom: 16px;{% endif %}
+    {% if 'left' in settings.position %}left: 16px;{% else %}right: 16px;{% endif %}
+    width: {{ settings.width_pct }}vw;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: {{ 'row-reverse' if settings.media_side == 'right' else 'row' }};
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 10px;
+    background: {{ settings.bg_color_css }};
+    color: {{ settings.text_color }};
+    font-family: {{ settings.font_family }};
+    font-size: {{ settings.font_size_px }}px;
+  }
+  .overlay img {
+    max-width: 40%;
+    max-height: 90px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    display: block;
+  }
+  .overlay .text {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.4;
+  }
+  .overlay .row {
+    margin: 2px 0;
+    overflow-wrap: break-word;
+  }
+  .overlay .label {
+    opacity: 0.75;
+    font-size: 0.85em;
+  }
+</style>
+</head>
+<body>
+  <div class="overlay">
+    {% if settings.show_media and thumb_url %}
+    <img src="{{ thumb_url }}" alt="">
+    {% endif %}
+    <div class="text">
+      {% if settings.show_datetime %}
+      <div class="row">{{ date }} {{ heure }}</div>
+      {% endif %}
+      {% if settings.show_tags and tags %}
+      <div class="row"><span class="label">Tags :</span> {{ tags|join(', ') }}</div>
+      {% endif %}
+      {% if settings.show_participants and participants %}
+      <div class="row"><span class="label">Participants :</span> {{ participants|join(', ') }}</div>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<div class="form-card">
+  <p class="section-hint">
+    Design de la page affichée par App_screen-publisher pendant une alerte de capture
+    (<code>contentUrl</code> de l'event <code>display</code> — voir <code>/screen/capture/&lt;media_uid&gt;</code>) :
+    un petit bloc en overlay (miniature + données) plutôt que le média en plein écran.
+  </p>
+
+  <form method="post" action="{{ url_for('admin_set_screen_display_settings') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Position à l'écran</label>
+        <select name="position">
+          <option value="top-left" {% if screen_display_settings.position == 'top-left' %}selected{% endif %}>Haut gauche</option>
+          <option value="top-right" {% if screen_display_settings.position == 'top-right' %}selected{% endif %}>Haut droite</option>
+          <option value="bottom-left" {% if screen_display_settings.position == 'bottom-left' %}selected{% endif %}>Bas gauche</option>
+          <option value="bottom-right" {% if screen_display_settings.position == 'bottom-right' %}selected{% endif %}>Bas droite</option>
+        </select>
+      </div>
+      <div class="field field-half">
+        <label>Côté de la miniature (par rapport au texte)</label>
+        <select name="media_side">
+          <option value="left" {% if screen_display_settings.media_side == 'left' %}selected{% endif %}>Miniature à gauche, texte à droite</option>
+          <option value="right" {% if screen_display_settings.media_side == 'right' %}selected{% endif %}>Miniature à droite, texte à gauche</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Largeur du bloc (% de la largeur d'écran)</label>
+        <input type="number" name="width_pct" min="5" max="100" value="{{ screen_display_settings.width_pct }}">
+      </div>
+      <div class="field field-half">
+        <label>Taille du texte (px)</label>
+        <input type="number" name="font_size_px" min="8" max="72" value="{{ screen_display_settings.font_size_px }}">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Couleur de fond</label>
+        <input type="color" name="bg_color" value="{{ screen_display_settings.bg_color }}">
+      </div>
+      <div class="field field-half">
+        <label>Opacité du fond (%)</label>
+        <input type="number" name="bg_opacity" min="0" max="100" value="{{ screen_display_settings.bg_opacity }}">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Couleur du texte</label>
+        <input type="color" name="text_color" value="{{ screen_display_settings.text_color }}">
+      </div>
+      <div class="field field-half">
+        <label>Police (CSS font-family)</label>
+        <input type="text" name="font_family" value="{{ screen_display_settings.font_family }}">
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="checkbox-row">
+        <input type="checkbox" name="show_media" value="1" {% if screen_display_settings.show_media %}checked{% endif %}>
+        Afficher la miniature du média
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" name="show_datetime" value="1" {% if screen_display_settings.show_datetime %}checked{% endif %}>
+        Afficher la date/heure
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" name="show_tags" value="1" {% if screen_display_settings.show_tags %}checked{% endif %}>
+        Afficher les tags
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" name="show_participants" value="1" {% if screen_display_settings.show_participants %}checked{% endif %}>
+        Afficher les participants identifiés
+      </label>
+    </div>
+
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+
+  {% if screen_display_preview_media_uid %}
+  <p class="section-hint" style="margin-top:16px">
+    Aperçu avec la dernière capture (<code>{{ screen_display_preview_media_uid }}</code>) :
+    <a href="{{ url_for('screen_capture_display', media_uid=screen_display_preview_media_uid) }}" target="_blank" rel="noopener">
+      ouvrir la page d'overlay dans un nouvel onglet
+    </a>.
+  </p>
+  {% else %}
+  <p class="section-hint" style="margin-top:16px">Aucune capture existante pour l'instant — l'aperçu apparaîtra ici après la première capture.</p>
+  {% endif %}
+</div>
