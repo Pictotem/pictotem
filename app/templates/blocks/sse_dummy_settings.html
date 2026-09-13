@@ -23,7 +23,7 @@
       <textarea name="payload" rows="6" id="sseDummyPayload"
                 style="width:100%;font-family:monospace;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:10px 14px;font-size:14px">{{ sse_dummy_settings.payload }}</textarea>
       <div class="field-row" style="align-items:center;gap:10px;margin-top:8px">
-        <button type="button" class="action-btn" id="sseDummyInsertMedia">Insérer une capture de test</button>
+        <button type="button" class="action-btn" id="sseDummyInsertMedia">Insérer tous les champs d'une capture de test</button>
         <span id="sseDummyInsertMediaStatus" style="color:var(--muted);font-size:13px"></span>
       </div>
     </div>
@@ -114,9 +114,31 @@
         insertMediaStatus.textContent = data.error || 'Aucune capture disponible.';
         return;
       }
-      obj.overlay = { ...(obj.overlay || {}), mediaUrl: data.mediaUrl, mediaType: data.mediaType };
+      // Reprend tous les champs que _sse_broadcast_capture ajoute pour une
+      // vraie capture (voir app.py) : à la racine (mode "page" + métadonnées)
+      // et dans overlay (mode "overlay"), pour tester l'affichage des deux
+      // modes sans avoir à les retaper à la main.
+      obj.contentUrl = data.contentUrl;
+      obj.captureId = data.captureId;
+      obj.media_uid = data.media_uid;
+      obj.kind = data.kind;
+      obj.filename = data.filename;
+      obj.date = data.date;
+      obj.heure = data.heure;
+      obj.tags = data.tags;
+      obj.participants = data.participants;
+      obj.overlay = {
+        ...(obj.overlay || {}),
+        mediaUrl: data.mediaUrl,
+        mediaType: data.mediaType,
+        fields: [
+          { key: 'datetime', label: 'Heure', value: `${data.date} ${data.heure}` },
+          { key: 'tags', label: 'Tags', value: data.tags.join(', ') || 'aucun' },
+          { key: 'participants', label: 'Participants', value: data.participants.join(', ') || 'aucun' },
+        ],
+      };
       payloadField.value = JSON.stringify(obj, null, 2);
-      insertMediaStatus.textContent = 'Miniature insérée — pense à Enregistrer puis Démarrer pour tester.';
+      insertMediaStatus.textContent = 'Champs de test insérés — pense à Enregistrer puis Démarrer pour tester.';
     } catch (e) {
       insertMediaStatus.textContent = 'Erreur réseau lors de la récupération de la capture.';
     }

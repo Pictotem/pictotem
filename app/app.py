@@ -4330,19 +4330,34 @@ def admin_set_sse_dummy_settings():
 @require_admin_auth
 def admin_sse_dummy_sample_media():
     """Fournit à sse_dummy_settings.html (bouton « Insérer une capture de
-    test ») l'URL de miniature d'une capture réelle existante, pour tester le
-    payload dummy en mode overlay sans devoir connaître un nom de fichier.
-    Même construction d'URL (IP réseau, pas 127.0.0.1) que
+    test ») l'ensemble des champs qu'une vraie capture porterait dans l'event
+    « display » (voir _sse_broadcast_capture) — miniature, contentUrl,
+    métadonnées (captureId, media_uid, kind, filename, date, heure, tags,
+    participants) — pour tester le payload dummy en mode overlay comme en
+    mode page, sans devoir connaître un nom de fichier ni retaper ces
+    champs à la main. Même construction d'URL (IP réseau, pas 127.0.0.1) que
     _sse_broadcast_capture, pour rester joignable par App_screen-publisher
     depuis un autre poste."""
     captures, _ = list_captures(sort='desc', page=1, page_size=20)
     capture = next((c for c in captures if c['thumb_filename']), None)
     if not capture:
         return jsonify(ok=False, error='Aucune capture avec miniature disponible.')
+    tag_labels = [t['label'] for t in list_capture_tags(capture['id'])]
+    tags, participants = _split_tags_participants(tag_labels)
+    date_str, _, time_str = (capture['created_at'] or '').partition('T')
     net = get_network_info()
     return jsonify(ok=True,
                     mediaUrl=f"http://{net['ip']}:{net['port']}/media/thumb/{capture['thumb_filename']}",
-                    mediaType='image')
+                    mediaType='image',
+                    contentUrl=f"http://{net['ip']}:{net['port']}/screen/capture/{capture['media_uid']}",
+                    captureId=capture['id'],
+                    media_uid=capture['media_uid'],
+                    kind=capture['kind'],
+                    filename=capture['filename'],
+                    date=date_str,
+                    heure=time_str,
+                    tags=tags,
+                    participants=participants)
 
 
 @app.route('/admin/application/sse_captures_settings', methods=['POST'])
