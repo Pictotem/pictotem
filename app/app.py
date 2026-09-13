@@ -4326,6 +4326,25 @@ def admin_set_sse_dummy_settings():
     return _admin_block_redirect('sse_dummy_settings', ok='Réglages du flux de simulation enregistrés.')
 
 
+@app.route('/admin/application/sse_dummy_sample_media')
+@require_admin_auth
+def admin_sse_dummy_sample_media():
+    """Fournit à sse_dummy_settings.html (bouton « Insérer une capture de
+    test ») l'URL de miniature d'une capture réelle existante, pour tester le
+    payload dummy en mode overlay sans devoir connaître un nom de fichier.
+    Même construction d'URL (IP réseau, pas 127.0.0.1) que
+    _sse_broadcast_capture, pour rester joignable par App_screen-publisher
+    depuis un autre poste."""
+    captures, _ = list_captures(sort='desc', page=1, page_size=20)
+    capture = next((c for c in captures if c['thumb_filename']), None)
+    if not capture:
+        return jsonify(ok=False, error='Aucune capture avec miniature disponible.')
+    net = get_network_info()
+    return jsonify(ok=True,
+                    mediaUrl=f"http://{net['ip']}:{net['port']}/media/thumb/{capture['thumb_filename']}",
+                    mediaType='image')
+
+
 @app.route('/admin/application/sse_captures_settings', methods=['POST'])
 @require_admin_auth
 @csrf_protect

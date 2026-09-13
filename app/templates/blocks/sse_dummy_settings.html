@@ -20,8 +20,12 @@
 
     <div class="field">
       <label>Payload JSON (répété à chaque envoi)</label>
-      <textarea name="payload" rows="6"
+      <textarea name="payload" rows="6" id="sseDummyPayload"
                 style="width:100%;font-family:monospace;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:10px 14px;font-size:14px">{{ sse_dummy_settings.payload }}</textarea>
+      <div class="field-row" style="align-items:center;gap:10px;margin-top:8px">
+        <button type="button" class="action-btn" id="sseDummyInsertMedia">Insérer une capture de test</button>
+        <span id="sseDummyInsertMediaStatus" style="color:var(--muted);font-size:13px"></span>
+      </div>
     </div>
 
     <div class="field-row">
@@ -89,5 +93,33 @@
 
   stopBtn?.addEventListener('click', stop);
   window.addEventListener('beforeunload', stop);
+
+  const payloadField = document.getElementById('sseDummyPayload');
+  const insertMediaBtn = document.getElementById('sseDummyInsertMedia');
+  const insertMediaStatus = document.getElementById('sseDummyInsertMediaStatus');
+
+  insertMediaBtn?.addEventListener('click', async () => {
+    let obj;
+    try {
+      obj = JSON.parse(payloadField.value || '{}');
+    } catch (e) {
+      insertMediaStatus.textContent = 'JSON actuel invalide — corrige-le avant d\'insérer une capture.';
+      return;
+    }
+    insertMediaStatus.textContent = 'Recherche d\'une capture…';
+    try {
+      const res = await fetch('/admin/application/sse_dummy_sample_media');
+      const data = await res.json();
+      if (!data.ok) {
+        insertMediaStatus.textContent = data.error || 'Aucune capture disponible.';
+        return;
+      }
+      obj.overlay = { ...(obj.overlay || {}), mediaUrl: data.mediaUrl, mediaType: data.mediaType };
+      payloadField.value = JSON.stringify(obj, null, 2);
+      insertMediaStatus.textContent = 'Miniature insérée — pense à Enregistrer puis Démarrer pour tester.';
+    } catch (e) {
+      insertMediaStatus.textContent = 'Erreur réseau lors de la récupération de la capture.';
+    }
+  });
 })();
 </script>
