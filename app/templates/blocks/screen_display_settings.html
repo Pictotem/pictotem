@@ -1,8 +1,13 @@
 <div class="form-card">
   <p class="section-hint">
-    Design de la page affichée par App_screen-publisher pendant une alerte de capture
-    (<code>contentUrl</code> de l'event <code>display</code> — voir <code>/screen/capture/&lt;media_uid&gt;</code>) :
-    un petit bloc en overlay (miniature + données) plutôt que le média en plein écran.
+    Ces réglages servent à deux destinations à la fois, selon comment la source Pictotem est
+    enregistrée côté App_screen-publisher : le design de la page <code>/screen/capture/&lt;media_uid&gt;</code>
+    (mode d'affichage <strong>« page »</strong>, prise de contrôle plein écran, via <code>contentUrl</code>),
+    et le choix des champs envoyés dans <code>overlay.fields</code>/<code>overlay.mediaUrl</code> (mode
+    <strong>« overlay »</strong>, petit bloc en surimpression du contenu déjà affiché — dans ce mode, la
+    position/les couleurs/la police se règlent côté App_screen-publisher, pas ici). Les cases à cocher
+    (média, date/heure, tags, participants) s'appliquent aux deux modes ; position/largeur/couleurs/police
+    ne s'appliquent qu'au mode « page ».
   </p>
 
   <form method="post" action="{{ url_for('admin_set_screen_display_settings') }}">

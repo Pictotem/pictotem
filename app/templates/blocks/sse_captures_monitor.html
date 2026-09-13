@@ -76,7 +76,10 @@
     source.addEventListener('display', (e) => {
       try {
         const d = JSON.parse(e.data);
-        appendLog(`#${e.lastEventId} [${d.date} ${d.heure}] ${d.title} (importance ${d.importance}, ttl ${d.ttlMs}ms) — ${d.reason} — ${d.contentUrl}`);
+        const overlayInfo = d.overlay
+          ? `overlay: [${(d.overlay.fields || []).map(f => `${f.label}=${f.value}`).join(', ')}]${d.overlay.mediaUrl ? ' + média' : ''}`
+          : 'overlay: (absent)';
+        appendLog(`#${e.lastEventId} [${d.date} ${d.heure}] ${d.title} (importance ${d.importance}, ttl ${d.ttlMs}ms) — ${d.reason} — ${overlayInfo} — page: ${d.contentUrl}`);
       } catch (err) {
         appendLog(e.data);
       }

@@ -713,34 +713,67 @@ def _split_tags_participants(tag_labels: list) -> tuple:
     return tags, participants
 
 
-def _sse_broadcast_capture(capture_id, media_uid, kind, filename, created_at):
+def _sse_broadcast_capture(capture_id, media_uid, kind, filename, thumb_filename, created_at):
     """Construit et diffuse l'event « display » d'une capture qui vient
-    d'être enregistrée (voir schéma spec en tête de section). contentUrl
-    pointe vers /screen/capture/<media_uid> (screen_capture_display) — une
-    page HTML dédiée, avec son propre design réglable en admin (bloc
-    « Overlay écran partagé »), plutôt que directement vers le fichier média
-    brut : le spec sépare volontairement l'arbitrage (SSE) du rendu visuel
-    détaillé, qui reste la responsabilité d'une page web autonome. Cette
-    page est protégée par require_media_auth, déjà accessible sans
-    authentification pour une requête non locale (même mécanisme que la
+    d'être enregistrée (voir schéma étendu DEX/sse-server-spec.md §4bis,
+    App_screen-publisher). Deux destinations distinctes et indépendantes
+    cohabitent dans le même event, pour les deux modes d'affichage possibles
+    côté client (voir §1 du spec) :
+      - contentUrl pointe vers /screen/capture/<media_uid>
+        (screen_capture_display), une page HTML dédiée — utilisée
+        uniquement si la source est enregistrée en mode "page" (prise de
+        contrôle plein écran) ;
+      - overlay.mediaUrl/overlay.fields portent le même contenu (miniature +
+        champs) sous une forme structurée — utilisés uniquement si la source
+        est enregistrée en mode "overlay" (petit bloc en surimpression, voir
+        architecture.md §11bis) ; contentUrl est alors ignoré par le client.
+    Les deux URLs sont protégées par require_media_auth, déjà accessibles
+    sans authentification pour une requête non locale (même mécanisme que la
     galerie publique côté visiteurs, voir is_gallery_authenticated dans
-    auth.py) — donc joignable par App_screen-publisher depuis un autre
-    poste. URL construite avec l'IP réseau courante (get_network_info, même
-    détection que build_gallery_url) plutôt que 127.0.0.1."""
+    auth.py), et construites avec l'IP réseau courante (get_network_info,
+    même détection que build_gallery_url) plutôt que 127.0.0.1, pour rester
+    joignables par App_screen-publisher depuis un autre poste.
+    Les champs affichés dans overlay.fields et la présence d'overlay.mediaUrl
+    suivent les mêmes réglages admin (bloc « Overlay écran partagé ») que la
+    page /screen/capture/<media_uid> — un seul jeu de réglages pour les deux
+    modes."""
     tag_labels = [t['label'] for t in list_capture_tags(capture_id)]
     tags, participants = _split_tags_participants(tag_labels)
     date_str, _, time_str = (created_at or '').partition('T')
 
     settings = _sse_captures_settings()
+    display_settings = _screen_display_settings()
     net = get_network_info()
     content_url = f"http://{net['ip']}:{net['port']}/screen/capture/{media_uid}"
     reason = f"tags : {', '.join(tags) or 'aucun'} — participants : {', '.join(participants) or 'aucun'}"
+
+    overlay_fields = []
+    if display_settings['show_datetime']:
+        overlay_fields.append({'key': 'datetime', 'label': 'Heure', 'value': f'{date_str} {time_str}'})
+    if display_settings['show_tags'] and tags:
+        overlay_fields.append({'key': 'tags', 'label': 'Tags', 'value': ', '.join(tags)})
+    if display_settings['show_participants'] and participants:
+        overlay_fields.append({'key': 'participants', 'label': 'Participants', 'value': ', '.join(participants)})
+    overlay = {
+        'fields': overlay_fields,
+        # expiresAt (epoch ms) : voir §4bis du spec — si l'event a patienté
+        # dans le tampon d'App_screen-publisher au-delà de cette date (goulot
+        # d'affichage, voir architecture.md §11bis), le client PEUT l'écarter
+        # plutôt que de l'afficher hors contexte. Réutilise ttl_ms comme
+        # fenêtre de fraîcheur, cohérent avec sa signification pour le mode
+        # "page" (durée de validité de l'event).
+        'expiresAt': int(time.time() * 1000) + settings['ttl_ms'],
+    }
+    if display_settings['show_media'] and thumb_filename:
+        overlay['mediaUrl'] = f"http://{net['ip']}:{net['port']}/media/thumb/{thumb_filename}"
+        overlay['mediaType'] = 'image'
 
     _sse_capture_broadcast('display', {
         'importance': settings['importance'],
         'ttlMs': settings['ttl_ms'],
         'title': f'Nouvelle capture — {kind}',
         'reason': reason,
+        'overlay': overlay,
         'contentUrl': content_url,
         # Métadonnées complémentaires, hors schéma minimal du spec mais
         # utiles à un consommateur qui voudrait plus de détail.
@@ -903,7 +936,7 @@ def capture_photo():
     capture_id, media_uid, created_at = record_capture('photo', filename, thumb_name)
     logger.info('Photo capturée %s (cadre=%s)', filename, frame_id)
     qr_tags = _qr_tag_detections(capture_id, detections)
-    _sse_broadcast_capture(capture_id, media_uid, 'photo', filename, created_at)
+    _sse_broadcast_capture(capture_id, media_uid, 'photo', filename, thumb_name, created_at)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
                     'filename': filename, 'qr_tags': qr_tags,
                     'url': f'/media/photo/{filename}', 'message': resolve_dynamic_placeholders(message_text())})
@@ -1116,7 +1149,7 @@ def capture_video():
             if text not in seen_texts:
                 seen_texts.append(text)
         qr_tags = _qr_tag_detections(capture_id, [{'text': t} for t in seen_texts])
-    _sse_broadcast_capture(capture_id, media_uid, 'video', final_filename, created_at)
+    _sse_broadcast_capture(capture_id, media_uid, 'video', final_filename, thumb_name, created_at)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'video',
                     'filename': final_filename, 'qr_tags': qr_tags,
                     'url': f'/media/video/{final_filename}', 'message': resolve_dynamic_placeholders(message_text())})
@@ -2542,7 +2575,7 @@ def capture_photostrip_finish():
     capture_id, media_uid, created_at = record_capture('photo', filename, thumb_name)
     logger.info('Photo strip capturé %s (%d prises, cadre=%s)', filename, len(frames), session['frame_id'])
     qr_tags = _qr_tag_detections(capture_id, detections)
-    _sse_broadcast_capture(capture_id, media_uid, 'photo', filename, created_at)
+    _sse_broadcast_capture(capture_id, media_uid, 'photo', filename, thumb_name, created_at)
     return jsonify({'ok': True, 'id': capture_id, 'media_uid': media_uid, 'kind': 'photo',
                     'filename': filename, 'qr_tags': qr_tags,
                     'url': f'/media/photo/{filename}', 'message': resolve_dynamic_placeholders(message_text())})
