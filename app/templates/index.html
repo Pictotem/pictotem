@@ -15,6 +15,8 @@
       --bottom-bar-qr-size: {{ bottom_bar_sizes.qr_size }}px;
       --top-bar-height: {{ top_bar.height }}px;
       --top-bar-color: {{ top_bar.color }};
+      --top-bar-top: {{ 'auto' if top_bar.position == 'bottom' else '0' }};
+      --top-bar-bottom: {{ '0' if top_bar.position == 'bottom' else 'auto' }};
 
       /* Boutons d'action — socle commun réglable depuis /admin/buttons.
          Filtre "safe" sur la police : sa valeur peut contenir des guillemets
@@ -111,7 +113,7 @@
        startTopBarCountdown()/stopTopBarCountdown() dans app.js — un seul
        compte à rebours est actif à la fois, jamais de conflit. */
     .top-countdown-bar {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 25000;
+      position: fixed; top: var(--top-bar-top); bottom: var(--top-bar-bottom); left: 0; right: 0; z-index: 25000;
       height: var(--top-bar-height); background: rgba(255,255,255,.10);
       overflow: hidden; pointer-events: none;
     }

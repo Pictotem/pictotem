@@ -226,7 +226,7 @@
     </div>
 
     <div class="text-section">
-      <h2>Barre de progression (tout en haut de l'écran)</h2>
+      <h2>Barre de progression (haut ou bas de l'écran)</h2>
       <div class="text-fields">
         <div class="text-field" style="grid-column:1/-1">
           <p class="field-default" style="margin:0 0 4px;font-size:12px">
@@ -246,6 +246,14 @@
           <input type="color" id="top_bar_color" name="top_bar_color"
                  value="{{ top_bar.color }}" style="width:70px;height:38px;padding:2px;cursor:pointer;">
           <p class="field-default">Défaut : #f2c94c</p>
+        </div>
+        <div class="text-field">
+          <label class="field-label" for="top_bar_position">Position</label>
+          <select id="top_bar_position" name="top_bar_position" style="width:140px">
+            <option value="top"{{ ' selected' if top_bar.position != 'bottom' }}>Tout en haut</option>
+            <option value="bottom"{{ ' selected' if top_bar.position == 'bottom' }}>Tout en bas</option>
+          </select>
+          <p class="field-default">Défaut : tout en haut</p>
         </div>
       </div>
     </div>

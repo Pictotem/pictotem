@@ -184,6 +184,7 @@ def get_top_bar_settings() -> dict:
     return {
         'height': int(raw_h) if raw_h.isdigit() else 6,
         'color':  get_setting('ui.top_bar_color', '') or '#f2c94c',
+        'position': 'bottom' if get_setting('ui.top_bar_position', '') == 'bottom' else 'top',
     }
 
 
@@ -3210,6 +3211,9 @@ def admin_texts():
         top_bar_color = (request.form.get('top_bar_color') or '').strip()
         if re.match(r'^#[0-9a-fA-F]{6}$', top_bar_color):
             set_setting('ui.top_bar_color', top_bar_color)
+        top_bar_position = (request.form.get('top_bar_position') or '').strip()
+        if top_bar_position in ('top', 'bottom'):
+            set_setting('ui.top_bar_position', top_bar_position)
 
         version_label = (request.form.get('about_version_label') or '').strip()
         set_setting('about.version_label', version_label)
