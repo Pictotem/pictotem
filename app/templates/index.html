@@ -123,7 +123,7 @@
     }
 
     .idle-timer-wrap {
-      position: absolute; top: 0; left: 0; right: 0; z-index: 60;
+      position: fixed; inset: 0; z-index: 26000; /* au-dessus de la barre de progression */
       pointer-events: none;
     }
     .idle-timer-badge {
@@ -522,6 +522,9 @@
       idleTimerFontSize:   {{ idle_timer_font_size }},
       idleTimerPaddingY:   {{ idle_timer_padding_y }},
       idleTimerPaddingX:   {{ idle_timer_padding_x }},
+      idleTimerPosition:   {{ idle_timer_position|tojson }},
+      idleTimerMarginX:    {{ idle_timer_margin_x }},
+      idleTimerMarginY:    {{ idle_timer_margin_y }},
       screensaverEnabled:        {{ 'true' if screensaver_enabled else 'false' }},
       screensaverTimeoutSeconds: {{ screensaver_timeout_seconds }},
       showPhotoStrip:            {{ 'true' if photo_strip.get('enabled', True) else 'false' }},

@@ -48,6 +48,31 @@
       </div>
       <p class="field-default">Défaut : 5 px / 13 px</p>
     </div>
+    <div class="text-field">
+      <label class="field-label" for="idle_timer_position">Position du cartouche</label>
+      <select id="idle_timer_position" name="idle_timer_position" style="width:160px">
+        {% for v, l in [('top-left','Haut gauche'),('top-right','Haut droit'),('bottom-left','Bas gauche'),('bottom-right','Bas droit')] %}
+        <option value="{{ v }}"{{ ' selected' if idle_timer_position == v }}>{{ l }}</option>
+        {% endfor %}
+      </select>
+      <p class="field-default">Peut se superposer à la barre de progression.</p>
+    </div>
+    <div class="text-field">
+      <label class="field-label">Marges depuis le bord (px)</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div>
+          <label class="field-label" for="idle_timer_margin_x" style="font-size:11px">Horizontale</label>
+          <input type="number" id="idle_timer_margin_x" name="idle_timer_margin_x"
+                 value="{{ idle_timer_margin_x }}" min="0" max="500" style="width:80px">
+        </div>
+        <div>
+          <label class="field-label" for="idle_timer_margin_y" style="font-size:11px">Verticale</label>
+          <input type="number" id="idle_timer_margin_y" name="idle_timer_margin_y"
+                 value="{{ idle_timer_margin_y }}" min="0" max="500" style="width:80px">
+        </div>
+      </div>
+      <p class="field-default">Défaut : 16 px / 10 px</p>
+    </div>
     <div class="text-field" style="grid-column:1/-1">
       <button type="submit" class="action-btn primary">Enregistrer</button>
     </div>

@@ -315,6 +315,14 @@ function _idleUpdateUi() {
 
 function _idleApplyStyle() {
   if (!idleTimerBadge) return;
+  {
+    const pos = cfg.idleTimerPosition || 'top-right';
+    const mx = `${cfg.idleTimerMarginX ?? 16}px`, my = `${cfg.idleTimerMarginY ?? 10}px`;
+    const s = idleTimerBadge.style;
+    s.top = s.bottom = s.left = s.right = 'auto';
+    s[pos.startsWith('top') ? 'top' : 'bottom'] = my;
+    s[pos.endsWith('left') ? 'left' : 'right'] = mx;
+  }
   if (cfg.idleTimerFontSize)  idleTimerBadge.style.fontSize = `${cfg.idleTimerFontSize}px`;
   if (cfg.idleTimerPaddingY != null && cfg.idleTimerPaddingX != null)
     idleTimerBadge.style.padding = `${cfg.idleTimerPaddingY}px ${cfg.idleTimerPaddingX}px`;

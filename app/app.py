@@ -177,6 +177,12 @@ def get_ui_texts() -> dict:
     return {k: (get_setting(f'text.{k}', '') or v) for k, v in TEXT_DEFAULTS.items()}
 
 
+def _idle_timer_position() -> str:
+    """Coin d'ancrage du cartouche « Retour dans Ns » (réglé dans le B-O)."""
+    pos = get_setting('idle_timer_position', '')
+    return pos if pos in ('top-left', 'top-right', 'bottom-left', 'bottom-right') else 'top-right'
+
+
 def get_top_bar_settings() -> dict:
     """Hauteur/couleur de la barre de progression tout en haut de l'écran,
     réglables depuis /admin/texts — voir #topCountdownBar dans index.html."""
@@ -425,6 +431,9 @@ def index():
         idle_timer_font_size=int(get_setting('idle_timer_font_size', '13')),
         idle_timer_padding_y=int(get_setting('idle_timer_padding_y', '5')),
         idle_timer_padding_x=int(get_setting('idle_timer_padding_x', '13')),
+        idle_timer_position=_idle_timer_position(),
+        idle_timer_margin_x=int(get_setting('idle_timer_margin_x', '16')),
+        idle_timer_margin_y=int(get_setting('idle_timer_margin_y', '10')),
         screensaver_enabled=get_setting('ui.screensaver_enabled', '0') == '1',
         screensaver_timeout_seconds=(
             int(get_setting('ui.screensaver_timeout_min', '') or '3') * 60
@@ -3773,6 +3782,9 @@ def _block_ctx_app_idle_timer() -> dict:
         'idle_timer_font_size': int(get_setting('idle_timer_font_size', '13')),
         'idle_timer_padding_y': int(get_setting('idle_timer_padding_y', '5')),
         'idle_timer_padding_x': int(get_setting('idle_timer_padding_x', '13')),
+        'idle_timer_position': _idle_timer_position(),
+        'idle_timer_margin_x': int(get_setting('idle_timer_margin_x', '16')),
+        'idle_timer_margin_y': int(get_setting('idle_timer_margin_y', '10')),
     }
 
 
@@ -4304,6 +4316,11 @@ def admin_set_idle_timer():
     for key, default in [('idle_timer_font_size', '13'), ('idle_timer_padding_y', '5'), ('idle_timer_padding_x', '13')]:
         raw = (request.form.get(key) or default).strip()
         set_setting(key, str(max(1, int(raw))) if raw.isdigit() else default)
+    pos = (request.form.get('idle_timer_position') or '').strip()
+    set_setting('idle_timer_position', pos if pos in ('top-left', 'top-right', 'bottom-left', 'bottom-right') else 'top-right')
+    for key, default in [('idle_timer_margin_x', '16'), ('idle_timer_margin_y', '10')]:
+        raw = (request.form.get(key) or default).strip()
+        set_setting(key, str(min(int(raw), 500)) if raw.isdigit() else default)
     return _admin_block_redirect('app_idle_timer', ok='Mise en veille automatique mise à jour.')
 
 
