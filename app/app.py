@@ -63,6 +63,7 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 list_slideshow_images, add_slideshow_image, delete_slideshow_image_db,
                 list_screensaver_images, add_screensaver_image, delete_screensaver_image_db,
                 set_screensaver_image_active,
+                list_other_images, add_other_image, rename_other_image, delete_other_image_db,
                 cast_vote, admin_adjust_vote, get_voter_votes,
                 add_guest_upload, list_guest_uploads, list_approved_guest_uploads,
                 count_guest_uploads_by_token, set_guest_upload_status, delete_guest_upload_db,
@@ -3469,7 +3470,10 @@ _ADMIN_BLOCKS = {
     'app_restart_update':  {'title': "Redémarrage avec mise à jour (Git)",      'default_page': 'application', 'template': 'blocks/app_restart_update.html',  'context_fn': None},
     'app_autostart':       {'title': "Démarrage automatique Windows",           'default_page': 'application', 'template': 'blocks/app_autostart.html',       'context_fn': '_block_ctx_app_autostart'},
     'app_wallpaper':       {'title': "Fond d'écran Windows",                    'default_page': 'media',       'template': 'blocks/app_wallpaper.html',       'context_fn': '_block_ctx_app_wallpaper'},
-    'app_idle_timer':      {'title': "Mise en veille automatique",              'default_page': 'application', 'template': 'blocks/app_idle_timer.html',      'context_fn': '_block_ctx_app_idle_timer'},
+    'media_slideshow':     {'title': "Images intermédiaires",                    'default_page': 'media',       'template': 'blocks/media_slideshow.html',     'context_fn': '_block_ctx_media_slideshow'},
+    'media_screensaver':   {'title': "Images de l'écran de veille",             'default_page': 'media',       'template': 'blocks/media_screensaver.html',   'context_fn': '_block_ctx_media_screensaver'},
+    'media_other':         {'title': "Autres images",                           'default_page': 'media',       'template': 'blocks/media_other.html',         'context_fn': '_block_ctx_media_other'},
+    'app_idle_timer':      {'title': "Mise en veille automatique",             'default_page': 'application', 'template': 'blocks/app_idle_timer.html',      'context_fn': '_block_ctx_app_idle_timer'},
     'app_network_info':    {'title': "Informations réseau (interface principale)", 'default_page': 'application', 'template': 'blocks/app_network_info.html', 'context_fn': '_block_ctx_app_network_info'},
     'access_password':     {'title': "Mot de passe du back office",             'default_page': 'access',      'template': 'blocks/access_password.html',     'context_fn': '_block_ctx_access_password'},
     'access_clear_password': {'title': "Supprimer la protection",               'default_page': 'access',      'template': 'blocks/access_clear_password.html', 'context_fn': '_block_ctx_access_password'},
@@ -3775,6 +3779,18 @@ def _block_ctx_app_autostart() -> dict:
 
 def _block_ctx_app_wallpaper() -> dict:
     return {'wallpaper_images': _wallpaper_images_view()}
+
+
+def _block_ctx_media_slideshow() -> dict:
+    return {'media_slideshow_images': list_slideshow_images()}
+
+
+def _block_ctx_media_screensaver() -> dict:
+    return {'media_screensaver_images': list_screensaver_images()}
+
+
+def _block_ctx_media_other() -> dict:
+    return {'media_other_images': list_other_images()}
 
 
 def _block_ctx_app_idle_timer() -> dict:
@@ -4217,10 +4233,10 @@ def admin_media():
         if action == 'upload_slideshow':
             file = request.files.get('image')
             if not file or not file.filename:
-                return redirect(url_for('admin_media', err='Aucun fichier sélectionné.'))
+                return _admin_block_redirect('media_slideshow', err='Aucun fichier sélectionné.')
             ext = Path(file.filename).suffix.lower()
             if ext not in _SLIDESHOW_ALLOWED_EXT:
-                return redirect(url_for('admin_media', err='Format non supporté (PNG, JPG, WEBP, GIF).'))
+                return _admin_block_redirect('media_slideshow', err='Format non supporté (PNG, JPG, WEBP, GIF).')
             safe = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem) + ext
             SLIDESHOW_DIR.mkdir(parents=True, exist_ok=True)
             dest = SLIDESHOW_DIR / safe
@@ -4229,23 +4245,23 @@ def admin_media():
                 dest = SLIDESHOW_DIR / safe
             file.save(str(dest))
             add_slideshow_image(safe)
-            return redirect(url_for('admin_media', ok=f'Image « {safe} » ajoutée.'))
+            return _admin_block_redirect('media_slideshow', ok=f'Image « {safe} » ajoutée.')
 
         if action == 'delete_slideshow':
             image_id = int(request.form.get('image_id', 0))
             img = delete_slideshow_image_db(image_id)
             if img:
                 (SLIDESHOW_DIR / img['filename']).unlink(missing_ok=True)
-                return redirect(url_for('admin_media', ok='Image supprimée.'))
-            return redirect(url_for('admin_media', err='Image introuvable.'))
+                return _admin_block_redirect('media_slideshow', ok='Image supprimée.')
+            return _admin_block_redirect('media_slideshow', err='Image introuvable.')
 
         if action == 'upload_screensaver':
             file = request.files.get('image')
             if not file or not file.filename:
-                return redirect(url_for('admin_media', err='Aucun fichier sélectionné.'))
+                return _admin_block_redirect('media_screensaver', err='Aucun fichier sélectionné.')
             ext = Path(file.filename).suffix.lower()
             if ext not in _SCREENSAVER_ALLOWED_EXT:
-                return redirect(url_for('admin_media', err='Format non supporté (PNG, JPG, WEBP, GIF).'))
+                return _admin_block_redirect('media_screensaver', err='Format non supporté (PNG, JPG, WEBP, GIF).')
             safe = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem) + ext
             SCREENSAVER_DIR.mkdir(parents=True, exist_ok=True)
             dest = SCREENSAVER_DIR / safe
@@ -4254,20 +4270,58 @@ def admin_media():
                 dest = SCREENSAVER_DIR / safe
             file.save(str(dest))
             add_screensaver_image(safe)
-            return redirect(url_for('admin_media', ok=f'Image « {safe} » ajoutée.'))
+            return _admin_block_redirect('media_screensaver', ok=f'Image « {safe} » ajoutée.')
 
         if action == 'delete_screensaver':
             image_id = int(request.form.get('image_id', 0))
             img = delete_screensaver_image_db(image_id)
             if img:
                 (SCREENSAVER_DIR / img['filename']).unlink(missing_ok=True)
-                return redirect(url_for('admin_media', ok='Image supprimée.'))
-            return redirect(url_for('admin_media', err='Image introuvable.'))
+                return _admin_block_redirect('media_screensaver', ok='Image supprimée.')
+            return _admin_block_redirect('media_screensaver', err='Image introuvable.')
 
         if action == 'toggle_screensaver_active':
             image_id = int(request.form.get('image_id', 0))
             set_screensaver_image_active(image_id, bool(request.form.get('active')))
-            return redirect(url_for('admin_media'))
+            return _admin_block_redirect('media_screensaver')
+
+        if action == 'upload_other':
+            files = [f for f in request.files.getlist('images') if f and f.filename]
+            if not files:
+                return _admin_block_redirect('media_other', err='Aucun fichier sélectionné.')
+            OTHER_DIR.mkdir(parents=True, exist_ok=True)
+            added, skipped = 0, 0
+            for file in files:
+                ext = Path(file.filename).suffix.lower()
+                if ext not in _SLIDESHOW_ALLOWED_EXT:
+                    skipped += 1
+                    continue
+                stem = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem)
+                safe = stem + ext
+                if (OTHER_DIR / safe).exists():
+                    safe = f'{stem}_{int(datetime.now().timestamp() * 1000)}{ext}'
+                file.save(str(OTHER_DIR / safe))
+                add_other_image(safe, Path(file.filename).stem[:80])
+                added += 1
+            if not added:
+                return _admin_block_redirect('media_other', err='Format non supporté (PNG, JPG, WEBP, GIF).')
+            msg = f'{added} image(s) ajoutée(s).' + (f' {skipped} ignorée(s) (format non supporté).' if skipped else '')
+            return _admin_block_redirect('media_other', ok=msg)
+
+        if action == 'rename_other':
+            image_id = int(request.form.get('image_id', 0))
+            label = (request.form.get('label') or '').strip()[:80]
+            if rename_other_image(image_id, label):
+                return _admin_block_redirect('media_other', ok='Image renommée.')
+            return _admin_block_redirect('media_other', err='Image introuvable.')
+
+        if action == 'delete_other':
+            image_id = int(request.form.get('image_id', 0))
+            img = delete_other_image_db(image_id)
+            if img:
+                (OTHER_DIR / img['filename']).unlink(missing_ok=True)
+                return _admin_block_redirect('media_other', ok='Image supprimée.')
+            return _admin_block_redirect('media_other', err='Image introuvable.')
 
         abort(404)
 
@@ -4276,8 +4330,6 @@ def admin_media():
         'admin_media.html', config=CONFIG,
         blocks=blocks, current_page='media', admin_pages=_admin_all_pages(),
         page_label=_admin_page_label('media', 'Médiathèque'),
-        slideshow_images=list_slideshow_images(),
-        screensaver_images=list_screensaver_images(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -6351,6 +6403,7 @@ def admin_buttons_set_style():
 
 # ── Slideshow /bestof ─────────────────────────────────────────────────────────
 
+OTHER_DIR = BASE_DIR / 'app' / 'static' / 'other_images'
 SLIDESHOW_DIR = BASE_DIR / 'app' / 'static' / 'slideshow'
 _SLIDESHOW_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp', '.gif'}
 
@@ -6415,6 +6468,8 @@ def _promo_media_library() -> list:
         items.append({'url': f"/static/slideshow/{img['filename']}", 'label': img['filename']})
     for img in list_screensaver_images():
         items.append({'url': f"/static/screensaver/{img['filename']}", 'label': img['filename']})
+    for img in list_other_images():
+        items.append({'url': f"/static/other_images/{img['filename']}", 'label': img.get('label') or img['filename']})
     for bg in list_promo_backgrounds():
         if (bg.get('kind') or 'image') == 'image' and bg.get('filename'):
             items.append({'url': f"/static/promo/{bg['filename']}", 'label': bg.get('label') or bg['filename']})

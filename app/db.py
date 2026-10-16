@@ -223,6 +223,14 @@ def init_db():
         )
         """)
         conn.execute("""
+        CREATE TABLE IF NOT EXISTS other_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute("""
         CREATE TABLE IF NOT EXISTS wallpaper_images (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             filename TEXT NOT NULL,
@@ -1046,6 +1054,45 @@ def delete_slideshow_image_db(image_id):
             return None
         img = dict(row)
         conn.execute('DELETE FROM slideshow_images WHERE id = ?', (image_id,))
+        conn.commit()
+    return img
+
+
+# ── Autres images de la médiathèque ───────────────────────────────────────────
+
+def list_other_images():
+    with closing(db_conn()) as conn:
+        rows = conn.execute(
+            'SELECT * FROM other_images ORDER BY created_at DESC, id DESC'
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_other_image(filename, label=''):
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            'INSERT INTO other_images(filename, label, created_at) VALUES(?,?,?)',
+            (filename, label, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def rename_other_image(image_id, label):
+    with closing(db_conn()) as conn:
+        cur = conn.execute('UPDATE other_images SET label = ? WHERE id = ?', (label, image_id))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_other_image_db(image_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM other_images WHERE id = ?', (image_id,)).fetchone()
+        if not row:
+            return None
+        img = dict(row)
+        conn.execute('DELETE FROM other_images WHERE id = ?', (image_id,))
         conn.commit()
     return img
 

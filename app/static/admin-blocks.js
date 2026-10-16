@@ -108,6 +108,36 @@
           });
         });
 
+        // Boutons monter / descendre (même endpoint que le glisser-déposer)
+        if (page && blocks.length > 1) {
+          const postOrder = () => postForm('/admin/ui/block_order', {
+            _csrf_token: csrfToken(),
+            order: Array.from(container.querySelectorAll(':scope > [data-block-id]'))
+              .map((el) => el.dataset.blockId).join(','),
+            page,
+          });
+          blocks.forEach((block) => {
+            const header = block.querySelector(':scope > .block-header-row');
+            const toggle = header && header.querySelector('.block-collapse-toggle');
+            if (!toggle) return;
+            [['up', '▲', 'Monter'], ['down', '▼', 'Descendre']].forEach(([dir, label, title]) => {
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'block-move-btn';
+              btn.textContent = label;
+              btn.title = title;
+              btn.setAttribute('aria-label', title);
+              btn.addEventListener('click', () => {
+                const sib = dir === 'up' ? block.previousElementSibling : block.nextElementSibling;
+                if (!sib || !sib.hasAttribute('data-block-id')) return;
+                container.insertBefore(block, dir === 'up' ? sib : sib.nextElementSibling);
+                postOrder();
+              });
+              header.insertBefore(btn, toggle);
+            });
+          });
+        }
+
         // Glisser-déposer pour réordonner DANS la page (jamais entre pages)
         if (page) {
           wireDragReorder(container, 'block-id', ':scope > .block-header-row > .block-drag-handle',

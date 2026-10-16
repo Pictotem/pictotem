@@ -342,3 +342,33 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
   border: 1px dashed var(--border); border-radius: 14px; padding: 28px 20px;
   text-align: center; color: var(--muted); font-size: 14px;
 }
+
+/* Blocs de la médiathèque (media_slideshow / media_screensaver / media_other),
+   dupliqués depuis l'ancien admin_media.html pour rester disponibles quand un
+   de ces blocs est déplacé vers une autre tuile. */
+.img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.img-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.img-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+.img-card-foot { padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.img-card-name { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.img-card-inactive img { opacity: .35; }
+.img-card-inactive .img-card-name { opacity: .55; }
+.img-card-toggle { padding: 6px 10px 0; }
+.img-card-toggle-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
+.img-card-toggle-label input[type=checkbox] { cursor: pointer; }
+.img-card-rename { display: flex; gap: 4px; padding: 6px 10px 0; }
+.img-card-rename input { flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+.img-card-rename button, .img-card-copy { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 3px 8px; font-size: 12px; cursor: pointer; }
+.img-card-rename button:hover, .img-card-copy:hover { border-color: var(--accent); color: var(--accent); }
+.upload-zone { background: var(--surface); border: 2px dashed var(--border); border-radius: 14px; padding: 28px 24px; text-align: center; transition: border-color .15s; }
+.upload-zone:focus-within { border-color: var(--accent); }
+.upload-zone input[type=file] { display: none; }
+.upload-label { color: var(--accent); font-size: 14px; cursor: pointer; display: block; margin-bottom: 6px; }
+.upload-hint { font-size: 12px; color: var(--muted); }
+.admin-block-body .btn-primary { background: var(--accent); color: #000; font-weight: 700; border: none; border-radius: 10px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
+.admin-block-body .btn-danger { background: rgba(180,40,40,.7); color: #fff; font-weight: 600; border: none; border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+.admin-block-body .btn-danger:hover { background: rgba(220,50,50,.9); }
+
+/* Boutons monter / descendre injectés par admin-blocks.js */
+.block-move-btn { background: none; border: none; color: rgba(255,255,255,.5); font-size: 12px; cursor: pointer; padding: 2px 5px; line-height: 1; flex-shrink: 0; }
+.block-move-btn:hover { color: var(--accent); }
