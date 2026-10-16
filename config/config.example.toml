@@ -81,6 +81,9 @@ copies = 1
 enabled = true
 trust_proxy = false
 local_addresses = ["127.0.0.1", "::1"]
+# main_password : simple valeur de repli. Le mot de passe d'accès distant à
+# l'interface principale se gère désormais depuis le back office (tuile
+# « Admin »), qui a priorité dès qu'il y est défini.
 main_password = "changeme"
 gallery_password = "changeme"
 main_session_name = "pictotem_main_auth"

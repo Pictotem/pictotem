@@ -42,9 +42,10 @@ from auth import (admin_password_status, auth_enabled, build_secret_key,
                   check_main_password, client_ip, csrf_protect,
                   gallery_session_key, generate_csrf_token,
                   is_admin_authenticated, is_gallery_authenticated,
-                  is_local_request, is_main_authenticated, main_session_key,
+                  is_local_request, is_main_authenticated, main_access_token,
+                  main_password_status, main_session_key,
                   require_admin_auth, require_gallery_auth, require_main_auth,
-                  require_media_auth, set_admin_password)
+                  require_media_auth, set_admin_password, set_main_password)
 from camera import (VIDEO_CAPTURE_ACTIVE, CAM_LOCK, clear_overlay_cache,
                     clear_recording_frame, composite_frame_overlay,
                     encode_jpeg, get_frame_overlay_path, get_latest_preview_frame,
@@ -3477,7 +3478,9 @@ _ADMIN_BLOCKS = {
     'app_network_info':    {'title': "Informations réseau (interface principale)", 'default_page': 'application', 'template': 'blocks/app_network_info.html', 'context_fn': '_block_ctx_app_network_info'},
     'access_password':     {'title': "Mot de passe du back office",             'default_page': 'access',      'template': 'blocks/access_password.html',     'context_fn': '_block_ctx_access_password'},
     'access_clear_password': {'title': "Supprimer la protection",               'default_page': 'access',      'template': 'blocks/access_clear_password.html', 'context_fn': '_block_ctx_access_password'},
-    'archive_export':      {'title': "Archiver un intervalle",                  'default_page': 'archive',     'template': 'blocks/archive_export.html',      'context_fn': None},
+    'access_main_password': {'title': "Mot de passe de l'interface principale (accès distant)", 'default_page': 'access', 'template': 'blocks/access_main_password.html', 'context_fn': '_block_ctx_access_main_password'},
+    'access_main_clear_password': {'title': "Supprimer le mot de passe de l'interface principale", 'default_page': 'access', 'template': 'blocks/access_main_clear_password.html', 'context_fn': '_block_ctx_access_main_password'},
+    'archive_export':      {'title': "Archiver un intervalle",                 'default_page': 'archive',     'template': 'blocks/archive_export.html',      'context_fn': None},
     'archive_cleanup':     {'title': "Nettoyer un intervalle",                  'default_page': 'archive',     'template': 'blocks/archive_cleanup.html',     'context_fn': None, 'variant': 'danger'},
     'texts_custom_fonts':  {'title': "Polices personnalisées",                  'default_page': 'texts',       'template': 'blocks/texts_custom_fonts.html',  'context_fn': '_block_ctx_texts_custom_fonts'},
     'system_camera':       {'title': "Caméra",                                  'default_page': 'system',      'template': 'blocks/system_camera.html',       'context_fn': '_block_ctx_system_camera'},
@@ -3813,6 +3816,17 @@ def _block_ctx_app_network_info() -> dict:
 
 def _block_ctx_access_password() -> dict:
     return {'password_status': admin_password_status()}
+
+
+def _block_ctx_access_main_password() -> dict:
+    token = main_access_token()
+    return {
+        'main_password_status': main_password_status(),
+        'main_auth_enabled': auth_enabled(),
+        'main_access_url': f"{request.host_url}?key={token}" if token else '',
+        'secret_key_ephemeral': not os.environ.get('PICTOTEM_SECRET_KEY', '').strip()
+                                and CONFIG['server'].get('secret_key', '').strip() in ('', 'change-me', 'change-me-production-secret'),
+    }
 
 
 def _block_ctx_texts_custom_fonts() -> dict:
@@ -4557,6 +4571,9 @@ def admin_access():
     visible = ['access_password']
     if password_status['set'] and password_status['source'] != 'env':
         visible.append('access_clear_password')
+    visible.append('access_main_password')
+    if main_password_status()['source'] == 'db' and main_password_status()['set']:
+        visible.append('access_main_clear_password')
     blocks, block_context = _admin_render_blocks('access', locally_visible=visible)
     return render_template(
         'admin_access.html', config=CONFIG,
@@ -4601,6 +4618,37 @@ def admin_clear_password():
     return _admin_block_redirect(
         'access_clear_password',
         ok='Protection par mot de passe désactivée — le back office est désormais accessible sans mot de passe.',
+    )
+
+
+@app.route('/admin/access/main-password', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_set_main_password():
+    """Définit ou change le mot de passe d'accès distant à l'interface
+    principale (vide refusé : utiliser admin_clear_main_password)."""
+    new_password = (request.form.get('new_password') or '').strip()
+    confirm_password = (request.form.get('confirm_password') or '').strip()
+    if not new_password:
+        return _admin_block_redirect('access_main_password', err="Le mot de passe ne peut pas être vide.")
+    if new_password != confirm_password:
+        return _admin_block_redirect('access_main_password', err='Les deux mots de passe saisis ne correspondent pas.')
+    set_main_password(new_password)
+    logger.info("Mot de passe de l'interface principale modifié depuis /admin/access (back office).")
+    return _admin_block_redirect('access_main_password', ok="Mot de passe de l'interface principale mis à jour.")
+
+
+@app.route('/admin/access/main-password/clear', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_clear_main_password():
+    """Supprime le mot de passe de l'interface principale : l'accès distant
+    est alors refusé tant que l'authentification est activée."""
+    set_main_password('')
+    logger.warning("Mot de passe de l'interface principale supprimé depuis /admin/access.")
+    return _admin_block_redirect(
+        'access_main_clear_password',
+        ok="Mot de passe de l'interface principale supprimé — l'accès distant est désormais refusé.",
     )
 
 

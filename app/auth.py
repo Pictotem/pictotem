@@ -1,9 +1,12 @@
+import hashlib
+import hmac
 import logging
 import os
 import secrets
 from functools import wraps
+from urllib.parse import urlencode
 
-from flask import abort, redirect, request, session, url_for
+from flask import abort, current_app, redirect, request, session, url_for
 
 from config_loader import CONFIG
 from db import get_setting, set_setting
@@ -13,8 +16,66 @@ logger = logging.getLogger('pictotem')
 
 # ── Point 1 : lecture des mots de passe avec priorité aux variables d'env ────
 
+# Mot de passe de l'interface principale (accès distant) : géré depuis la
+# Tuile "Admin" du back office, même principe que le mot de passe admin
+# ci-dessous. Priorité : 1. env PICTOTEM_MAIN_PASSWORD ; 2. réglage en base
+# 'auth.main_password' (même vide) ; 3. repli config.toml [auth] main_password
+# tant qu'aucun mot de passe n'a été défini depuis le back office.
+_MAIN_PASSWORD_SETTING_KEY = 'auth.main_password'
+_MAIN_PASSWORD_UNSET = object()
+
+
 def _get_main_password() -> str:
-    return os.environ.get('PICTOTEM_MAIN_PASSWORD') or str(CONFIG.get('auth', {}).get('main_password', ''))
+    env_password = os.environ.get('PICTOTEM_MAIN_PASSWORD')
+    if env_password:
+        return env_password
+    db_value = get_setting(_MAIN_PASSWORD_SETTING_KEY, _MAIN_PASSWORD_UNSET)
+    if db_value is not _MAIN_PASSWORD_UNSET:
+        return db_value
+    return str(CONFIG.get('auth', {}).get('main_password', ''))
+
+
+def main_password_status() -> dict:
+    """Origine du mot de passe de l'interface principale actuellement actif
+    (jamais le mot de passe en clair). 'source' : 'env' | 'db' |
+    'config_legacy' | 'unset'."""
+    if os.environ.get('PICTOTEM_MAIN_PASSWORD'):
+        return {'set': True, 'source': 'env'}
+    db_value = get_setting(_MAIN_PASSWORD_SETTING_KEY, _MAIN_PASSWORD_UNSET)
+    if db_value is not _MAIN_PASSWORD_UNSET:
+        return {'set': bool(db_value), 'source': 'db'}
+    legacy = str(CONFIG.get('auth', {}).get('main_password', '')).strip()
+    return {'set': bool(legacy), 'source': 'config_legacy' if legacy else 'unset'}
+
+
+def set_main_password(new_password: str) -> None:
+    """Définit (ou, avec une chaîne vide, supprime) le mot de passe de
+    l'interface principale en base. Effet immédiat, sans redémarrage."""
+    set_setting(_MAIN_PASSWORD_SETTING_KEY, (new_password or '').strip())
+
+
+def main_access_token() -> str:
+    """Jeton d'accès direct (lien ?key=...) dérivé par HMAC du mot de passe
+    principal et de la secret_key de l'application — jamais le mot de passe
+    lui-même. Vide si aucun mot de passe actif. Changer le mot de passe (ou
+    la secret_key) invalide les anciens liens."""
+    password = _get_main_password()
+    if not password:
+        return ''
+    secret = (current_app.secret_key or '')
+    if isinstance(secret, str):
+        secret = secret.encode()
+    return hmac.new(secret, b'main-access:' + password.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def try_token_login() -> bool:
+    """Authentifie la session si la requête porte un ?key= valide."""
+    provided = request.args.get('key', '')
+    expected = main_access_token()
+    if provided and expected and secrets.compare_digest(provided, expected):
+        session[main_session_key()] = True
+        return True
+    return False
 
 
 def _get_gallery_password() -> str:
@@ -168,6 +229,11 @@ def require_main_auth(f):
     def wrapped(*args, **kwargs):
         if is_main_authenticated():
             return f(*args, **kwargs)
+        if try_token_login():
+            # Redirige vers la même URL sans ?key= (évite qu'il reste dans
+            # l'historique / le Referer).
+            rest = [(k, v) for k, v in request.args.items(multi=True) if k != 'key']
+            return redirect(request.path + ('?' + urlencode(rest) if rest else ''))
         return redirect(url_for('login_main', next=request.full_path.rstrip('?')))
     return wrapped
 
