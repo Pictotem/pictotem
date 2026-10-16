@@ -6,6 +6,7 @@
   <title>{{ config.get('ui', {}).get('app_title', 'Pictotem') }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('custom_fonts_css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ckeditor5/ckeditor5-content.css') }}">
   <style>
     /* Tailles réglables depuis /admin/texts (texte de droite + QR code de la
        barre du bas ; hauteur/couleur de la barre de progression tout en haut)
@@ -450,6 +451,15 @@
     <div id="screensaverSlideB" class="screensaver-slide"></div>
   </div>
 
+  <!-- Page d'instructions (réveil de veille / bouton Aide) : contenu et
+       réglages fournis par /api/instructions, voir static/app.js. Pas
+       d'iframe : les événements doivent remonter au document. -->
+  <div id="instructionsOverlay" class="instructions-overlay hidden" aria-hidden="true">
+    <div id="instructionsContent" class="instructions-content ck-content"></div>
+    <button id="instructionsClose" class="instructions-close" type="button" aria-label="Fermer"></button>
+    <div class="instructions-bar" aria-hidden="true"><div id="instructionsBarFill" class="instructions-bar-fill"></div></div>
+  </div>
+
   <div id="framePickerPanel" class="frame-picker-panel hidden">
     <div class="picker-drag-handle" id="pickerDragHandle">
       <div class="picker-drag-bar"></div>
@@ -549,6 +559,7 @@
       networkPort:               {{ network_info.port }},
     };
   </script>
+  <script src="{{ url_for('static', filename='instructions-ui.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

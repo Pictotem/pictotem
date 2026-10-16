@@ -981,3 +981,65 @@ button, input, a { font: inherit; }
 .vkbd-key.enter { background: var(--accent); color: #fff; flex: 1.8; }
 .vkbd-accents .vkbd-key { flex: 1; font-size: 15px; }
 .vkbd-key.vkbd-mode { font-weight: 700; letter-spacing: .02em; }
+
+/* ── Page d'instructions + bouton « Aide » (voir static/app.js, section
+   « Page d'instructions »). z-index 16000 : au-dessus de l'écran de veille
+   (15000), sous les modales (20000) et la barre de progression (25000). ── */
+.instructions-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 16000;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 5vh 6vw;
+  -webkit-overflow-scrolling: touch;
+}
+.instructions-content { max-width: 100%; }
+.instructions-content img { max-width: 100%; height: auto; }
+.instructions-close {
+  position: absolute;
+  z-index: 1;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--btn-font, inherit);
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 2px 10px rgba(0,0,0,.45);
+}
+/* Fermeture automatique : fine barre discrète en bas de l'écran. */
+.instructions-bar {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  height: 5px;
+  z-index: 2;
+  pointer-events: none;
+}
+.instructions-bar-fill {
+  height: 100%;
+  width: 100%;
+  background: rgba(255,255,255,.55);
+}
+.help-btn {
+  z-index: 9000;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--btn-font, inherit);
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(0,0,0,.35);
+}
+.help-btn.in-bar { position: static; box-shadow: none; }
+.bottom-bar-center.with-help {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--capture-gap, 18px);
+  flex-wrap: wrap;
+}

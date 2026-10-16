@@ -3492,6 +3492,9 @@ _ADMIN_BLOCKS = {
     'tags_media_api':      {'title': "API REST — accès aux ID média & tags",     'default_page': 'tags',        'template': 'blocks/tags_media_api.html',      'context_fn': '_block_ctx_tags_media_api'},
     'slideshow_settings':      {'title': "Paramètres",                          'default_page': 'slideshow',   'template': 'blocks/slideshow_settings.html',      'context_fn': '_block_ctx_slideshow_settings'},
     'screensaver_settings':    {'title': "Paramètres",                          'default_page': 'screensaver', 'template': 'blocks/screensaver_settings.html',    'context_fn': '_block_ctx_screensaver_settings'},
+    'instructions_page':       {'title': "Page d'instructions au réveil",       'default_page': 'screensaver', 'template': 'blocks/instructions_page.html',       'context_fn': '_block_ctx_instructions_page'},
+    'instructions_close_btn':  {'title': "Page d'instructions — bouton de fermeture", 'default_page': 'screensaver', 'template': 'blocks/instructions_close_btn.html', 'context_fn': '_block_ctx_instructions_close_btn'},
+    'help_button':             {'title': "Bouton « Aide »",                      'default_page': 'buttons',     'template': 'blocks/help_button.html',             'context_fn': '_block_ctx_help_button'},
     'sse_dummy_settings':      {'title': "Flux SSE de simulation (dev)",       'default_page': 'application', 'template': 'blocks/sse_dummy_settings.html',       'context_fn': '_block_ctx_sse_dummy_settings'},
     'sse_captures_monitor':    {'title': "Flux SSE des captures",              'default_page': 'application', 'template': 'blocks/sse_captures_monitor.html', 'context_fn': '_block_ctx_sse_captures_monitor'},
     'sse_api_auth':            {'title': "Accès externe aux flux SSE (identifiants)", 'default_page': 'application', 'template': 'blocks/sse_api_auth.html', 'context_fn': '_block_ctx_sse_api_auth'},
@@ -8223,6 +8226,213 @@ def admin_screensaver_set_settings():
         set_setting('ui.screensaver_delay', raw_delay)
     set_setting('ui.screensaver_include_captures', '1' if request.form.get('include_captures') else '0')
     return _admin_block_redirect('screensaver_settings', ok='Paramètres mis à jour.')
+
+
+# ── Page d'instructions au réveil + bouton « Aide » ──────────────────────────
+# Page plein écran (HTML WYSIWYG, même éditeur CKEditor que les pages promo)
+# affichée à la sortie de l'écran de veille si celle-ci a duré au moins N
+# minutes, et rouvrable à la demande via un bouton « Aide » (flottant ou dans
+# la barre d'actions). Le kiosque lit tout via /api/instructions (interrogé
+# toutes les 30 s, comme /api/screensaver/settings) : aucun rechargement de
+# page nécessaire après un changement dans le back office.
+
+_INSTR_POSITIONS = (
+    'top-left', 'top-center', 'top-right',
+    'middle-left', 'middle-center', 'middle-right',
+    'bottom-left', 'bottom-center', 'bottom-right',
+)
+_INSTR_POSITION_LABELS = [
+    ('top-left', 'Haut gauche'), ('top-center', 'Haut centre'), ('top-right', 'Haut droite'),
+    ('middle-left', 'Milieu gauche'), ('middle-center', 'Centre'), ('middle-right', 'Milieu droite'),
+    ('bottom-left', 'Bas gauche'), ('bottom-center', 'Bas centre'), ('bottom-right', 'Bas droite'),
+]
+_HELP_SHAPES = {'pill': 'Pilule', 'rounded': 'Arrondi', 'square': 'Carré', 'circle': 'Rond'}
+_HELP_MODES = {'floating': 'Bouton flottant (toujours visible)', 'bar': "Dans la barre d'actions"}
+_INSTR_HEX_RE = re.compile(r'#[0-9a-fA-F]{6}')
+_INSTR_MIN_BTN_PX = 56      # cible tactile minimale : jamais de bouton introuvable
+_INSTR_HTML_MAX = 200_000
+
+
+def _int_setting(key: str, default: int, lo: int, hi: int) -> int:
+    raw = (get_setting(key, '') or '').strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = default
+    return max(lo, min(hi, value))
+
+
+def _hex_setting(key: str, default: str) -> str:
+    value = (get_setting(key, '') or '').strip()
+    return value if _INSTR_HEX_RE.fullmatch(value) else default
+
+
+def _enum_setting(key: str, allowed, default: str) -> str:
+    value = (get_setting(key, '') or '').strip()
+    return value if value in allowed else default
+
+
+def _instructions_settings() -> dict:
+    close_bg = _hex_setting('instructions.close_bg', '#ffffff')
+    return {
+        'enabled':        get_setting('instructions.enabled', '0') == '1',
+        'html':           get_setting('instructions.html', ''),
+        'bg_color':       _hex_setting('instructions.bg_color', '#111111'),
+        'text_color':     _hex_setting('instructions.text_color', '#ffffff'),
+        'min_sleep_min':  _int_setting('instructions.min_sleep_min', 0, 0, 1440),
+        'autoclose_s':    _int_setting('instructions.autoclose_s', 60, 0, 3600),
+        'tap_anywhere':   get_setting('instructions.tap_anywhere', '1') == '1',
+        'close_kind':     _enum_setting('instructions.close_kind', ('symbol', 'text'), 'symbol'),
+        'close_label':    (get_setting('instructions.close_label', '') or '').strip()[:20] or '✕',
+        'close_bg':       close_bg,
+        'close_fg':       _readable_text_color(close_bg),
+        'close_size':     _int_setting('instructions.close_size', 72, _INSTR_MIN_BTN_PX, 300),
+        'close_position': _enum_setting('instructions.close_position', _INSTR_POSITIONS, 'top-right'),
+        'close_margin_x': _int_setting('instructions.close_margin_x', 24, 0, 300),
+        'close_margin_y': _int_setting('instructions.close_margin_y', 24, 0, 300),
+    }
+
+
+def _help_button_settings() -> dict:
+    bg = _hex_setting('help_button.bg', '#32c1f9')
+    return {
+        'enabled':  get_setting('help_button.enabled', '0') == '1',
+        'mode':     _enum_setting('help_button.mode', _HELP_MODES, 'floating'),
+        'label':    (get_setting('help_button.label', '') or '').strip()[:20] or 'Aide',
+        'shape':    _enum_setting('help_button.shape', _HELP_SHAPES, 'circle'),
+        'bg':       bg,
+        'fg':       _readable_text_color(bg),
+        'size':     _int_setting('help_button.size', 72, _INSTR_MIN_BTN_PX, 300),
+        'position': _enum_setting('help_button.position', _INSTR_POSITIONS, 'top-left'),
+        'margin_x': _int_setting('help_button.margin_x', 24, 0, 300),
+        'margin_y': _int_setting('help_button.margin_y', 24, 0, 300),
+    }
+
+
+@app.route('/api/instructions')
+@require_main_auth
+def api_instructions():
+    """Contenu + réglages de la page d'instructions et du bouton Aide.
+    {ip}/{port} et {qrcode=...} sont résolus ici (route publique du kiosque),
+    jamais stockés résolus (voir resolve_dynamic_placeholders)."""
+    s = _instructions_settings()
+    h = _help_button_settings()
+    html = ''
+    if s['enabled']:
+        html = _resolve_inline_qrcodes(resolve_dynamic_placeholders(s['html']))
+    resp = jsonify({
+        'enabled':       s['enabled'] and bool(html.strip()),
+        'html':          html,
+        'bg_color':      s['bg_color'],
+        'text_color':    s['text_color'],
+        'min_sleep_seconds': s['min_sleep_min'] * 60,
+        'autoclose_seconds': s['autoclose_s'],
+        'tap_anywhere':  s['tap_anywhere'],
+        'close': {
+            'kind': s['close_kind'], 'label': s['close_label'], 'bg': s['close_bg'],
+            'fg': s['close_fg'], 'size': s['close_size'], 'position': s['close_position'],
+            'margin_x': s['close_margin_x'], 'margin_y': s['close_margin_y'],
+        },
+        # Le bouton Aide n'a de sens que si une page existe à ouvrir.
+        'help': dict(h, enabled=h['enabled'] and s['enabled'] and bool(html.strip()),
+                     radius=_HELP_SHAPE_RADIUS.get(h['shape'], '999px')),
+    })
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+_HELP_SHAPE_RADIUS = {'pill': '999px', 'rounded': '16px', 'square': '6px', 'circle': '50%'}
+
+
+def _block_ctx_instructions_page() -> dict:
+    return {
+        'instr_settings':       _instructions_settings(),
+        'instr_positions':      _INSTR_POSITION_LABELS,
+        'instr_fonts':          _all_fonts(),
+        'instr_colors':         _charte_colors_for_ckeditor(),
+        'instr_text_sizes':     _PROMO_TEXT_SIZES,
+        'instr_media_library':  _promo_media_library(),
+        'instr_content_images': [
+            {'url': f"/static/promo_content/{i['filename']}", 'label': i.get('label') or i['filename']}
+            for i in list_promo_content_images()
+        ],
+    }
+
+
+def _block_ctx_instructions_close_btn() -> dict:
+    return {'instr_close_settings': _instructions_settings(), 'instr_close_positions': _INSTR_POSITION_LABELS}
+
+
+def _block_ctx_help_button() -> dict:
+    return {
+        'help_settings': _help_button_settings(),
+        'help_positions': _INSTR_POSITION_LABELS,
+        'help_shapes': list(_HELP_SHAPES.items()),
+        'help_modes': list(_HELP_MODES.items()),
+    }
+
+
+def _form_int(name: str, lo: int, hi: int, default: int) -> str:
+    raw = (request.form.get(name) or '').strip()
+    value = int(raw) if raw.isdigit() else default
+    return str(max(lo, min(hi, value)))
+
+
+def _form_hex(name: str, default: str) -> str:
+    raw = (request.form.get(name) or '').strip()
+    return raw if _INSTR_HEX_RE.fullmatch(raw) else default
+
+
+@app.route('/admin/screensaver/instructions', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_instructions_set_page():
+    html = sanitize_promo_html(request.form.get('html_content') or '')
+    if len(html) > _INSTR_HTML_MAX:
+        return _admin_block_redirect('instructions_page', err='Contenu trop volumineux.')
+    set_setting('instructions.enabled', '1' if request.form.get('enabled') else '0')
+    set_setting('instructions.html', html)
+    set_setting('instructions.bg_color', _form_hex('bg_color', '#111111'))
+    set_setting('instructions.text_color', _form_hex('text_color', '#ffffff'))
+    set_setting('instructions.min_sleep_min', _form_int('min_sleep_min', 0, 1440, 0))
+    set_setting('instructions.autoclose_s', _form_int('autoclose_s', 0, 3600, 60))
+    set_setting('instructions.tap_anywhere', '1' if request.form.get('tap_anywhere') else '0')
+    return _admin_block_redirect('instructions_page', ok="Page d'instructions enregistrée.")
+
+
+@app.route('/admin/screensaver/instructions/close', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_instructions_set_close_btn():
+    kind = request.form.get('close_kind')
+    set_setting('instructions.close_kind', kind if kind in ('symbol', 'text') else 'symbol')
+    set_setting('instructions.close_label', (request.form.get('close_label') or '').strip()[:20])
+    set_setting('instructions.close_bg', _form_hex('close_bg', '#ffffff'))
+    set_setting('instructions.close_size', _form_int('close_size', _INSTR_MIN_BTN_PX, 300, 72))
+    pos = request.form.get('close_position')
+    set_setting('instructions.close_position', pos if pos in _INSTR_POSITIONS else 'top-right')
+    set_setting('instructions.close_margin_x', _form_int('close_margin_x', 0, 300, 24))
+    set_setting('instructions.close_margin_y', _form_int('close_margin_y', 0, 300, 24))
+    return _admin_block_redirect('instructions_close_btn', ok='Bouton de fermeture enregistré.')
+
+
+@app.route('/admin/buttons/help', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_help_button_set():
+    set_setting('help_button.enabled', '1' if request.form.get('enabled') else '0')
+    mode = request.form.get('mode')
+    set_setting('help_button.mode', mode if mode in _HELP_MODES else 'floating')
+    set_setting('help_button.label', (request.form.get('label') or '').strip()[:20])
+    shape = request.form.get('shape')
+    set_setting('help_button.shape', shape if shape in _HELP_SHAPES else 'circle')
+    set_setting('help_button.bg', _form_hex('bg', '#32c1f9'))
+    set_setting('help_button.size', _form_int('size', _INSTR_MIN_BTN_PX, 300, 72))
+    pos = request.form.get('position')
+    set_setting('help_button.position', pos if pos in _INSTR_POSITIONS else 'top-left')
+    set_setting('help_button.margin_x', _form_int('margin_x', 0, 300, 24))
+    set_setting('help_button.margin_y', _form_int('margin_y', 0, 300, 24))
+    return _admin_block_redirect('help_button', ok='Bouton Aide enregistré.')
 
 
 # ── Admin — import de pack de frames ─────────────────────────────────────────

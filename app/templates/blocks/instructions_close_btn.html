@@ -1,0 +1,64 @@
+<style>
+  .ib-form input[type=text], .ib-form input[type=number], .ib-form select {
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 10px; padding: 8px 12px; font-size: 14px;
+  }
+  .ib-form input[type=color] { width: 48px; height: 36px; padding: 2px; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px; vertical-align: middle; }
+  .ib-hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  .ib-form .field-row { display: flex; gap: 20px; flex-wrap: wrap; }
+  .ib-form .field { margin-bottom: 14px; }
+  .ib-form .field label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+  .ib-form .btn-primary { background: var(--accent); color: #000; font-weight: 700; border: none;
+    border-radius: 10px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
+</style>
+<div class="form-card">
+  <form method="post" action="{{ url_for('admin_instructions_set_close_btn') }}" class="ib-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <p class="ib-hint" style="margin:0 0 16px">
+      Seul élément ajouté par-dessus la page d'instructions. Pour éviter une borne bloquée, la taille minimale
+      est de 56 px, la position reste toujours dans l'écran et la couleur du texte s'ajuste automatiquement
+      au fond. Utilisez « Aperçu plein écran » dans le bloc précédent pour vérifier (après enregistrement).
+    </p>
+    <div class="field-row">
+      <div class="field">
+        <label>Type</label>
+        <select name="close_kind">
+          <option value="symbol" {% if instr_close_settings.close_kind == 'symbol' %}selected{% endif %}>Symbole (rond)</option>
+          <option value="text"   {% if instr_close_settings.close_kind == 'text'   %}selected{% endif %}>Texte (pilule)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Symbole ou texte (20 car. max)</label>
+        <input type="text" name="close_label" maxlength="20" value="{{ instr_close_settings.close_label }}" placeholder="✕">
+      </div>
+      <div class="field">
+        <label>Couleur de fond</label>
+        <input type="color" name="close_bg" value="{{ instr_close_settings.close_bg }}">
+      </div>
+      <div class="field">
+        <label>Taille (px, min 56)</label>
+        <input type="number" name="close_size" min="56" max="300" value="{{ instr_close_settings.close_size }}">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Position</label>
+        <select name="close_position">
+          {% for value, label in instr_close_positions %}
+          <option value="{{ value }}" {% if instr_close_settings.close_position == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>Marge horizontale (px)</label>
+        <input type="number" name="close_margin_x" min="0" max="300" value="{{ instr_close_settings.close_margin_x }}">
+      </div>
+      <div class="field">
+        <label>Marge verticale (px)</label>
+        <input type="number" name="close_margin_y" min="0" max="300" value="{{ instr_close_settings.close_margin_y }}">
+      </div>
+    </div>
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+</div>

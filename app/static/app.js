@@ -249,7 +249,7 @@ async function pollQrLive() {
   // Pas de scan pendant la relecture (le flux live n'est plus la vue
   // principale) ni pendant l'écran de veille — évite des requêtes inutiles.
   const screensaverActive = screensaverOverlay && !screensaverOverlay.classList.contains('hidden');
-  if (state === 'replay' || screensaverActive) {
+  if (state === 'replay' || screensaverActive || instrOpen) {
     if (qrLiveOverlayLayer) qrLiveOverlayLayer.innerHTML = '';
     return;
   }
@@ -385,6 +385,7 @@ let ssCurrent       = 'A';
 let ssCleanup       = null;
 let ssRefreshTimer  = null;
 let ssDelayMs       = 5000;
+let ssStartedAt     = 0; // début de la veille en cours (durée mesurée au réveil, voir « Page d'instructions »)
 
 function ssShuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -458,6 +459,7 @@ function ssShowNext() {
 async function ssStart() {
   if (ssActive) return;
   ssActive = true;
+  ssStartedAt = Date.now();
   stopTopBarCountdown(); // le diaporama prend le relais, plus besoin du compte à rebours
   setVisible(screensaverOverlay, true);
   try {
@@ -505,7 +507,14 @@ function startVeilleTopBar() {
 
 function ssNoteActivity(e) {
   ssLastActivity = Date.now();
-  if (ssActive) ssStop(); // referme la veille ; on retombe plus bas pour relancer la barre
+  if (ssActive) {
+    const sleptSeconds = (Date.now() - ssStartedAt) / 1000;
+    ssStop(); // referme la veille ; on retombe plus bas pour relancer la barre
+    // Page d'instructions au réveil : l'overlay couvre l'écran dès cet instant,
+    // il absorbe donc le « clic » synthétisé qui suit le touchstart de réveil.
+    if (instrShouldShowOnWake(sleptSeconds)) { instrOpenPage(); return; }
+  }
+  if (instrOpen) return; // pas de barre de veille sous la page d'instructions
   if (state !== 'home') return;
   if (e && e.type === 'mousemove') {
     const now = Date.now();
@@ -518,6 +527,7 @@ function ssNoteActivity(e) {
 function ssCheck() {
   if (!cfg.screensaverEnabled || !cfg.screensaverTimeoutSeconds) return;
   if (ssActive) return;
+  if (instrOpen) { ssLastActivity = Date.now(); return; } // la page d'instructions a sa propre fermeture auto
   if (state !== 'home') { ssLastActivity = Date.now(); return; } // jamais couper une capture en cours
   if ((Date.now() - ssLastActivity) / 1000 >= cfg.screensaverTimeoutSeconds) ssStart();
 }
@@ -550,6 +560,152 @@ async function ssRefreshSettings() {
   } catch (e) { /* on garde les valeurs actuelles */ }
 }
 setInterval(ssRefreshSettings, 30000);
+
+// — Page d'instructions (réveil de veille) + bouton « Aide » —
+// Contenu et réglages : /api/instructions (rafraîchi toutes les 30 s, comme les
+// réglages de veille). HTML injecté directement (pas d'iframe) : il a été
+// assaini côté serveur et les événements doivent remonter au document.
+// Fermeture : bouton configurable, appui n'importe où (option) et fermeture
+// automatique après inactivité. Un court délai de grâce ignore les appuis
+// qui suivent immédiatement l'ouverture (clic fantôme du geste de réveil).
+const instrOverlay  = document.getElementById('instructionsOverlay');
+const instrContent  = document.getElementById('instructionsContent');
+const instrCloseBtn = document.getElementById('instructionsClose');
+const instrBarFill  = document.getElementById('instructionsBarFill');
+const instrUI       = window.PictotemInstructionsUI;
+const INSTR_GRACE_MS = 600;
+
+let instrCfg       = null;
+let instrOpen      = false;
+let instrOpenedAt  = 0;
+let instrAutoTimer = null;
+let instrLastHtml  = null;
+let helpBtn        = null;
+
+function instrShouldShowOnWake(sleptSeconds) {
+  return !!(instrCfg && instrCfg.enabled && sleptSeconds >= (instrCfg.min_sleep_seconds || 0));
+}
+
+function instrStyleOverlay() {
+  if (!instrCfg || !instrOverlay) return;
+  instrOverlay.style.background = instrCfg.bg_color;
+  instrOverlay.style.color = instrCfg.text_color;
+  if (instrUI && instrCloseBtn) instrUI.styleCloseButton(instrCloseBtn, instrCfg.close);
+}
+
+function instrScheduleAutoClose() {
+  clearTimeout(instrAutoTimer);
+  instrAutoTimer = null;
+  const secs = instrCfg ? instrCfg.autoclose_seconds : 0;
+  if (!instrBarFill) return;
+  // Barre de progression : remise à 100 % puis transition linéaire vers 0.
+  instrBarFill.style.transition = 'none';
+  instrBarFill.style.width = '100%';
+  if (!(secs > 0)) return;
+  void instrBarFill.offsetWidth;
+  instrBarFill.style.transition = `width ${secs}s linear`;
+  instrBarFill.style.width = '0%';
+  instrAutoTimer = setTimeout(() => instrClosePage(true), secs * 1000);
+}
+
+function instrOpenPage() {
+  if (!instrCfg || !instrCfg.enabled || !instrOverlay || instrOpen) return;
+  instrOpen = true;
+  instrOpenedAt = Date.now();
+  stopTopBarCountdown();
+  instrStyleOverlay();
+  instrOverlay.scrollTop = 0;
+  setVisible(instrOverlay, true);
+  instrOverlay.setAttribute('aria-hidden', 'false');
+  instrScheduleAutoClose();
+  helpSyncVisibility();
+}
+
+function instrClosePage(force) {
+  if (!instrOpen) return;
+  if (!force && Date.now() - instrOpenedAt < INSTR_GRACE_MS) return;
+  instrOpen = false;
+  clearTimeout(instrAutoTimer);
+  instrAutoTimer = null;
+  setVisible(instrOverlay, false);
+  instrOverlay.setAttribute('aria-hidden', 'true');
+  ssLastActivity = Date.now(); // repart de zéro pour le prochain écran de veille
+  startVeilleTopBar();
+  helpSyncVisibility();
+}
+
+if (instrOverlay) {
+  instrOverlay.addEventListener('click', () => {
+    if (instrCfg && instrCfg.tap_anywhere) instrClosePage(false);
+  });
+  // Toute interaction dans la page (défilement, appui) repousse la fermeture auto.
+  ['touchstart', 'mousedown', 'wheel', 'scroll'].forEach((evt) => {
+    instrOverlay.addEventListener(evt, () => { if (instrOpen) instrScheduleAutoClose(); },
+      { passive: true });
+  });
+}
+if (instrCloseBtn) {
+  instrCloseBtn.addEventListener('click', (e) => { e.stopPropagation(); instrClosePage(false); });
+}
+
+// Bouton « Aide » : flottant (fixe, toujours visible hors capture) ou intégré
+// à la zone centrale de la barre d'actions.
+function helpSyncVisibility() {
+  if (!helpBtn) return;
+  const capturing = lookHereBanner && !lookHereBanner.classList.contains('hidden');
+  const hide = instrOpen || ssActive || capturing;
+  helpBtn.classList.toggle('hidden', hide);
+}
+
+function helpApply() {
+  const h = instrCfg && instrCfg.help;
+  const center = document.querySelector('.bottom-bar-center');
+  if (!h || !h.enabled) {
+    if (helpBtn) { helpBtn.remove(); helpBtn = null; }
+    if (center) center.classList.remove('with-help');
+    return;
+  }
+  if (!helpBtn) {
+    helpBtn = document.createElement('button');
+    helpBtn.type = 'button';
+    helpBtn.id = 'btnHelp';
+    helpBtn.addEventListener('click', () => instrOpenPage());
+  }
+  const inBar = h.mode === 'bar' && !!center;
+  helpBtn.className = 'help-btn' + (inBar ? ' in-bar' : '');
+  if (inBar) {
+    const left = String(h.position || '').endsWith('left');
+    const wantFirst = left, isFirst = center.firstElementChild === helpBtn;
+    if (helpBtn.parentNode !== center || (wantFirst !== isFirst)) {
+      if (left) center.insertBefore(helpBtn, center.firstChild); else center.appendChild(helpBtn);
+    }
+    center.classList.add('with-help');
+  } else {
+    if (helpBtn.parentNode !== document.body) document.body.appendChild(helpBtn);
+    if (center) center.classList.remove('with-help');
+  }
+  if (instrUI) instrUI.styleHelpButton(helpBtn, h, !inBar);
+  helpSyncVisibility();
+}
+
+async function instrRefresh() {
+  try {
+    const res = await fetch('/api/instructions', { cache: 'no-store' });
+    if (!res.ok) return;
+    instrCfg = await res.json();
+    if (instrContent && instrCfg.html !== instrLastHtml) {
+      instrContent.innerHTML = instrCfg.html || '';
+      instrLastHtml = instrCfg.html;
+    }
+    if (!instrCfg.enabled && instrOpen) instrClosePage(true);
+    else if (instrOpen) { instrStyleOverlay(); }
+    helpApply();
+  } catch (_) { /* on garde la configuration actuelle */ }
+}
+window.addEventListener('resize', () => { helpApply(); if (instrOpen) instrStyleOverlay(); });
+setInterval(helpSyncVisibility, 500);
+setInterval(instrRefresh, 30000);
+instrRefresh();
 
 // — Masquage automatique de la barre inférieure sur l'écran d'accueil —
 const HOME_BAR_HIDE_MS = 10000;

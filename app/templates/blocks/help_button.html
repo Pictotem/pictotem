@@ -1,0 +1,79 @@
+<style>
+  .hb-form input[type=text], .hb-form input[type=number], .hb-form select {
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 10px; padding: 8px 12px; font-size: 14px;
+  }
+  .hb-form input[type=color] { width: 48px; height: 36px; padding: 2px; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px; vertical-align: middle; }
+  .hb-hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  /* Repli : ces classes sont définies par la page d'accueil de chaque tuile
+     (le bloc est déplaçable), pas dans style.css. */
+  .hb-form .field-row { display: flex; gap: 20px; flex-wrap: wrap; }
+  .hb-form .field { margin-bottom: 14px; }
+  .hb-form .field label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+  .hb-form .checkbox-row { display: flex !important; align-items: center; gap: 10px; cursor: pointer; }
+  .hb-form .btn-primary { background: var(--accent); color: #000; font-weight: 700; border: none;
+    border-radius: 10px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
+</style>
+<div class="form-card">
+  <form method="post" action="{{ url_for('admin_help_button_set') }}" class="hb-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="field">
+      <label class="checkbox-row">
+        <input type="checkbox" name="enabled" value="1" {% if help_settings.enabled %}checked{% endif %}>
+        Afficher le bouton « Aide » sur le kiosque
+      </label>
+      <p class="hb-hint">Ouvre la page d'instructions (à activer et rédiger dans l'onglet Écran de veille) sans quitter l'étape en cours. Sans page d'instructions active, le bouton n'apparaît pas.</p>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Emplacement</label>
+        <select name="mode">
+          {% for value, label in help_modes %}
+          <option value="{{ value }}" {% if help_settings.mode == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>Texte ou symbole (20 car. max)</label>
+        <input type="text" name="label" maxlength="20" value="{{ help_settings.label }}" placeholder="Aide">
+      </div>
+      <div class="field">
+        <label>Forme</label>
+        <select name="shape">
+          {% for value, label in help_shapes %}
+          <option value="{{ value }}" {% if help_settings.shape == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>Couleur de fond</label>
+        <input type="color" name="bg" value="{{ help_settings.bg }}">
+      </div>
+      <div class="field">
+        <label>Taille (hauteur px, min 56)</label>
+        <input type="number" name="size" min="56" max="300" value="{{ help_settings.size }}">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Position (bouton flottant)</label>
+        <select name="position">
+          {% for value, label in help_positions %}
+          <option value="{{ value }}" {% if help_settings.position == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <p class="hb-hint">Dans la barre d'actions : « gauche » place le bouton avant les autres, sinon après.</p>
+      </div>
+      <div class="field">
+        <label>Marge horizontale (px)</label>
+        <input type="number" name="margin_x" min="0" max="300" value="{{ help_settings.margin_x }}">
+      </div>
+      <div class="field">
+        <label>Marge verticale (px)</label>
+        <input type="number" name="margin_y" min="0" max="300" value="{{ help_settings.margin_y }}">
+      </div>
+    </div>
+    <button class="btn-primary" type="submit">Enregistrer</button>
+  </form>
+</div>
