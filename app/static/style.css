@@ -994,6 +994,7 @@ button, input, a { font: inherit; }
   padding: 5vh 6vw;
   -webkit-overflow-scrolling: touch;
 }
+#bottomQrBtn.gqr-enabled { cursor: pointer; }
 .instructions-content { max-width: 100%; }
 .instructions-content img { max-width: 100%; height: auto; }
 .instructions-close {

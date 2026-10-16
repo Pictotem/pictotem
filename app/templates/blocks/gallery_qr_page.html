@@ -1,0 +1,108 @@
+<style>
+  #gqr-editor-wrap .ck-content.ck-editor__editable { color: {{ gqr_settings.text_color }}; }
+  #gqr-preview { position: fixed; inset: 0; z-index: 3000; overflow: auto; padding: 5vh 6vw; box-sizing: border-box; }
+  #gqr-preview.hidden { display: none; }
+  #gqr-preview button { border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  #gqr-preview-note { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 3001;
+    background: rgba(0,0,0,.7); color: #fff; font-size: 12px; padding: 6px 14px; border-radius: 999px; }
+  #gqr-preview-note.hidden { display: none; }
+</style>
+{# Les scripts/styles CKEditor, la config de l'éditeur et la médiathèque sont fournis par le bloc
+   « Page d'instructions » (même page) : ne pas les dupliquer ici. #}
+<div class="form-card">
+  <form method="post" action="{{ url_for('admin_gallery_qr_set_page') }}" class="promo-page-form instr-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+
+    <div class="field">
+      <label class="checkbox-row">
+        <input type="checkbox" name="enabled" value="1" {% if gqr_settings.enabled %}checked{% endif %}>
+        Activer la page QR galerie
+      </label>
+      <p class="instr-hint">Affichée plein écran quand on touche le QR code en bas à droite de la borne. Sans contenu, le QR reste non cliquable.</p>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Fermeture automatique après inactivité (secondes)</label>
+        <input type="number" name="autoclose_s" min="0" max="3600" value="{{ gqr_settings.autoclose_s }}">
+        <p class="instr-hint">0 = jamais (déconseillé : la borne resterait bloquée sur la page).</p>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="checkbox-row">
+        <input type="checkbox" name="tap_anywhere" value="1" {% if gqr_settings.tap_anywhere %}checked{% endif %}>
+        Un appui n'importe où sur la page la ferme (en plus du bouton)
+      </label>
+    </div>
+
+    <div class="field-row">
+      <div class="field field-half">
+        <label>Couleur de fond de la page</label>
+        <input type="color" name="bg_color" value="{{ gqr_settings.bg_color }}">
+      </div>
+      <div class="field field-half">
+        <label>Couleur du texte par défaut</label>
+        <input type="color" name="text_color" value="{{ gqr_settings.text_color }}">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Contenu (couvre tout l'écran de la borne)</label>
+      <div id="gqr-editor-wrap">
+        <div id="wysiwyg-galleryqr" class="promo-ck-editor"
+             data-placeholder="Expliquez comment accéder à la galerie, puis insérez {qrcode=&quot;&quot; taille=&quot;450&quot;}…"
+             data-editor-bg-color="{{ gqr_settings.bg_color }}">{{ gqr_settings.html | safe }}</div>
+      </div>
+      <input type="hidden" name="html_content">
+      <p class="instr-hint">
+        Emplacements dynamiques résolus à l'affichage : <code>{ip}</code>, <code>{port}</code>, QR code
+        <code>{qrcode="" taille="450" color="#000000" bgcolor="#ffffff"}</code> (texte vide = lien de la galerie).
+        Les images se choisissent dans la médiathèque (bouton image de la barre d'outils).
+      </p>
+    </div>
+
+    <div class="instr-actions">
+      <button class="btn-primary" type="submit">Enregistrer</button>
+      <button class="instr-btn-secondary" type="button" id="gqr-preview-btn">Aperçu plein écran</button>
+    </div>
+  </form>
+</div>
+
+<div id="gqr-preview" class="hidden">
+  <button type="button" id="gqr-preview-close" aria-label="Fermer l'aperçu"></button>
+</div>
+<div id="gqr-preview-note" class="hidden">Aperçu — appuyez n'importe où ou sur le bouton pour fermer</div>
+
+<script>
+  // Aperçu plein écran : reprend le HTML courant de l'éditeur et le bouton de
+  // fermeture tel que réglé dans le bloc suivant (valeurs enregistrées).
+  window.addEventListener('load', function () {
+    var btn = document.getElementById('gqr-preview-btn');
+    var box = document.getElementById('gqr-preview');
+    var note = document.getElementById('gqr-preview-note');
+    var closeBtn = document.getElementById('gqr-preview-close');
+    if (!btn || !box || !closeBtn) return;
+    var close = {{ {
+      'kind': instr_settings.close_kind, 'label': instr_settings.close_label, 'bg': instr_settings.close_bg,
+      'fg': instr_settings.close_fg, 'size': instr_settings.close_size, 'position': instr_settings.close_position,
+      'margin_x': instr_settings.close_margin_x, 'margin_y': instr_settings.close_margin_y,
+    } | tojson }};
+    function hide() { box.classList.add('hidden'); note.classList.add('hidden'); }
+    btn.addEventListener('click', function () {
+      var src = document.querySelector('#wysiwyg-galleryqr .ck-content, #gqr-editor-wrap .ck-content');
+      Array.from(box.querySelectorAll('.gqr-preview-content')).forEach(function (n) { n.remove(); });
+      var content = document.createElement('div');
+      content.className = 'gqr-preview-content ck-content';
+      content.innerHTML = src ? src.innerHTML : '';
+      box.insertBefore(content, closeBtn);
+      box.style.background = btn.form.querySelector('[name=bg_color]').value;
+      box.style.color = btn.form.querySelector('[name=text_color]').value;
+      if (window.PictotemInstructionsUI) window.PictotemInstructionsUI.styleCloseButton(closeBtn, close);
+      box.classList.remove('hidden'); note.classList.remove('hidden');
+    });
+    closeBtn.addEventListener('click', function (e) { e.stopPropagation(); hide(); });
+    box.addEventListener('click', hide);
+  });
+</script>

@@ -3500,6 +3500,7 @@ _ADMIN_BLOCKS = {
     'slideshow_settings':      {'title': "Paramètres",                          'default_page': 'slideshow',   'template': 'blocks/slideshow_settings.html',      'context_fn': '_block_ctx_slideshow_settings'},
     'screensaver_settings':    {'title': "Paramètres",                          'default_page': 'screensaver', 'template': 'blocks/screensaver_settings.html',    'context_fn': '_block_ctx_screensaver_settings'},
     'instructions_page':       {'title': "Page d'instructions au réveil",       'default_page': 'screensaver', 'template': 'blocks/instructions_page.html',       'context_fn': '_block_ctx_instructions_page'},
+    'gallery_qr_page':         {'title': "Page QR galerie (tap sur le QR de la barre du bas)", 'default_page': 'screensaver', 'template': 'blocks/gallery_qr_page.html', 'context_fn': '_block_ctx_gallery_qr_page'},
     'instructions_close_btn':  {'title': "Page d'instructions — bouton de fermeture", 'default_page': 'screensaver', 'template': 'blocks/instructions_close_btn.html', 'context_fn': '_block_ctx_instructions_close_btn'},
     'help_button':             {'title': "Bouton « Aide »",                      'default_page': 'buttons',     'template': 'blocks/help_button.html',             'context_fn': '_block_ctx_help_button'},
     'sse_dummy_settings':      {'title': "Flux SSE de simulation (dev)",       'default_page': 'application', 'template': 'blocks/sse_dummy_settings.html',       'context_fn': '_block_ctx_sse_dummy_settings'},
@@ -8517,6 +8518,77 @@ def admin_instructions_set_close_btn():
     set_setting('instructions.close_margin_x', _form_int('close_margin_x', 0, 300, 24))
     set_setting('instructions.close_margin_y', _form_int('close_margin_y', 0, 300, 24))
     return _admin_block_redirect('instructions_close_btn', ok='Bouton de fermeture enregistré.')
+
+
+# ── Page QR galerie (tap sur le QR de la barre du bas) ───────────────────────
+# Même éditeur WYSIWYG que la page d'instructions ; le style du bouton de
+# fermeture est partagé avec elle (instructions.close_*).
+
+_GALLERY_QR_DEFAULT_HTML = (
+    '<h1 style="text-align:center">Retrouvez vos photos</h1>'
+    '<ol><li>Scannez le QR code avec votre téléphone</li>'
+    '<li>Connectez-vous au même Wi-Fi que le photomaton</li>'
+    '<li>Parcourez et téléchargez vos photos</li></ol>'
+    '<p style="text-align:center">{qrcode="" taille="450"}</p>'
+)
+
+
+def _gallery_qr_settings() -> dict:
+    return {
+        'enabled':      get_setting('galleryqr.enabled', '0') == '1',
+        'html':         get_setting('galleryqr.html', '') or _GALLERY_QR_DEFAULT_HTML,
+        'bg_color':     _hex_setting('galleryqr.bg_color', '#111111'),
+        'text_color':   _hex_setting('galleryqr.text_color', '#ffffff'),
+        'autoclose_s':  _int_setting('galleryqr.autoclose_s', 30, 0, 3600),
+        'tap_anywhere': get_setting('galleryqr.tap_anywhere', '1') == '1',
+    }
+
+
+@app.route('/api/gallery-qr')
+@require_main_auth
+def api_gallery_qr():
+    """Contenu + réglages de la page QR galerie (lue par le kiosque, toutes les 30 s)."""
+    s = _gallery_qr_settings()
+    c = _instructions_settings()
+    html = _resolve_inline_qrcodes(resolve_dynamic_placeholders(s['html'])) if s['enabled'] else ''
+    resp = jsonify({
+        'enabled':           s['enabled'] and bool(html.strip()),
+        'html':              html,
+        'bg_color':          s['bg_color'],
+        'text_color':        s['text_color'],
+        'autoclose_seconds': s['autoclose_s'],
+        'tap_anywhere':      s['tap_anywhere'],
+        'close': {
+            'kind': c['close_kind'], 'label': c['close_label'], 'bg': c['close_bg'],
+            'fg': c['close_fg'], 'size': c['close_size'], 'position': c['close_position'],
+            'margin_x': c['close_margin_x'], 'margin_y': c['close_margin_y'],
+        },
+    })
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+def _block_ctx_gallery_qr_page() -> dict:
+    ctx = _block_ctx_instructions_page()
+    ctx['gqr_settings'] = _gallery_qr_settings()
+    ctx['instr_settings'] = _instructions_settings()  # style du bouton de fermeture (aperçu)
+    return ctx
+
+
+@app.route('/admin/screensaver/gallery-qr', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_gallery_qr_set_page():
+    html = sanitize_promo_html(request.form.get('html_content') or '')
+    if len(html) > _INSTR_HTML_MAX:
+        return _admin_block_redirect('gallery_qr_page', err='Contenu trop volumineux.')
+    set_setting('galleryqr.enabled', '1' if request.form.get('enabled') else '0')
+    set_setting('galleryqr.html', html)
+    set_setting('galleryqr.bg_color', _form_hex('bg_color', '#111111'))
+    set_setting('galleryqr.text_color', _form_hex('text_color', '#ffffff'))
+    set_setting('galleryqr.autoclose_s', _form_int('autoclose_s', 0, 3600, 30))
+    set_setting('galleryqr.tap_anywhere', '1' if request.form.get('tap_anywhere') else '0')
+    return _admin_block_redirect('gallery_qr_page', ok='Page QR galerie enregistrée.')
 
 
 @app.route('/admin/buttons/help', methods=['POST'])

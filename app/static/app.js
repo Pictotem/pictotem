@@ -249,7 +249,7 @@ async function pollQrLive() {
   // Pas de scan pendant la relecture (le flux live n'est plus la vue
   // principale) ni pendant l'écran de veille — évite des requêtes inutiles.
   const screensaverActive = screensaverOverlay && !screensaverOverlay.classList.contains('hidden');
-  if (state === 'replay' || screensaverActive || instrOpen) {
+  if (state === 'replay' || screensaverActive || instrOpen || gqrOpen) {
     if (qrLiveOverlayLayer) qrLiveOverlayLayer.innerHTML = '';
     return;
   }
@@ -514,7 +514,7 @@ function ssNoteActivity(e) {
     // il absorbe donc le « clic » synthétisé qui suit le touchstart de réveil.
     if (instrShouldShowOnWake(sleptSeconds)) { instrOpenPage(); return; }
   }
-  if (instrOpen) return; // pas de barre de veille sous la page d'instructions
+  if (instrOpen || gqrOpen) return; // pas de barre de veille sous les pages plein écran
   if (state !== 'home') return;
   if (e && e.type === 'mousemove') {
     const now = Date.now();
@@ -527,7 +527,7 @@ function ssNoteActivity(e) {
 function ssCheck() {
   if (!cfg.screensaverEnabled || !cfg.screensaverTimeoutSeconds) return;
   if (ssActive) return;
-  if (instrOpen) { ssLastActivity = Date.now(); return; } // la page d'instructions a sa propre fermeture auto
+  if (instrOpen || gqrOpen) { ssLastActivity = Date.now(); return; } // la page d'instructions a sa propre fermeture auto
   if (state !== 'home') { ssLastActivity = Date.now(); return; } // jamais couper une capture en cours
   if ((Date.now() - ssLastActivity) / 1000 >= cfg.screensaverTimeoutSeconds) ssStart();
 }
@@ -653,7 +653,7 @@ if (instrCloseBtn) {
 function helpSyncVisibility() {
   if (!helpBtn) return;
   const capturing = lookHereBanner && !lookHereBanner.classList.contains('hidden');
-  const hide = instrOpen || ssActive || capturing;
+  const hide = instrOpen || gqrOpen || ssActive || capturing;
   helpBtn.classList.toggle('hidden', hide);
 }
 
@@ -706,6 +706,109 @@ window.addEventListener('resize', () => { helpApply(); if (instrOpen) instrStyle
 setInterval(helpSyncVisibility, 500);
 setInterval(instrRefresh, 30000);
 instrRefresh();
+
+// — Page QR galerie (tap sur le QR de la barre du bas) —
+// Même mécanique que la page d'instructions : contenu WYSIWYG et réglages via
+// /api/gallery-qr (rafraîchi toutes les 30 s), fermeture par bouton, appui
+// n'importe où (option) ou délai d'inactivité.
+const gqrOverlay  = document.getElementById('galleryQrOverlay');
+const gqrContent  = document.getElementById('galleryQrContent');
+const gqrCloseBtn = document.getElementById('galleryQrClose');
+const gqrBarFill  = document.getElementById('galleryQrBarFill');
+const gqrTrigger  = document.getElementById('bottomQrBtn');
+const GQR_GRACE_MS = 600;
+
+let gqrCfg       = null;
+let gqrOpen      = false;
+let gqrOpenedAt  = 0;
+let gqrAutoTimer = null;
+let gqrLastHtml  = null;
+
+function gqrStyleOverlay() {
+  if (!gqrCfg || !gqrOverlay) return;
+  gqrOverlay.style.background = gqrCfg.bg_color;
+  gqrOverlay.style.color = gqrCfg.text_color;
+  if (instrUI && gqrCloseBtn) instrUI.styleCloseButton(gqrCloseBtn, gqrCfg.close);
+}
+
+function gqrScheduleAutoClose() {
+  clearTimeout(gqrAutoTimer);
+  gqrAutoTimer = null;
+  const secs = gqrCfg ? gqrCfg.autoclose_seconds : 0;
+  if (!gqrBarFill) return;
+  gqrBarFill.style.transition = 'none';
+  gqrBarFill.style.width = '100%';
+  if (!(secs > 0)) return;
+  void gqrBarFill.offsetWidth;
+  gqrBarFill.style.transition = `width ${secs}s linear`;
+  gqrBarFill.style.width = '0%';
+  gqrAutoTimer = setTimeout(() => gqrClosePage(true), secs * 1000);
+}
+
+function gqrOpenPage() {
+  if (!gqrCfg || !gqrCfg.enabled || !gqrOverlay || gqrOpen || instrOpen) return;
+  gqrOpen = true;
+  gqrOpenedAt = Date.now();
+  stopTopBarCountdown();
+  stopIdleTimer();
+  gqrStyleOverlay();
+  gqrOverlay.scrollTop = 0;
+  setVisible(gqrOverlay, true);
+  gqrOverlay.setAttribute('aria-hidden', 'false');
+  gqrScheduleAutoClose();
+  helpSyncVisibility();
+}
+
+function gqrClosePage(force) {
+  if (!gqrOpen) return;
+  if (!force && Date.now() - gqrOpenedAt < GQR_GRACE_MS) return;
+  gqrOpen = false;
+  clearTimeout(gqrAutoTimer);
+  gqrAutoTimer = null;
+  setVisible(gqrOverlay, false);
+  gqrOverlay.setAttribute('aria-hidden', 'true');
+  ssLastActivity = Date.now();
+  if (IDLE_ACTIVE_STATES.has(state)) startIdleTimer();
+  else if (state === 'home') startVeilleTopBar();
+  helpSyncVisibility();
+}
+
+if (gqrOverlay) {
+  gqrOverlay.addEventListener('click', () => {
+    if (gqrCfg && gqrCfg.tap_anywhere) gqrClosePage(false);
+  });
+  ['touchstart', 'mousedown', 'wheel', 'scroll'].forEach((evt) => {
+    gqrOverlay.addEventListener(evt, () => { if (gqrOpen) gqrScheduleAutoClose(); },
+      { passive: true });
+  });
+}
+if (gqrCloseBtn) {
+  gqrCloseBtn.addEventListener('click', (e) => { e.stopPropagation(); gqrClosePage(false); });
+}
+if (gqrTrigger) {
+  gqrTrigger.addEventListener('click', () => gqrOpenPage());
+  gqrTrigger.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); gqrOpenPage(); }
+  });
+}
+
+async function gqrRefresh() {
+  try {
+    const res = await fetch('/api/gallery-qr', { cache: 'no-store' });
+    if (!res.ok) return;
+    gqrCfg = await res.json();
+    if (gqrContent && gqrCfg.html !== gqrLastHtml) {
+      gqrContent.innerHTML = gqrCfg.html || '';
+      gqrLastHtml = gqrCfg.html;
+    }
+    if (gqrTrigger) gqrTrigger.classList.toggle('gqr-enabled', !!gqrCfg.enabled);
+    if (!gqrCfg.enabled && gqrOpen) gqrClosePage(true);
+    else if (gqrOpen) gqrStyleOverlay();
+  } catch (_) { /* on garde la configuration actuelle */ }
+}
+window.addEventListener('resize', () => { if (gqrOpen) gqrStyleOverlay(); });
+setInterval(gqrRefresh, 30000);
+gqrRefresh();
 
 // — Masquage automatique de la barre inférieure sur l'écran d'accueil —
 const HOME_BAR_HIDE_MS = 10000;

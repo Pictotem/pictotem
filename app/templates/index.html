@@ -432,7 +432,7 @@
         </div>
 
         <div class="bottom-bar-zone bottom-bar-right">
-          <div class="bottom-bar-qr-wrap">
+          <div class="bottom-bar-qr-wrap" id="bottomQrBtn" role="button" tabindex="0" aria-label="Agrandir le QR code de la galerie">
             <div class="bottom-bar-qr-texts">
               <div class="bottom-bar-qr-text" id="bottomRightMessage">{{ texts.bottom_right }}</div>
               {% if texts.bottom_right_sub %}<div class="bottom-bar-qr-sub">{{ texts.bottom_right_sub }}</div>{% endif %}
@@ -458,6 +458,14 @@
     <div id="instructionsContent" class="instructions-content ck-content"></div>
     <button id="instructionsClose" class="instructions-close" type="button" aria-label="Fermer"></button>
     <div class="instructions-bar" aria-hidden="true"><div id="instructionsBarFill" class="instructions-bar-fill"></div></div>
+  </div>
+
+  <!-- Page QR galerie (tap sur le QR de la barre du bas) : contenu WYSIWYG et
+       réglages fournis par /api/gallery-qr, voir static/app.js. -->
+  <div id="galleryQrOverlay" class="instructions-overlay hidden" aria-hidden="true">
+    <div id="galleryQrContent" class="instructions-content ck-content"></div>
+    <button id="galleryQrClose" class="instructions-close" type="button" aria-label="Fermer"></button>
+    <div class="instructions-bar" aria-hidden="true"><div id="galleryQrBarFill" class="instructions-bar-fill"></div></div>
   </div>
 
   <div id="framePickerPanel" class="frame-picker-panel hidden">
