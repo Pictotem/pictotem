@@ -16,6 +16,29 @@
 // jamais de .tuiles-grid, et /admin n'a jamais de [data-block-id]), donc
 // aucun risque de conflit entre les deux usages.
 (function () {
+  // Conserve la position de scroll à travers une soumission de formulaire
+  // (POST + redirect = rechargement de la page, qui remonterait en haut).
+  const scrollKey = 'scroll:' + location.pathname;
+  document.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (!form || (form.method || '').toLowerCase() === 'get') return;
+    try { sessionStorage.setItem(scrollKey, String(window.scrollY)); } catch (_) {}
+  }, true);
+  function restoreScroll() {
+    let y = null;
+    try {
+      y = sessionStorage.getItem(scrollKey);
+      sessionStorage.removeItem(scrollKey);
+    } catch (_) {}
+    if (y === null) return;
+    requestAnimationFrame(() => window.scrollTo(0, parseInt(y, 10) || 0));
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', restoreScroll);
+  } else {
+    restoreScroll();
+  }
+
   function csrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
     return meta ? meta.content : '';
