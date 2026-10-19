@@ -163,6 +163,7 @@
           <label class="upload-label" for="tags_gallery_bg_input">Choisir une image…</label>
           <input type="file" id="tags_gallery_bg_input" name="tags_gallery_bg" accept=".png,.jpg,.jpeg,.webp"
                  onchange="document.getElementById('tags-gallery-bg-name').textContent = this.files[0]?.name || ''">
+{% from 'blocks/_media_macros.html' import library_select with context %}{{ library_select('tags_gallery_bg_library') }}
           <span id="tags-gallery-bg-name"></span>
           <p class="upload-hint">PNG, JPG, WEBP — remplace l'image actuelle s'il y en a une.</p>
           <button class="btn-primary" type="submit" style="margin-top:10px">Mettre à jour</button>

@@ -1,0 +1,118 @@
+{#- Briques d'UI partagées par toute la médiathèque (table media_library).
+    Import : {% from 'blocks/_media_macros.html' import media_grid, media_uploader, gradient_form with context %}
+    `block` : id du bloc d'origine (retour sur la bonne page après l'action) ;
+    `next`  : à défaut, chemin /admin/... où revenir (ex. page promo). -#}
+
+{% macro _hidden(block, next) -%}
+<input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+{% if block %}<input type="hidden" name="block" value="{{ block }}">{% endif %}
+{% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+{%- endmacro %}
+
+{% macro media_grid(items, block='', next='', rename=False, toggle=False, move=False, copy=False, empty='Aucune image.') -%}
+{% if items %}
+<div class="img-grid">
+  {% for img in items %}
+  <div class="img-card{{ '' if img.active or not toggle else ' img-card-inactive' }}">
+    {% if img.kind == 'gradient' %}
+    <div class="bg-gradient-swatch" style="background:linear-gradient({{ img.angle }}deg, {{ img.color1 }}, {{ img.color2 }})"></div>
+    {% else %}
+    <img src="{{ img.url }}" alt="{{ img.label or img.filename }}" loading="lazy">
+    {% endif %}
+    {% if toggle %}
+    <form method="post" action="{{ url_for('admin_media_toggle', media_id=img.id) }}" class="img-card-toggle">
+      {{ _hidden(block, next) }}
+      <label class="img-card-toggle-label">
+        <input type="checkbox" name="active" onchange="this.form.submit()" {{ 'checked' if img.active }}>
+        {{ 'Diffusée' if img.active else 'En pause' }}
+      </label>
+    </form>
+    {% endif %}
+    {% if rename %}
+    <form method="post" action="{{ url_for('admin_media_rename', media_id=img.id) }}" class="img-card-rename">
+      {{ _hidden(block, next) }}
+      <input type="text" name="label" value="{{ img.label }}" maxlength="80"
+             placeholder="{{ img.filename or 'Dégradé' }}" aria-label="Libellé">
+      <button type="submit" title="Renommer">✓</button>
+    </form>
+    {% endif %}
+    <div class="img-card-foot">
+      {% if not rename %}
+      <span class="img-card-name" title="{{ img.label or img.filename }}">{{ img.label or img.filename or 'Dégradé' }}</span>
+      {% endif %}
+      {% if copy and img.url %}
+      <button type="button" class="img-card-copy" data-url="{{ img.url }}"
+              onclick="navigator.clipboard.writeText(location.origin + this.dataset.url); this.textContent='Copié';">Copier l'URL</button>
+      {% endif %}
+      {% if move %}
+      {% for d, sym in (('up', '▲'), ('down', '▼')) %}
+      <form method="post" action="{{ url_for('admin_media_move', media_id=img.id) }}">
+        {{ _hidden(block, next) }}
+        <input type="hidden" name="direction" value="{{ d }}">
+        <button type="submit" class="img-card-copy" title="Déplacer">{{ sym }}</button>
+      </form>
+      {% endfor %}
+      {% endif %}
+      <form method="post" action="{{ url_for('admin_media_delete', media_id=img.id) }}"
+            onsubmit="return confirm('Supprimer cette image de la médiathèque ?')">
+        {{ _hidden(block, next) }}
+        <button class="btn-danger" type="submit">✕</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p style="color:var(--muted);font-size:14px;margin-bottom:20px">{{ empty }}</p>
+{% endif %}
+{%- endmacro %}
+
+{# Cartouche d'upload unique (zone pointillée, multi-fichiers). `uid` : suffixe
+   unique des ids HTML ; `with_label` ajoute le champ « Nom ». #}
+{% macro media_uploader(category, uid, block='', next='', accept='.png,.jpg,.jpeg,.webp,.gif', hint='PNG, JPG, WEBP, GIF — plusieurs fichiers possibles', with_label=False) -%}
+<form method="post" action="{{ url_for('admin_media_upload') }}" enctype="multipart/form-data">
+  {{ _hidden(block, next) }}
+  <input type="hidden" name="category" value="{{ category }}">
+  <div class="upload-zone">
+    <label class="upload-label" for="media-input-{{ uid }}">Choisir des images…</label>
+    <input type="file" id="media-input-{{ uid }}" name="images" multiple accept="{{ accept }}"
+           onchange="document.getElementById('media-name-{{ uid }}').textContent = Array.from(this.files).map(f => f.name).join(', ')">
+    <span id="media-name-{{ uid }}"></span>
+    {% if with_label %}
+    <div class="field" style="margin-top:12px;max-width:320px">
+      <label>Nom (optionnel, si un seul fichier)</label>
+      <input type="text" name="label" maxlength="80" placeholder="ex. Fond bleu nuit">
+    </div>
+    {% endif %}
+    <p class="upload-hint">{{ hint }}</p>
+    <div style="margin-top:14px">
+      <button class="btn-primary" type="submit">Ajouter</button>
+    </div>
+  </div>
+</form>
+{%- endmacro %}
+
+{% macro gradient_form(block='', next='') -%}
+<form method="post" action="{{ url_for('admin_media_gradient_add') }}" class="form-card"
+      style="margin-top:16px;background:var(--surface-2)">
+  {{ _hidden(block, next) }}
+  <p style="font-weight:700;font-size:14px;margin:0 0 14px">Nouveau dégradé (2 couleurs)</p>
+  <div class="field-row">
+    <div class="field field-half"><label>Couleur 1</label><input type="color" name="color1" value="#0d8b8f"></div>
+    <div class="field field-half"><label>Couleur 2</label><input type="color" name="color2" value="#111315"></div>
+  </div>
+  <div class="field"><label>Angle (°)</label><input type="number" name="angle" min="0" max="359" value="135" style="max-width:120px"></div>
+  <div class="field"><label>Nom (optionnel)</label><input type="text" name="label" maxlength="80" placeholder="ex. Bleu nuit"></div>
+  <button class="btn-primary" type="submit">Ajouter</button>
+</form>
+{%- endmacro %}
+
+{# Sélecteur « ou choisir dans la médiathèque » (champ <name> = id media_library),
+   à placer à côté d'un <input type="file"> ; les routes concernées utilisent
+   _upload_or_pick (app.py). #}
+{% macro library_select(name) -%}
+<select name="{{ name }}" style="margin-top:8px;max-width:100%">
+  <option value="">— ou choisir dans la médiathèque —</option>
+  {% for it in media_choices() %}<option value="{{ it.id }}">{{ it.name }}</option>{% endfor %}
+</select>
+{%- endmacro %}

@@ -21,6 +21,7 @@
         <div class="file-field" style="flex:1;">
           <label class="field-label">PNG avec transparence (fond transparent)</label>
           <input type="file" name="welcome_frame" accept=".png">
+{% from 'blocks/_media_macros.html' import library_select with context %}{{ library_select('welcome_frame_library') }}
         </div>
       </div>
       <button type="submit" class="action-btn small primary">Mettre à jour</button>

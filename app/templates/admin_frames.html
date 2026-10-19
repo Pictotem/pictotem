@@ -148,10 +148,12 @@
               <div class="file-field">
                 <label class="field-label">Nouvelle preview</label>
                 <input type="file" name="preview" accept=".jpg,.jpeg,.png,.webp,.gif">
+{% from 'blocks/_media_macros.html' import library_select with context %}{{ library_select('preview_library') }}
               </div>
               <div class="file-field">
                 <label class="field-label">Nouvel overlay PNG</label>
                 <input type="file" name="overlay" accept=".png">
+{% from 'blocks/_media_macros.html' import library_select with context %}{{ library_select('overlay_library') }}
               </div>
             </div>
             <div class="card-actions">

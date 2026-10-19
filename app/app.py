@@ -25,6 +25,7 @@ import unicodedata
 import zipfile
 from contextlib import closing
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 from functools import wraps
 from html import unescape as html_unescape
 
@@ -83,12 +84,13 @@ from db import (db_conn, delete_capture, delete_email_by_id, delete_frame_db,
                 delete_guest_code_db, upsert_guest_code, purge_guest_codes_by_date,
                 purge_guest_codes_first_n, generate_guest_code, regenerate_guest_codes_by_filter,
                 list_custom_fonts, create_custom_font, delete_custom_font_db,
-                list_promo_backgrounds, add_promo_background, add_promo_gradient_background,
-                delete_promo_background_db, list_promo_pages, get_promo_page, get_promo_page_by_slug,
+                list_promo_pages, get_promo_page, get_promo_page_by_slug,
                 create_promo_page, update_promo_page, delete_promo_page_db, move_promo_page,
                 list_promo_content_images, add_promo_content_image, delete_promo_content_image_db,
                 list_promo_schedules, create_promo_schedule, update_promo_schedule,
-                delete_promo_schedule)
+                delete_promo_schedule,
+                MEDIA_CATEGORIES, media_url, list_media, get_media, add_media,
+                add_media_gradient, rename_media, set_media_active, delete_media_db, move_media)
 from db import (list_retrospective_photos, get_retrospective_photo, add_retrospective_photo,
                 set_retrospective_photo_active, update_retrospective_photo_label,
                 update_retrospective_photo_text,
@@ -96,11 +98,11 @@ from db import (list_retrospective_photos, get_retrospective_photo, add_retrospe
                 add_retrospective_schedule, update_retrospective_schedule,
                 delete_retrospective_schedule_db,
                 list_retrospective_backgrounds, get_retrospective_background,
-                add_retrospective_background, set_retrospective_background_active,
+                set_retrospective_background_active,
                 delete_retrospective_background_db,
                 list_retrospective_overlays, get_retrospective_overlay,
-                add_retrospective_overlay, set_retrospective_overlay_active,
-                delete_retrospective_overlay_db, move_retrospective_overlay)
+                set_retrospective_overlay_active,
+                move_retrospective_overlay)
 from utils import (build_gallery_url, current_stamp, disable_autostart,
                    enable_autostart, generate_qr_png, generate_qr_png_custom,
                    get_network_info, is_autostart_enabled, make_thumb, message_text,
@@ -336,6 +338,54 @@ def _save_frame_file(file_storage, frame_id: str, kind: str):
     FRAMES_DIR.mkdir(parents=True, exist_ok=True)
     file_storage.save(str(FRAMES_DIR / filename))
     return filename
+
+
+class _LibraryFile:
+    """Image de la médiathèque présentée comme un fichier envoyé (mêmes
+    attributs `filename`/`save` que werkzeug.FileStorage) : permet aux routes
+    d'upload à image unique (badges, QR, cadres...) d'accepter « choisir dans
+    la médiathèque » sans changer leur logique."""
+
+    def __init__(self, item):
+        self.item = item
+        self.filename = item['filename']
+
+    def __bool__(self):
+        return True
+
+    def save(self, dest):
+        shutil.copyfile(str(_media_dir(self.item['category']) / self.filename), dest)
+
+
+def _library_pick(field: str):
+    """Fichier de la médiathèque désigné par request.form[field] (id), sinon None."""
+    raw = (request.form.get(field) or '').strip()
+    if not raw.isdigit():
+        return None
+    item = get_media(int(raw))
+    if not item or not item['filename'] or item['category'] not in MEDIA_CATEGORIES:
+        return None
+    if not (_media_dir(item['category']) / item['filename']).is_file():
+        return None
+    return _LibraryFile(item)
+
+
+def _upload_or_pick(field: str, library_field: str):
+    f = request.files.get(field)
+    return f if f and f.filename else _library_pick(library_field)
+
+
+def media_choices():
+    """Images de la médiathèque proposées par les sélecteurs « depuis la médiathèque »."""
+    out = []
+    for it in list_media():
+        if it['filename'] and it['category'] != 'promo_content':
+            out.append({'id': it['id'], 'url': media_url(it),
+                        'name': f"{MEDIA_CATEGORIES[it['category']][0]} — {it['label'] or it['filename']}"})
+    return out
+
+
+app.jinja_env.globals['media_choices'] = media_choices
 
 
 # ── Filtre Jinja ──────────────────────────────────────────────────────────────
@@ -3233,7 +3283,7 @@ def admin_frame_set_default(frame_id):
 @require_admin_auth
 @csrf_protect
 def admin_welcome_frame_upload():
-    file = request.files.get('welcome_frame')
+    file = _upload_or_pick('welcome_frame', 'welcome_frame_library')
     if not file or not file.filename:
         return _admin_block_redirect('frames_welcome', err='Aucun fichier sélectionné.')
     ext = Path(file.filename).suffix.lower()
@@ -3529,6 +3579,7 @@ _ADMIN_BLOCKS = {
     'app_restart_update':  {'title': "Redémarrage avec mise à jour (Git)",      'default_page': 'application', 'template': 'blocks/app_restart_update.html',  'context_fn': None},
     'app_autostart':       {'title': "Démarrage automatique Windows",           'default_page': 'application', 'template': 'blocks/app_autostart.html',       'context_fn': '_block_ctx_app_autostart'},
     'app_wallpaper':       {'title': "Fond d'écran Windows",                    'default_page': 'media',       'template': 'blocks/app_wallpaper.html',       'context_fn': '_block_ctx_app_wallpaper'},
+    'media_background':    {'title': "Fonds des pages promo",                      'default_page': 'media',       'template': 'blocks/media_background.html',    'context_fn': '_block_ctx_media_background'},
     'media_slideshow':     {'title': "Images intermédiaires",                    'default_page': 'media',       'template': 'blocks/media_slideshow.html',     'context_fn': '_block_ctx_media_slideshow'},
     'media_screensaver':   {'title': "Images de l'écran de veille",             'default_page': 'media',       'template': 'blocks/media_screensaver.html',   'context_fn': '_block_ctx_media_screensaver'},
     'media_other':         {'title': "Autres images",                           'default_page': 'media',       'template': 'blocks/media_other.html',         'context_fn': '_block_ctx_media_other'},
@@ -3845,16 +3896,27 @@ def _block_ctx_app_wallpaper() -> dict:
     return {'wallpaper_images': _wallpaper_images_view()}
 
 
+def _media_items(category: str) -> list:
+    items = list_media(category)
+    for it in items:
+        it['url'] = media_url(it)
+    return items
+
+
+def _block_ctx_media_background() -> dict:
+    return {'media_background_images': _media_items('background')}
+
+
 def _block_ctx_media_slideshow() -> dict:
-    return {'media_slideshow_images': list_slideshow_images()}
+    return {'media_slideshow_images': _media_items('slideshow')}
 
 
 def _block_ctx_media_screensaver() -> dict:
-    return {'media_screensaver_images': list_screensaver_images()}
+    return {'media_screensaver_images': _media_items('screensaver')}
 
 
 def _block_ctx_media_other() -> dict:
-    return {'media_other_images': list_other_images()}
+    return {'media_other_images': _media_items('other')}
 
 
 def _block_ctx_app_idle_timer() -> dict:
@@ -4297,109 +4359,12 @@ def _wallpaper_images_view() -> list:
 # « Slideshow Best Of » et « Écran de veille » avant cette version). Les
 # fonctions de base (list_slideshow_images, add_slideshow_image, ... et leurs
 # équivalents screensaver) sont réutilisées telles quelles.
-@app.route('/admin/media', methods=['GET', 'POST'])
+@app.route('/admin/media')
 @require_admin_auth
-@csrf_protect
 def admin_media():
-    """Tuile « Médiathèque »."""
-    if request.method == 'POST':
-        action = request.form.get('action', '')
-
-        if action == 'upload_slideshow':
-            file = request.files.get('image')
-            if not file or not file.filename:
-                return _admin_block_redirect('media_slideshow', err='Aucun fichier sélectionné.')
-            ext = Path(file.filename).suffix.lower()
-            if ext not in _SLIDESHOW_ALLOWED_EXT:
-                return _admin_block_redirect('media_slideshow', err='Format non supporté (PNG, JPG, WEBP, GIF).')
-            safe = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem) + ext
-            SLIDESHOW_DIR.mkdir(parents=True, exist_ok=True)
-            dest = SLIDESHOW_DIR / safe
-            if dest.exists():
-                safe = f'{Path(safe).stem}_{int(datetime.now().timestamp())}{ext}'
-                dest = SLIDESHOW_DIR / safe
-            file.save(str(dest))
-            add_slideshow_image(safe)
-            return _admin_block_redirect('media_slideshow', ok=f'Image « {safe} » ajoutée.')
-
-        if action == 'delete_slideshow':
-            image_id = int(request.form.get('image_id', 0))
-            img = delete_slideshow_image_db(image_id)
-            if img:
-                (SLIDESHOW_DIR / img['filename']).unlink(missing_ok=True)
-                return _admin_block_redirect('media_slideshow', ok='Image supprimée.')
-            return _admin_block_redirect('media_slideshow', err='Image introuvable.')
-
-        if action == 'upload_screensaver':
-            file = request.files.get('image')
-            if not file or not file.filename:
-                return _admin_block_redirect('media_screensaver', err='Aucun fichier sélectionné.')
-            ext = Path(file.filename).suffix.lower()
-            if ext not in _SCREENSAVER_ALLOWED_EXT:
-                return _admin_block_redirect('media_screensaver', err='Format non supporté (PNG, JPG, WEBP, GIF).')
-            safe = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem) + ext
-            SCREENSAVER_DIR.mkdir(parents=True, exist_ok=True)
-            dest = SCREENSAVER_DIR / safe
-            if dest.exists():
-                safe = f'{Path(safe).stem}_{int(datetime.now().timestamp())}{ext}'
-                dest = SCREENSAVER_DIR / safe
-            file.save(str(dest))
-            add_screensaver_image(safe)
-            return _admin_block_redirect('media_screensaver', ok=f'Image « {safe} » ajoutée.')
-
-        if action == 'delete_screensaver':
-            image_id = int(request.form.get('image_id', 0))
-            img = delete_screensaver_image_db(image_id)
-            if img:
-                (SCREENSAVER_DIR / img['filename']).unlink(missing_ok=True)
-                return _admin_block_redirect('media_screensaver', ok='Image supprimée.')
-            return _admin_block_redirect('media_screensaver', err='Image introuvable.')
-
-        if action == 'toggle_screensaver_active':
-            image_id = int(request.form.get('image_id', 0))
-            set_screensaver_image_active(image_id, bool(request.form.get('active')))
-            return _admin_block_redirect('media_screensaver')
-
-        if action == 'upload_other':
-            files = [f for f in request.files.getlist('images') if f and f.filename]
-            if not files:
-                return _admin_block_redirect('media_other', err='Aucun fichier sélectionné.')
-            OTHER_DIR.mkdir(parents=True, exist_ok=True)
-            added, skipped = 0, 0
-            for file in files:
-                ext = Path(file.filename).suffix.lower()
-                if ext not in _SLIDESHOW_ALLOWED_EXT:
-                    skipped += 1
-                    continue
-                stem = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem)
-                safe = stem + ext
-                if (OTHER_DIR / safe).exists():
-                    safe = f'{stem}_{int(datetime.now().timestamp() * 1000)}{ext}'
-                file.save(str(OTHER_DIR / safe))
-                add_other_image(safe, Path(file.filename).stem[:80])
-                added += 1
-            if not added:
-                return _admin_block_redirect('media_other', err='Format non supporté (PNG, JPG, WEBP, GIF).')
-            msg = f'{added} image(s) ajoutée(s).' + (f' {skipped} ignorée(s) (format non supporté).' if skipped else '')
-            return _admin_block_redirect('media_other', ok=msg)
-
-        if action == 'rename_other':
-            image_id = int(request.form.get('image_id', 0))
-            label = (request.form.get('label') or '').strip()[:80]
-            if rename_other_image(image_id, label):
-                return _admin_block_redirect('media_other', ok='Image renommée.')
-            return _admin_block_redirect('media_other', err='Image introuvable.')
-
-        if action == 'delete_other':
-            image_id = int(request.form.get('image_id', 0))
-            img = delete_other_image_db(image_id)
-            if img:
-                (OTHER_DIR / img['filename']).unlink(missing_ok=True)
-                return _admin_block_redirect('media_other', ok='Image supprimée.')
-            return _admin_block_redirect('media_other', err='Image introuvable.')
-
-        abort(404)
-
+    """Tuile « Médiathèque » : toute la gestion d'images passe par les routes
+    génériques /admin/media/item/* (table media_library, voir db.py) et les
+    macros templates/blocks/_media_macros.html."""
     blocks, block_context = _admin_render_blocks('media')
     return render_template(
         'admin_media.html', config=CONFIG,
@@ -4409,6 +4374,119 @@ def admin_media():
         alert_error=request.args.get('err'),
         **block_context,
     )
+
+
+# ── Médiathèque unifiée : routes CRUD génériques ──────────────────────────────
+_MEDIA_ALLOWED_EXT = {'.png', '.jpg', '.jpeg', '.webp', '.gif'}
+_MEDIA_CATEGORY_EXT = {'wallpaper': {'.png', '.jpg', '.jpeg', '.bmp'}}
+_MEDIA_ORDERED = {'retro_overlay'}
+
+
+def _media_dir(category: str) -> Path:
+    return BASE_DIR / 'app' / 'static' / MEDIA_CATEGORIES[category][1]
+
+
+def _media_redirect(**kwargs):
+    """Retour après une action : bloc d'origine (champ `block`), sinon page
+    interne /admin/... (champ `next`), sinon la médiathèque."""
+    block = request.form.get('block', '')
+    if block in _ADMIN_BLOCKS:
+        return _admin_block_redirect(block, **kwargs)
+    nxt = request.form.get('next', '')
+    if nxt.startswith('/admin/') and not nxt.startswith('//'):
+        base, _, anchor = nxt.partition('#')
+        sep = '&' if '?' in base else '?'
+        query = urlencode(kwargs)
+        return redirect(base + (sep + query if query else '') + (f'#{anchor}' if anchor else ''))
+    return redirect(url_for('admin_media', **kwargs))
+
+
+@app.route('/admin/media/item/upload', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media_upload():
+    category = request.form.get('category', '')
+    if category not in MEDIA_CATEGORIES:
+        abort(400)
+    files = [f for f in request.files.getlist('images') if f and f.filename]
+    if not files:
+        return _media_redirect(err='Aucun fichier sélectionné.')
+    allowed = _MEDIA_CATEGORY_EXT.get(category, _MEDIA_ALLOWED_EXT)
+    label_in = (request.form.get('label') or '').strip()[:80]
+    dest_dir = _media_dir(category)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    added, skipped = 0, 0
+    for file in files:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in allowed:
+            skipped += 1
+            continue
+        stem = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem) or 'image'
+        safe = stem + ext
+        if (dest_dir / safe).exists():
+            safe = f'{stem}_{int(datetime.now().timestamp() * 1000)}{ext}'
+        file.save(str(dest_dir / safe))
+        label = label_in if len(files) == 1 and label_in else Path(file.filename).stem[:80]
+        add_media(category, safe, label, ordered=category in _MEDIA_ORDERED)
+        added += 1
+    if not added:
+        fmt = ', '.join(e[1:].upper() for e in sorted(allowed))
+        return _media_redirect(err=f'Format non supporté ({fmt}).')
+    msg = f'{added} image(s) ajoutée(s).' + (f' {skipped} ignorée(s) (format non supporté).' if skipped else '')
+    return _media_redirect(ok=msg)
+
+
+@app.route('/admin/media/item/gradient', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media_gradient_add():
+    color1 = (request.form.get('color1') or '').strip()
+    color2 = (request.form.get('color2') or '').strip()
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', color1) or not re.fullmatch(r'#[0-9a-fA-F]{6}', color2):
+        return _media_redirect(err='Couleurs de dégradé invalides.')
+    raw_angle = (request.form.get('angle') or '135').strip()
+    angle = int(raw_angle) % 360 if raw_angle.lstrip('-').isdigit() else 135
+    add_media_gradient(color1, color2, angle, (request.form.get('label') or '').strip()[:80])
+    return _media_redirect(ok='Dégradé ajouté à la médiathèque.')
+
+
+@app.route('/admin/media/item/<int:media_id>/rename', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media_rename(media_id):
+    if rename_media(media_id, (request.form.get('label') or '').strip()[:80]):
+        return _media_redirect(ok='Image renommée.')
+    return _media_redirect(err='Image introuvable.')
+
+
+@app.route('/admin/media/item/<int:media_id>/toggle', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media_toggle(media_id):
+    set_media_active(media_id, bool(request.form.get('active')))
+    return _media_redirect()
+
+
+@app.route('/admin/media/item/<int:media_id>/move', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media_move(media_id):
+    direction = request.form.get('direction')
+    if direction in ('up', 'down'):
+        move_media(media_id, direction)
+    return _media_redirect()
+
+
+@app.route('/admin/media/item/<int:media_id>/delete', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media_delete(media_id):
+    item = delete_media_db(media_id)
+    if not item:
+        return _media_redirect(err='Image introuvable.')
+    if item['filename'] and item['category'] in MEDIA_CATEGORIES:
+        (_media_dir(item['category']) / item['filename']).unlink(missing_ok=True)
+    return _media_redirect(ok='Image supprimée.')
 
 
 @app.route('/admin/application')
@@ -4928,8 +5006,8 @@ def admin_frame_create():
     if get_frame_by_id_db(frame_id):
         return _admin_block_redirect('frames_new', err=f'Un cadre avec l\'identifiant "{frame_id}" existe déjà.')
     try:
-        preview_fn = _save_frame_file(request.files.get('preview'), frame_id, 'preview')
-        overlay_fn = _save_frame_file(request.files.get('overlay'), frame_id, 'overlay')
+        preview_fn = _save_frame_file(_upload_or_pick('preview', 'preview_library'), frame_id, 'preview')
+        overlay_fn = _save_frame_file(_upload_or_pick('overlay', 'overlay_library'), frame_id, 'overlay')
     except ValueError as exc:
         return _admin_block_redirect('frames_new', err=str(exc))
     upsert_frame(frame_id, label, preview_fn, overlay_fn, sort_order)
@@ -4950,10 +5028,10 @@ def admin_frame_edit(frame_id):
     preview_fn = frame['preview_filename']
     overlay_fn = frame['overlay_filename']
     try:
-        new_preview = _save_frame_file(request.files.get('preview'), frame_id, 'preview')
+        new_preview = _save_frame_file(_upload_or_pick('preview', 'preview_library'), frame_id, 'preview')
         if new_preview:
             preview_fn = new_preview
-        new_overlay = _save_frame_file(request.files.get('overlay'), frame_id, 'overlay')
+        new_overlay = _save_frame_file(_upload_or_pick('overlay', 'overlay_library'), frame_id, 'overlay')
         if new_overlay:
             overlay_fn = new_overlay
             clear_overlay_cache(frame_id)
@@ -5393,7 +5471,7 @@ def admin_media_id_bg_upload():
     fois (remplacée à chaque envoi) : même patron que le cadre d'accueil
     (voir admin_welcome_frame_upload ci-dessus) plutôt que la bibliothèque
     partagée des pages promo -- ce fond n'a de sens que pour ce badge précis."""
-    file = request.files.get('media_id_bg')
+    file = _upload_or_pick('media_id_bg', 'media_id_bg_library')
     if not file or not file.filename:
         return _admin_block_redirect('tags_media_id', err='Aucun fichier sélectionné.')
     ext = Path(file.filename).suffix.lower()
@@ -5431,7 +5509,7 @@ def admin_media_id_gallery_bg_upload():
     l'image de fond du badge ID média dans la GALERIE (vue unitaire) --
     fichier distinct (media-id-bg-gallery{ext}), même dossier
     (MEDIA_ID_BADGE_DIR), réglage indépendant (media_id.gallery_bg_image)."""
-    file = request.files.get('media_id_gallery_bg')
+    file = _upload_or_pick('media_id_gallery_bg', 'media_id_gallery_bg_library')
     if not file or not file.filename:
         return _admin_block_redirect('tags_media_id', err='Aucun fichier sélectionné.')
     ext = Path(file.filename).suffix.lower()
@@ -5510,7 +5588,7 @@ def admin_tags_gallery_bg_upload():
     (upload dédié, une seule image, remplacée à chaque envoi), dossier séparé
     (TAGS_BADGE_DIR) puisque ce sont des chips potentiellement multiples,
     distinctes du badge ID média."""
-    file = request.files.get('tags_gallery_bg')
+    file = _upload_or_pick('tags_gallery_bg', 'tags_gallery_bg_library')
     if not file or not file.filename:
         return _admin_block_redirect('tags_display', err='Aucun fichier sélectionné.')
     ext = Path(file.filename).suffix.lower()
@@ -6322,7 +6400,7 @@ def admin_guest_codes_set_qrcode_live_style():
     position = request.form.get('position', 'above')
     set_setting('qrcode.live_style.position', position if position in dict(_QR_LIVE_POSITIONS) else 'above')
 
-    file = request.files.get('bg_image')
+    file = _upload_or_pick('bg_image', 'bg_image_library')
     if file and file.filename:
         ext = Path(file.filename).suffix.lower()
         if ext not in _QR_LIVE_ALLOWED_EXT:
@@ -6367,7 +6445,7 @@ def admin_guest_codes_set_qrcode_live_error_style():
     if re.fullmatch(r'#[0-9a-fA-F]{6}', error_bg_color):
         set_setting('qrcode.live_error_style.bg_color', error_bg_color)
 
-    error_file = request.files.get('error_image')
+    error_file = _upload_or_pick('error_image', 'error_image_library')
     if error_file and error_file.filename:
         ext = Path(error_file.filename).suffix.lower()
         if ext not in _QR_LIVE_ALLOWED_EXT:
@@ -6566,17 +6644,24 @@ def _promo_media_library() -> list:
     — pas de nouvelle source de données, une vue agrégée de CRUD déjà
     existants."""
     items = []
-    for img in list_wallpaper_images():
-        items.append({'url': f"/static/wallpapers/{img['filename']}", 'label': img['filename']})
-    for img in list_slideshow_images():
-        items.append({'url': f"/static/slideshow/{img['filename']}", 'label': img['filename']})
-    for img in list_screensaver_images():
-        items.append({'url': f"/static/screensaver/{img['filename']}", 'label': img['filename']})
-    for img in list_other_images():
-        items.append({'url': f"/static/other_images/{img['filename']}", 'label': img.get('label') or img['filename']})
-    for bg in list_promo_backgrounds():
-        if (bg.get('kind') or 'image') == 'image' and bg.get('filename'):
-            items.append({'url': f"/static/promo/{bg['filename']}", 'label': bg.get('label') or bg['filename']})
+    for it in list_media():
+        if it['category'] in ('promo_content', 'retro_bg', 'retro_overlay') or it.get('kind') == 'gradient':
+            continue
+        if it['filename']:
+            items.append({'url': media_url(it), 'label': it.get('label') or it['filename']})
+    return items
+
+
+def _promo_background_choices() -> list:
+    """Fonds proposés à une page promo : les fonds dédiés d'abord (images et
+    dégradés), puis toutes les autres images de la médiathèque."""
+    items = []
+    for it in list_media():
+        it['url'] = media_url(it)
+        it['category_label'] = MEDIA_CATEGORIES.get(it['category'], (it['category'],))[0]
+        if it['category'] != 'promo_content':
+            items.append(it)
+    items.sort(key=lambda i: i['category'] != 'background')
     return items
 
 
@@ -6679,8 +6764,7 @@ def _promo_page_public(page: dict, effective_frequency: int = None) -> dict:
         'frequency':       max(1, freq),
         'pause_seconds':   max(1, page['pause_seconds']),
         'background_kind':   page.get('background_kind') or '',
-        'background_url':  (url_for('static', filename=f'promo/{page["background_filename"]}')
-                             if page.get('background_kind') == 'image' and page['background_filename'] else ''),
+        'background_url':  (page.get('background_url') or '') if page.get('background_kind') == 'image' else '',
         'background_color1': page.get('background_color1') or '',
         'background_color2': page.get('background_color2') or '',
         'background_angle':  page.get('background_angle') or 135,
@@ -7303,7 +7387,7 @@ def admin_slideshow():
         promo_schedules=promo_schedules_by_page,
         timeline_pages=timeline_pages,
         timeline_schedules=timeline_schedules,
-        promo_backgrounds=list_promo_backgrounds(),
+        promo_backgrounds=_promo_background_choices(),
         promo_content_images=[
             {'id': i['id'], 'url': f"/static/promo_content/{i['filename']}", 'label': i.get('label') or i['filename']}
             for i in list_promo_content_images()
@@ -7587,54 +7671,6 @@ def admin_promo_schedule_delete(page_id, schedule_id):
     return redirect(url_for('admin_slideshow', ok='Plage horaire supprimée.') + f"#promo-page-{page_id}")
 
 
-@app.route('/admin/slideshow/promo/bg_upload', methods=['POST'])
-@require_admin_auth
-@csrf_protect
-def admin_promo_bg_upload():
-    file = request.files.get('background')
-    if not file or not file.filename:
-        return redirect(url_for('admin_slideshow', err='Aucun fichier sélectionné.'))
-    ext = Path(file.filename).suffix.lower()
-    if ext not in _PROMO_ALLOWED_EXT:
-        return redirect(url_for('admin_slideshow', err='Format non supporté (PNG, JPG, WEBP).'))
-    PROMO_DIR.mkdir(parents=True, exist_ok=True)
-    safe = f'promo-bg-{int(datetime.now().timestamp())}{ext}'
-    file.save(str(PROMO_DIR / safe))
-    label = (request.form.get('label', '') or '').strip()[:80]
-    add_promo_background(safe, label)
-    return redirect(url_for('admin_slideshow', ok='Fond ajouté à la bibliothèque.'))
-
-
-@app.route('/admin/slideshow/promo/bg/gradient_add', methods=['POST'])
-@require_admin_auth
-@csrf_protect
-def admin_promo_bg_gradient_add():
-    """Ajoute un fond dégradé (deux couleurs + angle, aucun fichier) à la
-    bibliothèque partagée — voir add_promo_gradient_background (db.py).
-    Remplace l'ancien dégradé par défaut unique et codé en dur : la
-    bibliothèque peut désormais contenir autant de dégradés que voulu."""
-    color1 = (request.form.get('color1') or '').strip()
-    color2 = (request.form.get('color2') or '').strip()
-    if not re.fullmatch(r'#[0-9a-fA-F]{6}', color1) or not re.fullmatch(r'#[0-9a-fA-F]{6}', color2):
-        return redirect(url_for('admin_slideshow', err='Couleurs de dégradé invalides.'))
-    raw_angle = (request.form.get('angle') or '135').strip()
-    angle = int(raw_angle) % 360 if raw_angle.lstrip('-').isdigit() else 135
-    label = (request.form.get('label', '') or '').strip()[:80]
-    add_promo_gradient_background(color1, color2, angle, label)
-    return redirect(url_for('admin_slideshow', ok='Dégradé ajouté à la bibliothèque.'))
-
-
-@app.route('/admin/slideshow/promo/bg/<int:bg_id>/delete', methods=['POST'])
-@require_admin_auth
-@csrf_protect
-def admin_promo_bg_delete(bg_id):
-    bg = delete_promo_background_db(bg_id)
-    if bg:
-        (PROMO_DIR / bg['filename']).unlink(missing_ok=True)
-        return redirect(url_for('admin_slideshow', ok='Fond supprimé de la bibliothèque.'))
-    return redirect(url_for('admin_slideshow', err='Fond introuvable.'))
-
-
 # v2.0.8 : bibliothèque d'images dédiées au texte des pages promo -- voir
 # promo_content_images (db.py) et le sélecteur d'image du WYSIWYG (onglet «
 # Mes images », admin_slideshow.html / static/promo-editor.js). Distincte de
@@ -7694,8 +7730,8 @@ def admin_retrospective():
         filter_date_from=s['filter_date_from'], filter_date_to=s['filter_date_to'],
         filter_alpha_from=s['filter_alpha_from'], filter_alpha_to=s['filter_alpha_to'],
     )
-    backgrounds = list_retrospective_backgrounds()
-    overlays = list_retrospective_overlays()
+    backgrounds = _media_items('retro_bg')
+    overlays = _media_items('retro_overlay')
     return render_template(
         'admin_retrospective.html', config=CONFIG,
         blocks=blocks, current_page='retrospective', admin_pages=_admin_all_pages(),
@@ -7865,127 +7901,6 @@ def admin_retrospective_delete(photo_id):
             (THUMBS_DIR / item['thumb_filename']).unlink(missing_ok=True)
         return redirect(url_for('admin_retrospective', ok='Photo supprimée.'))
     return redirect(url_for('admin_retrospective', err='Photo introuvable.'))
-
-
-# ── Rétrospective — fonds d'écran ────────────────────────────────────────────
-# CRUD (upload en masse, actif/inactif, suppression) -- pas de renommage, ces
-# fonds sont identifiés par leur vignette dans l'admin (voir
-# retrospective_backgrounds, db.py, et RETROSPECTIVE_BG_DIR ci-dessus).
-
-@app.route('/admin/retrospective/background/upload', methods=['POST'])
-@require_admin_auth
-@csrf_protect
-def admin_retrospective_background_upload():
-    files = [f for f in request.files.getlist('backgrounds') if f and f.filename]
-    if not files:
-        return redirect(url_for('admin_retrospective', err='Aucun fichier sélectionné.'))
-    RETROSPECTIVE_BG_DIR.mkdir(parents=True, exist_ok=True)
-    added, skipped = 0, 0
-    for file in files:
-        ext = Path(file.filename).suffix.lower()
-        if ext not in _RETROSPECTIVE_ALLOWED_EXT:
-            skipped += 1
-            continue
-        stamp = current_stamp()
-        unique = secrets.token_hex(4)
-        safe = f'retro-bg-{stamp}-{unique}{ext}'
-        file.save(str(RETROSPECTIVE_BG_DIR / safe))
-        add_retrospective_background(safe)
-        added += 1
-    msg = f'{added} fond(s) ajouté(s).' if added else 'Aucun fond ajouté.'
-    if skipped:
-        msg += f' {skipped} fichier(s) ignoré(s) (format non supporté).'
-    return redirect(url_for('admin_retrospective', ok=msg))
-
-
-@app.route('/admin/retrospective/background/<int:bg_id>/toggle', methods=['POST'])
-@require_admin_auth
-@csrf_protect
-def admin_retrospective_background_toggle(bg_id):
-    item = get_retrospective_background(bg_id)
-    if not item:
-        return redirect(url_for('admin_retrospective', err='Fond introuvable.'))
-    set_retrospective_background_active(bg_id, not item['active'])
-    return redirect(url_for('admin_retrospective',
-                            ok=('Fond réactivé.' if not item['active'] else 'Fond désactivé.')))
-
-
-@app.route('/admin/retrospective/background/<int:bg_id>/delete', methods=['POST'])
-@require_admin_auth
-@csrf_protect
-def admin_retrospective_background_delete(bg_id):
-    item = delete_retrospective_background_db(bg_id)
-    if item:
-        (RETROSPECTIVE_BG_DIR / item['filename']).unlink(missing_ok=True)
-        return redirect(url_for('admin_retrospective', ok='Fond supprimé.'))
-    return redirect(url_for('admin_retrospective', err='Fond introuvable.'))
-
-
-# ── Rétrospective — images en premier plan (superposition) ──────────────────
-# CRUD (upload en masse, actif/inactif, suppression, réordonnancement) — même
-# principe que les fonds d'écran ci-dessus, avec en plus un ordre explicite
-# (sort_order, boutons ▲▼, voir move_retrospective_overlay, db.py) : ces
-# images sont assignées aux photos Rétrospective en tournant sur ce pool
-# actif dans l'ordre défini plutôt que tirées au sort (voir
-# api_bestof_slides ci-dessus et RETROSPECTIVE_OVERLAY_DIR).
-
-@app.route('/admin/retrospective/overlay/upload', methods=['POST'])
-@require_admin_auth
-@csrf_protect
-def admin_retrospective_overlay_upload():
-    files = [f for f in request.files.getlist('overlays') if f and f.filename]
-    if not files:
-        return redirect(url_for('admin_retrospective', err='Aucun fichier sélectionné.'))
-    RETROSPECTIVE_OVERLAY_DIR.mkdir(parents=True, exist_ok=True)
-    added, skipped = 0, 0
-    for file in files:
-        ext = Path(file.filename).suffix.lower()
-        if ext not in _RETROSPECTIVE_ALLOWED_EXT:
-            skipped += 1
-            continue
-        stamp = current_stamp()
-        unique = secrets.token_hex(4)
-        safe = f'retro-fg-{stamp}-{unique}{ext}'
-        file.save(str(RETROSPECTIVE_OVERLAY_DIR / safe))
-        add_retrospective_overlay(safe)
-        added += 1
-    msg = f'{added} image(s) ajoutée(s).' if added else 'Aucune image ajoutée.'
-    if skipped:
-        msg += f' {skipped} fichier(s) ignoré(s) (format non supporté).'
-    return redirect(url_for('admin_retrospective', ok=msg))
-
-
-@app.route('/admin/retrospective/overlay/<int:overlay_id>/toggle', methods=['POST'])
-@require_admin_auth
-@csrf_protect
-def admin_retrospective_overlay_toggle(overlay_id):
-    item = get_retrospective_overlay(overlay_id)
-    if not item:
-        return redirect(url_for('admin_retrospective', err='Image introuvable.'))
-    set_retrospective_overlay_active(overlay_id, not item['active'])
-    return redirect(url_for('admin_retrospective',
-                            ok=('Image réactivée.' if not item['active'] else 'Image désactivée.')))
-
-
-@app.route('/admin/retrospective/overlay/<int:overlay_id>/move', methods=['POST'])
-@require_admin_auth
-@csrf_protect
-def admin_retrospective_overlay_move(overlay_id):
-    direction = request.form.get('direction', '')
-    if direction in ('up', 'down'):
-        move_retrospective_overlay(overlay_id, direction)
-    return redirect(url_for('admin_retrospective', ok='Ordre mis à jour.'))
-
-
-@app.route('/admin/retrospective/overlay/<int:overlay_id>/delete', methods=['POST'])
-@require_admin_auth
-@csrf_protect
-def admin_retrospective_overlay_delete(overlay_id):
-    item = delete_retrospective_overlay_db(overlay_id)
-    if item:
-        (RETROSPECTIVE_OVERLAY_DIR / item['filename']).unlink(missing_ok=True)
-        return redirect(url_for('admin_retrospective', ok='Image supprimée.'))
-    return redirect(url_for('admin_retrospective', err='Image introuvable.'))
 
 
 @app.route('/admin/retrospective/schedule/create', methods=['POST'])

@@ -733,6 +733,230 @@ def init_db():
         """)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_retrospective_schedules_range ON retrospective_schedules(start_at, end_at)')
 
+        # Médiathèque unifiée : une seule table pour toutes les images gérées
+        # par l'admin (voir MEDIA_CATEGORIES plus bas). Les anciennes tables
+        # restent en place (rollback) mais ne sont plus écrites.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS media_library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            filename TEXT NOT NULL DEFAULT '',
+            label TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL DEFAULT 'image',
+            color1 TEXT,
+            color2 TEXT,
+            angle INTEGER NOT NULL DEFAULT 135,
+            active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_media_library_cat_file "
+            "ON media_library(category, filename) WHERE filename != ''"
+        )
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_media_library_category ON media_library(category)')
+        try:
+            _migrate_media_library(conn)
+        except Exception:
+            conn.rollback()
+            logger.exception("Migration vers media_library échouée (anciennes tables conservées)")
+
+        conn.commit()
+
+
+# ── Médiathèque unifiée (table media_library) ───────────────────────────────
+# category -> (libellé admin, dossier sous static/). Les fichiers restent dans
+# le dossier historique de leur catégorie : l'URL d'une image est toujours
+# /static/<dossier>/<filename>, voir media_url().
+MEDIA_CATEGORIES = {
+    'background':    ('Fonds des pages promo', 'promo'),
+    'promo_content': ('Images de texte promo', 'promo_content'),
+    'slideshow':     ('Diaporama', 'slideshow'),
+    'screensaver':   ('Écran de veille', 'screensaver'),
+    'wallpaper':     ('Fonds d\'écran Windows', 'wallpapers'),
+    'other':         ('Autres images', 'other_images'),
+    'retro_bg':      ('Rétrospective — fonds', 'retrospective_bg'),
+    'retro_overlay': ('Rétrospective — premier plan', 'retrospective_overlay'),
+}
+
+# ancienne table -> (catégorie, colonnes optionnelles à reprendre)
+_MEDIA_LEGACY_TABLES = (
+    ('slideshow_images', 'slideshow', ()),
+    ('screensaver_images', 'screensaver', ('active',)),
+    ('wallpaper_images', 'wallpaper', ()),
+    ('other_images', 'other', ('label',)),
+    ('promo_content_images', 'promo_content', ('label',)),
+    ('retrospective_backgrounds', 'retro_bg', ('active',)),
+    ('retrospective_overlays', 'retro_overlay', ('active', 'sort_order')),
+)
+
+
+def media_url(item):
+    """URL publique de l'image (None pour un dégradé)."""
+    if not item or item.get('kind') == 'gradient' or not item.get('filename'):
+        return None
+    folder = MEDIA_CATEGORIES.get(item['category'], ('', item['category']))[1]
+    return f'/static/{folder}/{item["filename"]}'
+
+
+def _migrate_media_library(conn):
+    done = conn.execute(
+        "SELECT value FROM settings WHERE key = 'media_library.migrated'"
+    ).fetchone()
+    if done:
+        return
+    existing = {r['name'] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    now = datetime.now().isoformat(timespec='seconds')
+
+    for table, category, extras in _MEDIA_LEGACY_TABLES:
+        if table not in existing:
+            continue
+        for r in conn.execute(f'SELECT * FROM {table} ORDER BY id').fetchall():
+            row = dict(r)
+            conn.execute(
+                'INSERT OR IGNORE INTO media_library'
+                '(category, filename, label, active, sort_order, created_at) VALUES(?,?,?,?,?,?)',
+                (category, row['filename'],
+                 row.get('label', '') if 'label' in extras else '',
+                 row.get('active', 1) if 'active' in extras else 1,
+                 row.get('sort_order', 0) if 'sort_order' in extras else 0,
+                 row.get('created_at') or now),
+            )
+
+    id_map = {}
+    if 'promo_backgrounds' in existing:
+        for r in conn.execute('SELECT * FROM promo_backgrounds ORDER BY id').fetchall():
+            row = dict(r)
+            kind = row.get('kind') or 'image'
+            cur = conn.execute(
+                'INSERT OR IGNORE INTO media_library'
+                '(category, filename, label, kind, color1, color2, angle, created_at) '
+                'VALUES(?,?,?,?,?,?,?,?)',
+                ('background', row['filename'] if kind == 'image' else '',
+                 row.get('label') or '', kind, row.get('color1'), row.get('color2'),
+                 row.get('angle') or 135, row.get('created_at') or now),
+            )
+            new_id = cur.lastrowid if cur.rowcount else conn.execute(
+                "SELECT id FROM media_library WHERE category='background' AND filename=?",
+                (row['filename'],),
+            ).fetchone()['id']
+            id_map[row['id']] = new_id
+    # Chaque page n'est lue/mise à jour qu'une fois : pas de double remappage.
+    if id_map and 'promo_pages' in existing:
+        for page in conn.execute(
+            'SELECT id, background_id FROM promo_pages WHERE background_id IS NOT NULL'
+        ).fetchall():
+            conn.execute(
+                'UPDATE promo_pages SET background_id = ? WHERE id = ?',
+                (id_map.get(page['background_id']), page['id']),
+            )
+    conn.execute(
+        "INSERT OR REPLACE INTO settings(key, value) VALUES('media_library.migrated', '1')"
+    )
+
+
+def list_media(category=None, active_only=False):
+    sql, args = 'SELECT * FROM media_library', []
+    where = []
+    if category:
+        where.append('category = ?')
+        args.append(category)
+    if active_only:
+        where.append('active = 1')
+    if where:
+        sql += ' WHERE ' + ' AND '.join(where)
+    sql += ' ORDER BY sort_order ASC, created_at DESC, id DESC'
+    with closing(db_conn()) as conn:
+        rows = conn.execute(sql, args).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_media(media_id):
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM media_library WHERE id = ?', (media_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_media(category, filename, label='', ordered=False):
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        order = 0
+        if ordered:
+            order = conn.execute(
+                'SELECT COALESCE(MAX(sort_order), -1) + 1 AS m FROM media_library WHERE category = ?',
+                (category,),
+            ).fetchone()['m']
+        cur = conn.execute(
+            'INSERT INTO media_library(category, filename, label, sort_order, created_at) VALUES(?,?,?,?,?)',
+            (category, filename, label, order, created_at),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def add_media_gradient(color1, color2, angle=135, label=''):
+    created_at = datetime.now().isoformat(timespec='seconds')
+    with closing(db_conn()) as conn:
+        cur = conn.execute(
+            "INSERT INTO media_library(category, filename, label, kind, color1, color2, angle, created_at) "
+            "VALUES('background', '', ?, 'gradient', ?, ?, ?, ?)",
+            (label, color1, color2, angle, created_at),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def rename_media(media_id, label):
+    with closing(db_conn()) as conn:
+        cur = conn.execute('UPDATE media_library SET label = ? WHERE id = ?', (label, media_id))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def set_media_active(media_id, active):
+    with closing(db_conn()) as conn:
+        conn.execute('UPDATE media_library SET active = ? WHERE id = ?', (1 if active else 0, media_id))
+        conn.commit()
+
+
+def delete_media_db(media_id):
+    """Supprime la ligne et retourne le dict (l'appelant supprime le fichier).
+    Les pages promo qui l'utilisaient comme fond retombent sur NULL."""
+    with closing(db_conn()) as conn:
+        row = conn.execute('SELECT * FROM media_library WHERE id = ?', (media_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        conn.execute('UPDATE promo_pages SET background_id = NULL WHERE background_id = ?', (media_id,))
+        conn.execute('DELETE FROM media_library WHERE id = ?', (media_id,))
+        conn.commit()
+    return item
+
+
+def move_media(media_id, direction):
+    """Échange sort_order avec le voisin de la même catégorie."""
+    with closing(db_conn()) as conn:
+        cat = conn.execute('SELECT category FROM media_library WHERE id = ?', (media_id,)).fetchone()
+        if not cat:
+            return
+        rows = conn.execute(
+            'SELECT id, sort_order FROM media_library WHERE category = ? ORDER BY sort_order ASC, id ASC',
+            (cat['category'],),
+        ).fetchall()
+        ids = [r['id'] for r in rows]
+        i = ids.index(media_id)
+        j = i - 1 if direction == 'up' else i + 1
+        if j < 0 or j >= len(ids):
+            return
+        a, b = rows[i], rows[j]
+        if a['sort_order'] == b['sort_order']:
+            # ordres identiques (pas d'ordre explicite) : renumérote
+            for n, r in enumerate(rows):
+                conn.execute('UPDATE media_library SET sort_order = ? WHERE id = ?', (n, r['id']))
+            a, b = {'id': a['id'], 'sort_order': i}, {'id': b['id'], 'sort_order': j}
+        conn.execute('UPDATE media_library SET sort_order = ? WHERE id = ?', (b['sort_order'], a['id']))
+        conn.execute('UPDATE media_library SET sort_order = ? WHERE id = ?', (a['sort_order'], b['id']))
         conn.commit()
 
 
@@ -1029,72 +1253,33 @@ def get_voter_votes(voter_token):
 # ── Slideshow ─────────────────────────────────────────────────────────────────
 
 def list_slideshow_images():
-    with closing(db_conn()) as conn:
-        rows = conn.execute(
-            'SELECT * FROM slideshow_images ORDER BY created_at DESC'
-        ).fetchall()
-    return [dict(r) for r in rows]
+    return list_media('slideshow')
 
 
 def add_slideshow_image(filename):
-    created_at = datetime.now().isoformat(timespec='seconds')
-    with closing(db_conn()) as conn:
-        cur = conn.execute(
-            'INSERT INTO slideshow_images(filename, created_at) VALUES(?,?)',
-            (filename, created_at)
-        )
-        conn.commit()
-        return cur.lastrowid
+    return add_media('slideshow', filename)
 
 
 def delete_slideshow_image_db(image_id):
-    with closing(db_conn()) as conn:
-        row = conn.execute('SELECT * FROM slideshow_images WHERE id = ?', (image_id,)).fetchone()
-        if not row:
-            return None
-        img = dict(row)
-        conn.execute('DELETE FROM slideshow_images WHERE id = ?', (image_id,))
-        conn.commit()
-    return img
+    return delete_media_db(image_id)
 
 
 # ── Autres images de la médiathèque ───────────────────────────────────────────
 
 def list_other_images():
-    with closing(db_conn()) as conn:
-        rows = conn.execute(
-            'SELECT * FROM other_images ORDER BY created_at DESC, id DESC'
-        ).fetchall()
-    return [dict(r) for r in rows]
+    return list_media('other')
 
 
 def add_other_image(filename, label=''):
-    created_at = datetime.now().isoformat(timespec='seconds')
-    with closing(db_conn()) as conn:
-        cur = conn.execute(
-            'INSERT INTO other_images(filename, label, created_at) VALUES(?,?,?)',
-            (filename, label, created_at)
-        )
-        conn.commit()
-        return cur.lastrowid
+    return add_media('other', filename, label)
 
 
 def rename_other_image(image_id, label):
-    with closing(db_conn()) as conn:
-        cur = conn.execute('UPDATE other_images SET label = ? WHERE id = ?', (label, image_id))
-        conn.commit()
-        return cur.rowcount > 0
+    return rename_media(image_id, label)
 
 
 def delete_other_image_db(image_id):
-    with closing(db_conn()) as conn:
-        row = conn.execute('SELECT * FROM other_images WHERE id = ?', (image_id,)).fetchone()
-        if not row:
-            return None
-        img = dict(row)
-        conn.execute('DELETE FROM other_images WHERE id = ?', (image_id,))
-        conn.commit()
-    return img
+    return delete_media_db(image_id)
 
 
 # ── Pages promo (diaporama /bestof) ──────────────────────────────────────────
@@ -1105,50 +1290,22 @@ def delete_other_image_db(image_id):
 # la validation des champs et le rendu (/bestof, admin_slideshow).
 
 def list_promo_backgrounds():
-    with closing(db_conn()) as conn:
-        rows = conn.execute('SELECT * FROM promo_backgrounds ORDER BY created_at DESC').fetchall()
-    return [dict(r) for r in rows]
+    return list_media('background')
 
 
 def add_promo_background(filename, label=''):
-    created_at = datetime.now().isoformat(timespec='seconds')
-    with closing(db_conn()) as conn:
-        cur = conn.execute(
-            "INSERT INTO promo_backgrounds(filename, label, created_at, kind) VALUES(?,?,?,'image')",
-            (filename, label, created_at)
-        )
-        conn.commit()
-        return cur.lastrowid
+    return add_media('background', filename, label)
 
 
 def add_promo_gradient_background(color1, color2, angle=135, label=''):
-    """Fond dégradé (deux couleurs + angle), sans fichier — voir kind='gradient'
-    sur promo_backgrounds. `angle` en degrés, sens CSS (linear-gradient)."""
-    created_at = datetime.now().isoformat(timespec='seconds')
-    with closing(db_conn()) as conn:
-        cur = conn.execute(
-            "INSERT INTO promo_backgrounds(filename, label, created_at, kind, color1, color2, angle) "
-            "VALUES('', ?, ?, 'gradient', ?, ?, ?)",
-            (label, created_at, color1, color2, angle)
-        )
-        conn.commit()
-        return cur.lastrowid
+    """Fond dégradé (deux couleurs + angle), sans fichier — kind='gradient'."""
+    return add_media_gradient(color1, color2, angle, label)
 
 
 def delete_promo_background_db(bg_id):
-    """Supprime de la DB et retourne le dict (l'appelant gère le fichier sur
-    disque) — les pages promo qui utilisaient ce fond retombent sur le
-    dégradé par défaut (background_id remis à NULL) plutôt que de pointer
-    vers un fond qui n'existe plus."""
-    with closing(db_conn()) as conn:
-        row = conn.execute('SELECT * FROM promo_backgrounds WHERE id = ?', (bg_id,)).fetchone()
-        if not row:
-            return None
-        bg = dict(row)
-        conn.execute('UPDATE promo_pages SET background_id = NULL WHERE background_id = ?', (bg_id,))
-        conn.execute('DELETE FROM promo_backgrounds WHERE id = ?', (bg_id,))
-        conn.commit()
-    return bg
+    """Supprime de la médiathèque et retourne le dict (l'appelant gère le
+    fichier) ; les pages promo qui l'utilisaient retombent sur NULL."""
+    return delete_media_db(bg_id)
 
 
 # v2.0.8 : bibliothèque d'images dédiées au TEXTE des pages promo (voir
@@ -1161,33 +1318,15 @@ def delete_promo_background_db(bg_id):
 # une image déjà insérée dans un texte devient une image cassée si son
 # fichier disparaît -- voir la confirmation côté template.
 def list_promo_content_images():
-    with closing(db_conn()) as conn:
-        rows = conn.execute('SELECT * FROM promo_content_images ORDER BY created_at DESC').fetchall()
-    return [dict(r) for r in rows]
+    return list_media('promo_content')
 
 
 def add_promo_content_image(filename, label=''):
-    created_at = datetime.now().isoformat(timespec='seconds')
-    with closing(db_conn()) as conn:
-        cur = conn.execute(
-            "INSERT INTO promo_content_images(filename, label, created_at) VALUES(?,?,?)",
-            (filename, label, created_at)
-        )
-        conn.commit()
-        return cur.lastrowid
+    return add_media('promo_content', filename, label)
 
 
 def delete_promo_content_image_db(image_id):
-    """Supprime de la DB et retourne le dict (l'appelant gère le fichier sur
-    disque)."""
-    with closing(db_conn()) as conn:
-        row = conn.execute('SELECT * FROM promo_content_images WHERE id = ?', (image_id,)).fetchone()
-        if not row:
-            return None
-        img = dict(row)
-        conn.execute('DELETE FROM promo_content_images WHERE id = ?', (image_id,))
-        conn.commit()
-    return img
+    return delete_media_db(image_id)
 
 
 # v2.0.2 : QR code par page remplacé par une balise {qrcode=...} inline
@@ -1219,6 +1358,7 @@ def _promo_page_row_to_dict(row, bg_by_id):
     d = dict(row)
     bg = bg_by_id.get(d['background_id'])
     d['background_filename'] = bg['filename'] if bg else ''
+    d['background_url']      = (media_url(bg) or '') if bg else ''
     d['background_kind']     = bg['kind'] if bg else ''
     d['background_color1']   = bg['color1'] if bg else ''
     d['background_color2']   = bg['color2'] if bg else ''
@@ -1229,7 +1369,7 @@ def _promo_page_row_to_dict(row, bg_by_id):
 def list_promo_pages():
     with closing(db_conn()) as conn:
         rows = conn.execute('SELECT * FROM promo_pages ORDER BY sort_order ASC, id ASC').fetchall()
-        bgs = conn.execute('SELECT * FROM promo_backgrounds').fetchall()
+        bgs = conn.execute("SELECT * FROM media_library WHERE category = 'background'").fetchall()
     bg_by_id = {b['id']: dict(b) for b in bgs}
     return [_promo_page_row_to_dict(r, bg_by_id) for r in rows]
 
@@ -1239,7 +1379,7 @@ def get_promo_page(page_id):
         row = conn.execute('SELECT * FROM promo_pages WHERE id = ?', (page_id,)).fetchone()
         if not row:
             return None
-        bgs = conn.execute('SELECT * FROM promo_backgrounds').fetchall()
+        bgs = conn.execute("SELECT * FROM media_library WHERE category = 'background'").fetchall()
     bg_by_id = {b['id']: dict(b) for b in bgs}
     return _promo_page_row_to_dict(row, bg_by_id)
 
@@ -1277,7 +1417,7 @@ def get_promo_page_by_slug(slug):
         row = conn.execute('SELECT * FROM promo_pages WHERE slug = ?', (slug,)).fetchone()
         if not row:
             return None
-        bgs = conn.execute('SELECT * FROM promo_backgrounds').fetchall()
+        bgs = conn.execute("SELECT * FROM media_library WHERE category = 'background'").fetchall()
     bg_by_id = {b['id']: dict(b) for b in bgs}
     return _promo_page_row_to_dict(row, bg_by_id)
 
@@ -1431,44 +1571,19 @@ def delete_promo_schedule(schedule_id):
 # ── Écran de veille (images dédiées) ─────────────────────────────────────────
 
 def list_screensaver_images(active_only=False):
-    query = 'SELECT * FROM screensaver_images'
-    if active_only:
-        query += ' WHERE active = 1'
-    query += ' ORDER BY created_at DESC'
-    with closing(db_conn()) as conn:
-        rows = conn.execute(query).fetchall()
-    return [dict(r) for r in rows]
+    return list_media('screensaver', active_only=active_only)
 
 
 def add_screensaver_image(filename):
-    created_at = datetime.now().isoformat(timespec='seconds')
-    with closing(db_conn()) as conn:
-        cur = conn.execute(
-            'INSERT INTO screensaver_images(filename, created_at) VALUES(?,?)',
-            (filename, created_at)
-        )
-        conn.commit()
-        return cur.lastrowid
+    return add_media('screensaver', filename)
 
 
 def delete_screensaver_image_db(image_id):
-    with closing(db_conn()) as conn:
-        row = conn.execute('SELECT * FROM screensaver_images WHERE id = ?', (image_id,)).fetchone()
-        if not row:
-            return None
-        img = dict(row)
-        conn.execute('DELETE FROM screensaver_images WHERE id = ?', (image_id,))
-        conn.commit()
-    return img
+    return delete_media_db(image_id)
 
 
 def set_screensaver_image_active(image_id, active):
-    with closing(db_conn()) as conn:
-        conn.execute(
-            'UPDATE screensaver_images SET active = ? WHERE id = ?',
-            (1 if active else 0, image_id)
-        )
-        conn.commit()
+    set_media_active(image_id, active)
 
 
 # ── Fond d'écran Windows (images disponibles) ────────────────────────────────
@@ -1478,33 +1593,15 @@ def set_screensaver_image_active(image_id, active):
 # (table settings) retient laquelle est actuellement appliquée.
 
 def list_wallpaper_images():
-    with closing(db_conn()) as conn:
-        rows = conn.execute(
-            'SELECT * FROM wallpaper_images ORDER BY created_at DESC'
-        ).fetchall()
-    return [dict(r) for r in rows]
+    return list_media('wallpaper')
 
 
 def add_wallpaper_image(filename):
-    created_at = datetime.now().isoformat(timespec='seconds')
-    with closing(db_conn()) as conn:
-        cur = conn.execute(
-            'INSERT INTO wallpaper_images(filename, created_at) VALUES(?,?)',
-            (filename, created_at)
-        )
-        conn.commit()
-        return cur.lastrowid
+    return add_media('wallpaper', filename)
 
 
 def delete_wallpaper_image_db(image_id):
-    with closing(db_conn()) as conn:
-        row = conn.execute('SELECT * FROM wallpaper_images WHERE id = ?', (image_id,)).fetchone()
-        if not row:
-            return None
-        img = dict(row)
-        conn.execute('DELETE FROM wallpaper_images WHERE id = ?', (image_id,))
-        conn.commit()
-    return img
+    return delete_media_db(image_id)
 
 
 # ── Polices personnalisées (voir /admin/texts et app.py : _all_fonts(),
@@ -2390,47 +2487,25 @@ def delete_retrospective_photo_db(photo_id):
 # ci-dessus, et api_bestof_slides/showNext() dans app.py/bestof.html).
 
 def list_retrospective_backgrounds(active_only=False):
-    sql = 'SELECT * FROM retrospective_backgrounds'
-    if active_only:
-        sql += ' WHERE active = 1'
-    sql += ' ORDER BY created_at DESC'
-    with closing(db_conn()) as conn:
-        rows = conn.execute(sql).fetchall()
-    return [dict(r) for r in rows]
+    return list_media('retro_bg', active_only=active_only)
 
 
 def get_retrospective_background(bg_id):
-    with closing(db_conn()) as conn:
-        row = conn.execute('SELECT * FROM retrospective_backgrounds WHERE id = ?', (bg_id,)).fetchone()
-    return dict(row) if row else None
+    item = get_media(bg_id)
+    return item if item and item['category'] == 'retro_bg' else None
 
 
 def add_retrospective_background(filename):
-    created_at = datetime.now().isoformat(timespec='seconds')
-    with closing(db_conn()) as conn:
-        cur = conn.execute(
-            'INSERT INTO retrospective_backgrounds(filename, active, created_at) VALUES(?,1,?)',
-            (filename, created_at)
-        )
-        conn.commit()
-        return cur.lastrowid
+    return add_media('retro_bg', filename)
 
 
 def set_retrospective_background_active(bg_id, active):
-    with closing(db_conn()) as conn:
-        conn.execute('UPDATE retrospective_backgrounds SET active = ? WHERE id = ?', (1 if active else 0, bg_id))
-        conn.commit()
+    set_media_active(bg_id, active)
 
 
 def delete_retrospective_background_db(bg_id):
-    with closing(db_conn()) as conn:
-        row = conn.execute('SELECT * FROM retrospective_backgrounds WHERE id = ?', (bg_id,)).fetchone()
-        if not row:
-            return None
-        item = dict(row)
-        conn.execute('DELETE FROM retrospective_backgrounds WHERE id = ?', (bg_id,))
-        conn.commit()
-    return item
+    return delete_media_db(bg_id)
+
 
 # ── Rétrospective — images en premier plan (superposition) ──────────────────
 # Bibliothèque d'images affichées EN AVANT (au-dessus) de chaque photo de la
@@ -2438,69 +2513,30 @@ def delete_retrospective_background_db(bg_id):
 # ci-dessus, et api_bestof_slides()/showNext() dans app.py/bestof.html.
 
 def list_retrospective_overlays(active_only=False):
-    sql = 'SELECT * FROM retrospective_overlays'
-    if active_only:
-        sql += ' WHERE active = 1'
-    sql += ' ORDER BY sort_order ASC, id ASC'
-    with closing(db_conn()) as conn:
-        rows = conn.execute(sql).fetchall()
-    return [dict(r) for r in rows]
+    return list_media('retro_overlay', active_only=active_only)
 
 
 def get_retrospective_overlay(overlay_id):
-    with closing(db_conn()) as conn:
-        row = conn.execute('SELECT * FROM retrospective_overlays WHERE id = ?', (overlay_id,)).fetchone()
-    return dict(row) if row else None
+    item = get_media(overlay_id)
+    return item if item and item['category'] == 'retro_overlay' else None
 
 
 def add_retrospective_overlay(filename):
-    """Ajoutée en fin de rotation (sort_order = max + 1), comme
-    create_promo_page ci-dessus."""
-    created_at = datetime.now().isoformat(timespec='seconds')
-    with closing(db_conn()) as conn:
-        max_order = conn.execute('SELECT COALESCE(MAX(sort_order), -1) AS m FROM retrospective_overlays').fetchone()['m']
-        cur = conn.execute(
-            'INSERT INTO retrospective_overlays(filename, active, sort_order, created_at) VALUES(?,1,?,?)',
-            (filename, max_order + 1, created_at)
-        )
-        conn.commit()
-        return cur.lastrowid
+    """Ajoutée en fin de rotation (sort_order = max + 1)."""
+    return add_media('retro_overlay', filename, ordered=True)
 
 
 def set_retrospective_overlay_active(overlay_id, active):
-    with closing(db_conn()) as conn:
-        conn.execute('UPDATE retrospective_overlays SET active = ? WHERE id = ?', (1 if active else 0, overlay_id))
-        conn.commit()
+    set_media_active(overlay_id, active)
 
 
 def delete_retrospective_overlay_db(overlay_id):
-    with closing(db_conn()) as conn:
-        row = conn.execute('SELECT * FROM retrospective_overlays WHERE id = ?', (overlay_id,)).fetchone()
-        if not row:
-            return None
-        item = dict(row)
-        conn.execute('DELETE FROM retrospective_overlays WHERE id = ?', (overlay_id,))
-        conn.commit()
-    return item
+    return delete_media_db(overlay_id)
 
 
 def move_retrospective_overlay(overlay_id, direction):
-    """Échange sort_order avec le voisin immédiat ('up' ou 'down') -- mêmes
-    boutons ▲▼ et même mécanique que move_promo_page ci-dessus."""
-    with closing(db_conn()) as conn:
-        rows = conn.execute('SELECT id, sort_order FROM retrospective_overlays ORDER BY sort_order ASC, id ASC').fetchall()
-        ids = [r['id'] for r in rows]
-        if overlay_id not in ids:
-            return
-        i = ids.index(overlay_id)
-        j = i - 1 if direction == 'up' else i + 1
-        if j < 0 or j >= len(ids):
-            return
-        a, b = rows[i], rows[j]
-        conn.execute('UPDATE retrospective_overlays SET sort_order = ? WHERE id = ?', (b['sort_order'], a['id']))
-        conn.execute('UPDATE retrospective_overlays SET sort_order = ? WHERE id = ?', (a['sort_order'], b['id']))
-        conn.commit()
-
+    """Échange sort_order avec le voisin immédiat ('up' ou 'down')."""
+    move_media(overlay_id, direction)
 
 
 # ── Rétrospective — créneaux de programmation ────────────────────────────────

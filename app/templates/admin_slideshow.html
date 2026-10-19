@@ -358,86 +358,20 @@
   </div>
   {% endfor %}
 
-  <!-- Bibliothèque de fonds (partagée par toutes les pages promo) -->
+  <!-- Fonds : gérés dans la médiathèque (même cartouche d'upload) -->
+  {% from 'blocks/_media_macros.html' import media_uploader with context %}
   <div class="section" id="promo-backgrounds">
-    <p class="section-title">Bibliothèque de fonds
+    <p class="section-title">Fonds des pages promo
       <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
-        Fonds partagés, sélectionnables sur n'importe quelle page promo ci-dessous
+        Les fonds viennent de la médiathèque : n'importe quelle image ou dégradé peut être choisi sur une page
       </span>
     </p>
-
-    {% if promo_backgrounds %}
-    <div class="img-grid">
-      {% for bg in promo_backgrounds %}
-      <div class="img-card">
-        {% if bg.kind == 'gradient' %}
-        <div class="bg-gradient-swatch" style="background:linear-gradient({{ bg.angle }}deg, {{ bg.color1 }}, {{ bg.color2 }})"></div>
-        {% else %}
-        <img src="{{ url_for('static', filename='promo/' + bg.filename) }}"
-             alt="{{ bg.label or bg.filename }}" loading="lazy">
-        {% endif %}
-        <div class="img-card-foot">
-          <span class="img-card-name" title="{{ bg.label or bg.filename }}">{{ bg.label or (bg.kind == 'gradient' and 'Dégradé') or bg.filename }}</span>
-          <form method="post" action="{{ url_for('admin_promo_bg_delete', bg_id=bg.id) }}"
-                onsubmit="return confirm('Supprimer ce fond de la bibliothèque ?')">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-            <button class="btn-danger" type="submit">✕</button>
-          </form>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p style="color:var(--muted);font-size:14px;margin-bottom:20px">
-      Aucun fond dans la bibliothèque — un fond neutre est utilisé tant qu'aucun fond n'est choisi.
+    <p class="upload-hint" style="text-align:left;margin:0 0 14px">
+      Renommer, supprimer ou créer un dégradé : <a href="{{ url_for('admin_media') }}">tuile Médiathèque</a>.
+      {{ promo_backgrounds|length }} fond(s) disponible(s).
     </p>
-    {% endif %}
-
-    <div class="field-row" style="align-items:stretch">
-      <form method="post" action="{{ url_for('admin_promo_bg_upload') }}" enctype="multipart/form-data"
-            class="field field-half" style="min-width:280px">
-        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <div class="upload-zone" style="height:100%;box-sizing:border-box">
-          <label class="upload-label" for="promo-bg-input">Choisir une image de fond…</label>
-          <input type="file" id="promo-bg-input" name="background" accept=".png,.jpg,.jpeg,.webp"
-                 onchange="document.getElementById('promo-bg-name').textContent = this.files[0]?.name || ''">
-          <span id="promo-bg-name"></span>
-          <div class="field" style="margin-top:12px;max-width:320px">
-            <label>Nom (optionnel)</label>
-            <input type="text" name="label" maxlength="80" placeholder="ex. Fond bleu nuit">
-          </div>
-          <p class="upload-hint">PNG, JPG, WEBP — résolution recommandée : 1920×1080</p>
-          <div style="margin-top:14px">
-            <button class="btn-primary" type="submit">Ajouter à la bibliothèque</button>
-          </div>
-        </div>
-      </form>
-
-      <form method="post" action="{{ url_for('admin_promo_bg_gradient_add') }}"
-            class="field field-half form-card" style="min-width:280px;background:var(--surface-2)">
-        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <p style="font-weight:700;font-size:14px;margin:0 0 14px">Nouveau dégradé (2 couleurs)</p>
-        <div class="field-row">
-          <div class="field field-half">
-            <label>Couleur 1</label>
-            <input type="color" name="color1" value="#0d8b8f">
-          </div>
-          <div class="field field-half">
-            <label>Couleur 2</label>
-            <input type="color" name="color2" value="#111315">
-          </div>
-        </div>
-        <div class="field">
-          <label>Angle (°)</label>
-          <input type="number" name="angle" min="0" max="359" value="135" style="max-width:120px">
-        </div>
-        <div class="field">
-          <label>Nom (optionnel)</label>
-          <input type="text" name="label" maxlength="80" placeholder="ex. Bleu nuit">
-        </div>
-        <button class="btn-primary" type="submit">Ajouter à la bibliothèque</button>
-      </form>
-    </div>
+    {{ media_uploader('background', 'promo-bg', next=url_for('admin_slideshow') ~ '#promo-backgrounds',
+                      hint='PNG, JPG, WEBP, GIF — résolution recommandée : 1920×1080', with_label=True) }}
   </div>
 
   <!-- Pages promo -->
@@ -605,13 +539,13 @@
                 <div class="bg-gradient-swatch" style="background:linear-gradient({{ bg.angle }}deg, {{ bg.color1 }}, {{ bg.color2 }})"
                      title="{{ bg.label or 'Dégradé' }}"></div>
                 {% else %}
-                <img src="{{ url_for('static', filename='promo/' + bg.filename) }}"
-                     alt="{{ bg.label or bg.filename }}" loading="lazy">
+                <img src="{{ bg.url }}" alt="{{ bg.label or bg.filename }}"
+                     title="{{ bg.category_label }} — {{ bg.label or bg.filename }}" loading="lazy">
                 {% endif %}
               </label>
               {% endfor %}
             </div>
-            <p class="upload-hint">Ajoutez ou supprimez des fonds depuis la bibliothèque ci-dessus.</p>
+            <p class="upload-hint">Toutes les images de la médiathèque sont proposées ; ajoutez-en depuis la tuile Médiathèque.</p>
           </div>
 
           <div class="field">

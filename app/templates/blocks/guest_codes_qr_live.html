@@ -159,6 +159,7 @@
         </div>
         {% endif %}
         <input type="file" name="bg_image" accept=".png,.jpg,.jpeg,.webp">
+{% from 'blocks/_media_macros.html' import library_select with context %}{{ library_select('bg_image_library') }}
         <p class="field-hint">Envoyer un nouveau fichier remplace l'image actuelle. Laisser vide pour la conserver.</p>
       </div>
     </div>
@@ -275,6 +276,7 @@
       </div>
       {% endif %}
       <input type="file" name="error_image" accept=".png,.jpg,.jpeg,.webp">
+{% from 'blocks/_media_macros.html' import library_select with context %}{{ library_select('error_image_library') }}
       <p class="field-hint">
         Envoyer un nouveau fichier remplace l'image actuelle. Laisser vide pour la conserver.
         L'image remplace entièrement le texte (pas de superposition).
