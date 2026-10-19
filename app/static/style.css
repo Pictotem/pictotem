@@ -1042,5 +1042,7 @@ button, input, a { font: inherit; }
   align-items: center;
   justify-content: center;
   gap: var(--capture-gap, 18px);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  max-width: none;
 }
+.bottom-bar-center.with-help .bottom-bar-buttons { flex-wrap: nowrap; }
