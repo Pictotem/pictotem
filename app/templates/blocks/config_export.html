@@ -1,0 +1,14 @@
+<p class="text-section-desc">
+  Génère un ZIP contenant tout le paramétrage de l'application : réglages, codes invités,
+  cadres, pages promo, charte graphique, tags prédéfinis, polices et images de la
+  médiathèque (écran de veille, fonds, etc.), à importer dans une autre instance via
+  « Importer une configuration ». Ne contient aucune capture, vote, e-mail ni upload invité.
+</p>
+<form method="post" action="{{ url_for('admin_config_export') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <label class="all-row">
+    <input type="checkbox" name="include_secrets" value="1" checked>
+    <span>Inclure les mots de passe, PIN et identifiants d'API (le ZIP devient sensible)</span>
+  </label>
+  <button type="submit" class="action-btn primary">Générer et télécharger la configuration</button>
+</form>

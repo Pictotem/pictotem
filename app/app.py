@@ -37,6 +37,7 @@ from flask import (Flask, Response, abort, jsonify, make_response, redirect,
                    session, url_for)
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+import config_transfer
 from auth import (admin_password_status, auth_enabled, build_secret_key,
                   check_admin_password, check_gallery_password,
                   check_main_password, client_ip, csrf_protect,
@@ -3142,6 +3143,63 @@ def admin_archive_cleanup():
     return _admin_block_redirect('archive_cleanup', ok=msg)
 
 
+# ── Admin — export / import de la configuration ──────────────────────────────
+# Voir config_transfer.py : réglages + tables de configuration (codes
+# invités, cadres, pages promo, charte...) + fichiers images/polices liés.
+
+def _config_transfer_dirs() -> dict:
+    return {
+        'frames': FRAMES_DIR, 'fonts': CUSTOM_FONTS_DIR, 'promo': PROMO_DIR,
+        'promo_content': PROMO_CONTENT_DIR, 'slideshow': SLIDESHOW_DIR,
+        'screensaver': SCREENSAVER_DIR, 'other_images': OTHER_DIR,
+        'wallpapers': WALLPAPER_DIR, 'retrospective_bg': RETROSPECTIVE_BG_DIR,
+        'retrospective_overlay': RETROSPECTIVE_OVERLAY_DIR,
+    }
+
+
+@app.route('/admin/archive/config_export', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_config_export():
+    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    zip_path = EXPORTS_DIR / f'config-{current_stamp()}.zip'
+    with closing(db_conn()) as conn:
+        counts = config_transfer.export_bundle(
+            conn, _config_transfer_dirs(), zip_path,
+            include_secrets=bool(request.form.get('include_secrets')))
+    logger.info('Export configuration : %s', counts)
+    return send_file(zip_path, mimetype='application/zip', as_attachment=True, download_name=zip_path.name)
+
+
+@app.route('/admin/archive/config_import', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_config_import():
+    file = request.files.get('bundle')
+    if not file or not file.filename:
+        return _admin_block_redirect('config_import', err='Aucun fichier sélectionné.')
+    mode = request.form.get('mode', 'merge')
+    if mode == 'replace' and not request.form.get('confirm'):
+        return _admin_block_redirect('config_import', err='Cochez la case de confirmation pour remplacer.')
+    try:
+        with closing(db_conn()) as conn:
+            counts = config_transfer.import_bundle(
+                conn, _config_transfer_dirs(), file.stream, mode=mode,
+                include_secrets=bool(request.form.get('include_secrets')))
+    except ValueError as exc:
+        return _admin_block_redirect('config_import', err=str(exc))
+    for fr in list_frames():
+        try:
+            clear_overlay_cache(fr['id'])
+        except Exception:
+            pass
+    logger.info('Import configuration (%s) : %s', mode, counts)
+    msg = (f"{counts['settings']} réglage(s), "
+           f"{counts['tables'].get('guest_codes', 0)} code(s) invité(s), "
+           f"{counts['files']} fichier(s) importé(s)")
+    return _admin_block_redirect('config_import', ok=msg)
+
+
 # ── Admin — cadres ────────────────────────────────────────────────────────────
 
 @app.route('/admin/exports/emails.csv')
@@ -3482,7 +3540,9 @@ _ADMIN_BLOCKS = {
     'access_main_clear_password': {'title': "Supprimer le mot de passe de l'interface principale", 'default_page': 'access', 'template': 'blocks/access_main_clear_password.html', 'context_fn': '_block_ctx_access_main_password'},
     'archive_export':      {'title': "Archiver un intervalle",                 'default_page': 'archive',     'template': 'blocks/archive_export.html',      'context_fn': None},
     'archive_cleanup':     {'title': "Nettoyer un intervalle",                  'default_page': 'archive',     'template': 'blocks/archive_cleanup.html',     'context_fn': None, 'variant': 'danger'},
-    'texts_custom_fonts':  {'title': "Polices personnalisées",                  'default_page': 'texts',       'template': 'blocks/texts_custom_fonts.html',  'context_fn': '_block_ctx_texts_custom_fonts'},
+    'config_export':       {'title': "Exporter la configuration",                'default_page': 'archive',     'template': 'blocks/config_export.html',       'context_fn': None},
+    'config_import':       {'title': "Importer une configuration",               'default_page': 'archive',     'template': 'blocks/config_import.html',       'context_fn': None},
+    'texts_custom_fonts':  {'title': "Polices personnalisées",                 'default_page': 'texts',       'template': 'blocks/texts_custom_fonts.html',  'context_fn': '_block_ctx_texts_custom_fonts'},
     'system_camera':       {'title': "Caméra",                                  'default_page': 'system',      'template': 'blocks/system_camera.html',       'context_fn': '_block_ctx_system_camera'},
     'system_screen':       {'title': "Écran / mode kiosque",                    'default_page': 'system',      'template': 'blocks/system_screen.html',       'context_fn': '_block_ctx_system_screen'},
     'system_kiosk_unlock': {'title': "Déverrouillage plein écran (interface principale)", 'default_page': 'system', 'template': 'blocks/system_kiosk_unlock.html', 'context_fn': '_block_ctx_system_kiosk_unlock'},

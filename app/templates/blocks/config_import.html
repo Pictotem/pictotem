@@ -1,0 +1,31 @@
+<p class="text-section-desc">
+  Importe un ZIP produit par « Exporter la configuration ». Les réglages et les fichiers
+  de même nom sont écrasés. Pensez à vérifier ensuite les réglages propres à la machine
+  (adresses IP, ports, caméra).
+</p>
+<form method="post" action="{{ url_for('admin_config_import') }}" enctype="multipart/form-data">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="form-row">
+    <div class="file-field" style="flex:1;">
+      <label class="field-label">Fichier ZIP de configuration</label>
+      <input type="file" name="bundle" accept=".zip" required>
+    </div>
+  </div>
+  <label class="all-row">
+    <input type="radio" name="mode" value="merge" checked>
+    <span>Fusionner (garde les éléments existants absents de l'export)</span>
+  </label>
+  <label class="all-row">
+    <input type="radio" name="mode" value="replace">
+    <span>Remplacer (vide d'abord codes invités, cadres, pages promo, etc.)</span>
+  </label>
+  <label class="all-row">
+    <input type="checkbox" name="include_secrets" value="1" checked>
+    <span>Importer aussi les mots de passe, PIN et identifiants d'API</span>
+  </label>
+  <label class="confirm-row">
+    <input type="checkbox" name="confirm" value="1">
+    <span>Je confirme le remplacement (requis en mode « Remplacer »)</span>
+  </label>
+  <button type="submit" class="action-btn primary">Importer la configuration</button>
+</form>
