@@ -95,6 +95,25 @@ try {
         }
     }
 
+    # git portable : necessaire uniquement pour la mise a jour (update.bat) --
+    # non bloquant si l'installation automatique echoue.
+    $gitExe = Join-Path $root "git\cmd\git.exe"
+    if (-not (Test-Path $gitExe)) {
+        Write-Log "git portable absent -- telechargement en cours (une seule fois, necessaire pour la mise a jour)..."
+        try {
+            & (Join-Path $root "setup_git.ps1") 2>&1 | ForEach-Object { Write-Relayed $_ }
+        }
+        catch {
+            Write-Log "ATTENTION : setup_git.ps1 a leve une erreur ($($_.Exception.Message))."
+        }
+        if (Test-Path $gitExe) {
+            Write-Log "git pret."
+        }
+        else {
+            Write-Log "ATTENTION : git n'a pas pu etre installe automatiquement. La mise a jour via update.bat sera indisponible."
+        }
+    }
+
     Write-Log "Demarrage de l'application (app\app.py)..."
     & $pythonExe (Join-Path $root "app\app.py") 2>&1 | ForEach-Object { Write-Relayed $_ }
     $exitCode = $LASTEXITCODE

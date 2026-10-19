@@ -4786,11 +4786,6 @@ def admin_restart_update_app():
     internet, etc.) — invisible et donc bloquée indéfiniment sans console,
     alors qu'une fenêtre visible sur la borne permet de constater l'échec
     et de la fermer."""
-    if not (BASE_DIR / '.git').is_dir():
-        return _admin_block_redirect(
-            'app_restart_update',
-            err="Ce dossier n'est pas un dépôt Git (pas de sous-dossier .git) — mise à jour impossible.",
-        )
     update_bat = BASE_DIR / 'update.bat'
     if not update_bat.exists():
         return _admin_block_redirect('app_restart_update', err='update.bat introuvable.')

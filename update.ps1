@@ -42,8 +42,29 @@ Write-Log "===================================================="
 Write-Log "Mise a jour de Pictotem"
 
 try {
+    # git : version portable du dossier (git\cmd) en priorite ; a defaut, git du
+    # systeme ; a defaut, telechargement de MinGit via setup_git.ps1.
+    $portableGitCmd = Join-Path $root "git\cmd"
+    if (-not (Test-Path (Join-Path $portableGitCmd "git.exe")) -and -not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Log "git absent -- telechargement de git portable (une seule fois)..."
+        & (Join-Path $root "setup_git.ps1") 2>&1 | ForEach-Object { Write-Relayed $_ }
+    }
+    if (Test-Path (Join-Path $portableGitCmd "git.exe")) {
+        $env:PATH = "$portableGitCmd;$env:PATH"
+    }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        throw "git est introuvable et son installation automatique a echoue -- verifiez la connexion internet."
+    }
+
+    # Dossier installe sans git (copie/ZIP) : on l'adopte en creant le depot
+    # et en le rattachant a GitHub ; le reset --hard ci-dessous l'aligne
+    # ensuite sur origin/main (config.toml, data\, logs\ ne sont pas touches).
     if (-not (Test-Path (Join-Path $root ".git"))) {
-        throw "Ce dossier n'est pas un depot git (pas de sous-dossier .git) -- mise a jour impossible."
+        Write-Log "Dossier sans depot git : initialisation et rattachement a GitHub..."
+        & git -C $root init -b main --quiet 2>&1 | ForEach-Object { Write-Relayed $_ }
+        if ($LASTEXITCODE -ne 0) { throw "git init a echoue (code $LASTEXITCODE)." }
+        & git -C $root remote add origin "https://github.com/Pictotem/pictotem" 2>&1 | ForEach-Object { Write-Relayed $_ }
+        if ($LASTEXITCODE -ne 0) { throw "git remote add a echoue (code $LASTEXITCODE)." }
     }
 
     # ── 1. Arret du programme s'il tourne ──────────────────────────────────
