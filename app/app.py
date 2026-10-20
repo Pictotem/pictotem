@@ -37,9 +37,11 @@ from flask import (Flask, Response, abort, jsonify, make_response, redirect,
                    render_template, request, send_file, send_from_directory,
                    session, url_for)
 from PIL import Image, ImageDraw, ImageFont, ImageOps
+from image_ops import ROTATE_ANGLES, rotate_image_file
 
 import config_transfer
 from auth import (admin_password_status, auth_enabled, build_secret_key,
+                  secret_key_is_ephemeral,
                   check_admin_password, check_gallery_password,
                   check_main_password, client_ip, csrf_protect,
                   gallery_session_key, generate_csrf_token,
@@ -386,6 +388,19 @@ def media_choices():
 
 
 app.jinja_env.globals['media_choices'] = media_choices
+
+
+def media_ver(item) -> int:
+    """Version (mtime) du fichier d'une image de la médiathèque, pour le cache busting."""
+    try:
+        if item['filename'] and item['category'] in MEDIA_CATEGORIES:
+            return int((_media_dir(item['category']) / item['filename']).stat().st_mtime)
+    except (OSError, KeyError):
+        pass
+    return 0
+
+
+app.jinja_env.globals['media_ver'] = media_ver
 
 
 # ── Filtre Jinja ──────────────────────────────────────────────────────────────
@@ -3947,8 +3962,7 @@ def _block_ctx_access_main_password() -> dict:
         'main_password_status': main_password_status(),
         'main_auth_enabled': auth_enabled(),
         'main_access_url': f"{request.host_url}?key={token}" if token else '',
-        'secret_key_ephemeral': not os.environ.get('PICTOTEM_SECRET_KEY', '').strip()
-                                and CONFIG['server'].get('secret_key', '').strip() in ('', 'change-me', 'change-me-production-secret'),
+        'secret_key_ephemeral': secret_key_is_ephemeral(),
     }
 
 
@@ -4457,6 +4471,30 @@ def admin_media_rename(media_id):
     if rename_media(media_id, (request.form.get('label') or '').strip()[:80]):
         return _media_redirect(ok='Image renommée.')
     return _media_redirect(err='Image introuvable.')
+
+
+@app.route('/admin/media/item/<int:media_id>/rotate', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_media_rotate(media_id):
+    raw = (request.form.get('angle') or '').strip()
+    try:
+        angle = int(raw)
+    except ValueError:
+        angle = None
+    if angle not in ROTATE_ANGLES:
+        return _media_redirect(err='Angle de rotation invalide.')
+    item = get_media(media_id)
+    if not item or not item['filename'] or item['category'] not in MEDIA_CATEGORIES:
+        return _media_redirect(err='Image introuvable ou non pivotable.')
+    path = _media_dir(item['category']) / item['filename']
+    if not path.is_file():
+        return _media_redirect(err='Fichier image introuvable.')
+    try:
+        rotate_image_file(path, angle)
+    except (ValueError, OSError) as e:
+        return _media_redirect(err=f'Rotation impossible : {e}')
+    return _media_redirect(ok='Image pivotée.')
 
 
 @app.route('/admin/media/item/<int:media_id>/toggle', methods=['POST'])

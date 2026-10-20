@@ -68,3 +68,20 @@ def test_crud_and_urls(tmpdb):
     second = db.add_retrospective_overlay('2.png')
     db.move_retrospective_overlay(second, 'up')
     assert [o['id'] for o in db.list_retrospective_overlays()] == [second, first]
+
+
+def test_rotate_image_file(tmp_path):
+    from PIL import Image
+    import image_ops
+
+    p = tmp_path / 'x.png'
+    Image.new('RGB', (40, 20), 'red').save(p)
+    image_ops.rotate_image_file(p, 90)
+    assert Image.open(p).size == (20, 40)
+    image_ops.rotate_image_file(p, 180)
+    assert Image.open(p).size == (20, 40)
+    image_ops.rotate_image_file(p, -90)
+    assert Image.open(p).size == (40, 20)
+    with pytest.raises(ValueError):
+        image_ops.rotate_image_file(p, 45)
+    assert not list(tmp_path.glob('*.tmp'))

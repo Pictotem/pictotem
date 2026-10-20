@@ -9,7 +9,7 @@
 {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
 {%- endmacro %}
 
-{% macro media_grid(items, block='', next='', rename=False, toggle=False, move=False, copy=False, empty='Aucune image.') -%}
+{% macro media_grid(items, block='', next='', rename=False, toggle=False, move=False, copy=False, rotate=True, empty='Aucune image.') -%}
 {% if items %}
 <div class="img-grid">
   {% for img in items %}
@@ -17,7 +17,7 @@
     {% if img.kind == 'gradient' %}
     <div class="bg-gradient-swatch" style="background:linear-gradient({{ img.angle }}deg, {{ img.color1 }}, {{ img.color2 }})"></div>
     {% else %}
-    <img src="{{ img.url }}" alt="{{ img.label or img.filename }}" loading="lazy">
+    <img src="{{ img.url }}?v={{ media_ver(img) }}" alt="{{ img.label or img.filename }}" loading="lazy">
     {% endif %}
     {% if toggle %}
     <form method="post" action="{{ url_for('admin_media_toggle', media_id=img.id) }}" class="img-card-toggle">
@@ -43,6 +43,15 @@
       {% if copy and img.url %}
       <button type="button" class="img-card-copy" data-url="{{ img.url }}"
               onclick="navigator.clipboard.writeText(location.origin + this.dataset.url); this.textContent='Copié';">Copier l'URL</button>
+      {% endif %}
+      {% if rotate and img.kind != 'gradient' and img.filename %}
+      {% for a, sym, tip in (('-90', '⟲', 'Pivoter de −90° (anti-horaire)'), ('180', '↻', 'Pivoter de 180°'), ('90', '⟳', 'Pivoter de +90° (horaire)')) %}
+      <form method="post" action="{{ url_for('admin_media_rotate', media_id=img.id) }}">
+        {{ _hidden(block, next) }}
+        <input type="hidden" name="angle" value="{{ a }}">
+        <button type="submit" class="img-card-copy" title="{{ tip }}">{{ sym }}</button>
+      </form>
+      {% endfor %}
       {% endif %}
       {% if move %}
       {% for d, sym in (('up', '▲'), ('down', '▼')) %}
