@@ -387,7 +387,7 @@
     <div class="img-grid" id="retroGrid">
       {% for p in photos %}
       <div class="img-card {% if not p.active %}inactive{% endif %}">
-        <img src="{{ url_for('media_thumb', filename=p.thumb_filename) if p.thumb_filename else url_for('media_retrospective', filename=p.filename) }}"
+        <img src="{{ url_for('media_thumb', filename=p.thumb_filename, v=retro_ver(p)) if p.thumb_filename else url_for('media_retrospective', filename=p.filename) }}"
              alt="{{ p.label }}" loading="lazy">
         <div class="img-card-body">
           {% if not p.active %}<div class="img-card-badge">Inactif</div>{% endif %}
@@ -403,6 +403,13 @@
           </form>
           <span class="card-date">{{ p.created_at | format_dt }}</span>
           <div class="card-actions">
+            {% for a, sym, tip in (('-90', '⟲', 'Pivoter de −90° (anti-horaire)'), ('180', '↻', 'Pivoter de 180°'), ('90', '⟳', 'Pivoter de +90° (horaire)')) %}
+            <form method="post" action="{{ url_for('admin_retrospective_rotate', photo_id=p.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="angle" value="{{ a }}">
+              <button class="btn-ok btn-sm" type="submit" title="{{ tip }}">{{ sym }}</button>
+            </form>
+            {% endfor %}
             <form method="post" action="{{ url_for('admin_retrospective_toggle', photo_id=p.id) }}">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
               <button class="btn-ok btn-sm" type="submit">{{ 'Désactiver' if p.active else 'Activer' }}</button>

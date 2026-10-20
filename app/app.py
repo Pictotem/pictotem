@@ -403,6 +403,18 @@ def media_ver(item) -> int:
 app.jinja_env.globals['media_ver'] = media_ver
 
 
+def retro_ver(photo) -> int:
+    """Version (mtime) de la vignette d'une photo Rétrospective, pour le cache busting."""
+    try:
+        name = photo.get('thumb_filename')
+        return int((THUMBS_DIR / name).stat().st_mtime) if name else 0
+    except OSError:
+        return 0
+
+
+app.jinja_env.globals['retro_ver'] = retro_ver
+
+
 # ── Filtre Jinja ──────────────────────────────────────────────────────────────
 
 @app.template_filter('format_dt')
@@ -7926,6 +7938,29 @@ def admin_retrospective_set_photo_text(photo_id):
     text = request.form.get('text', '').strip()[:300]
     update_retrospective_photo_text(photo_id, text)
     return redirect(url_for('admin_retrospective', ok='Texte mis à jour.'))
+
+
+@app.route('/admin/retrospective/<int:photo_id>/rotate', methods=['POST'])
+@require_admin_auth
+@csrf_protect
+def admin_retrospective_rotate(photo_id):
+    try:
+        angle = int((request.form.get('angle') or '').strip())
+    except ValueError:
+        angle = None
+    if angle not in ROTATE_ANGLES:
+        return redirect(url_for('admin_retrospective', err='Angle de rotation invalide.'))
+    item = get_retrospective_photo(photo_id)
+    path = RETROSPECTIVE_DIR / item['filename'] if item else None
+    if not path or not path.is_file():
+        return redirect(url_for('admin_retrospective', err='Photo introuvable.'))
+    try:
+        rotate_image_file(path, angle)
+        if item.get('thumb_filename'):
+            make_thumb(path, THUMBS_DIR / item['thumb_filename'])
+    except (ValueError, OSError) as e:
+        return redirect(url_for('admin_retrospective', err=f'Rotation impossible : {e}'))
+    return redirect(url_for('admin_retrospective', ok='Photo pivotée.'))
 
 
 @app.route('/admin/retrospective/<int:photo_id>/delete', methods=['POST'])
