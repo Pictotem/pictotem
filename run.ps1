@@ -15,6 +15,13 @@
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
+# Sortie en UTF-8 de bout en bout (Python -> console -> launcher.log) : sans
+# cela, les accents des logs de l'application s'affichent corrompus.
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 $logsDir = Join-Path $root "logs"
 if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir -ErrorAction Stop | Out-Null }
 $launcherLog = Join-Path $logsDir "launcher.log"

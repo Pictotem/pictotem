@@ -8,10 +8,12 @@ from urllib.parse import urlencode
 
 from flask import abort, current_app, redirect, request, session, url_for
 
-from config_loader import CONFIG
+from config_loader import BASE_DIR, CONFIG
 from db import get_setting, set_setting
 
 logger = logging.getLogger('pictotem')
+
+_DEFAULT_SECRET_KEYS = ('change-me', 'change-me-production-secret')
 
 
 # ── Point 1 : lecture des mots de passe avec priorité aux variables d'env ────
@@ -134,17 +136,48 @@ def set_admin_password(new_password: str) -> None:
 # ── Point 2 : clé secrète robuste ────────────────────────────────────────────
 
 def build_secret_key() -> str:
-    """Retourne la secret_key configurée, ou génère une clé éphémère en avertissant."""
+    """Retourne la secret_key : variable d'env, puis config.toml, puis clé
+    générée une fois et persistée dans data/secret_key (éphémère, avec
+    avertissement, seulement si l'écriture est impossible)."""
+    env_key = os.environ.get('PICTOTEM_SECRET_KEY', '').strip()
+    if env_key:
+        return env_key
     key = CONFIG['server'].get('secret_key', '').strip()
-    if not key or key in ('change-me', 'change-me-production-secret'):
-        key = secrets.token_hex(32)
+    if key and key not in _DEFAULT_SECRET_KEYS:
+        return key
+
+    key_file = BASE_DIR / 'data' / 'secret_key'
+    try:
+        stored = key_file.read_text(encoding='utf-8').strip()
+        if stored:
+            return stored
+    except OSError:
+        pass
+    key = secrets.token_hex(32)
+    try:
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text(key, encoding='utf-8')
+        logger.info('Clé secrète générée et enregistrée dans %s.', key_file)
+    except OSError:
         logger.warning(
-            'SECRET KEY non configurée ou par défaut — clé éphémère générée. '
+            'SECRET KEY non configurée et non persistable — clé éphémère générée. '
             'Les sessions seront invalidées à chaque redémarrage. '
             'Définissez server.secret_key dans config.toml ou la variable PICTOTEM_SECRET_KEY.'
         )
-    env_key = os.environ.get('PICTOTEM_SECRET_KEY', '').strip()
-    return env_key if env_key else key
+    return key
+
+
+def secret_key_is_ephemeral() -> bool:
+    """True si la clé en cours d'utilisation ne survit pas à un redémarrage."""
+    if os.environ.get('PICTOTEM_SECRET_KEY', '').strip():
+        return False
+    key = CONFIG['server'].get('secret_key', '').strip()
+    if key and key not in _DEFAULT_SECRET_KEYS:
+        return False
+    try:
+        return not (BASE_DIR / 'data' / 'secret_key').read_text(encoding='utf-8').strip()
+    except OSError:
+        return True
 
 
 # ── Point 3 : protection CSRF ─────────────────────────────────────────────────
