@@ -66,6 +66,7 @@
     .code-table th .sort-link { color: inherit; text-decoration: none; white-space: nowrap; }
     .code-table th .sort-link:hover, .code-table th .sort-link.active { color: var(--text, #fff); }
     .code-table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.05); vertical-align: middle; }
+    .code-table .col-num { width: 44px; color: var(--muted); font-size: 12px; text-align: right; }
     .code-table .col-code { width: 110px; }
     .code-table .col-date { width: 150px; font-size: 12px; color: var(--muted); }
     .code-table .col-act  { width: 260px; text-align: right; }
@@ -217,6 +218,7 @@
           {% set nxt = base ~ ('_desc' if cur == base ~ '_asc' else '_asc' if cur == base ~ '_desc' else default_dir) %}
           <th class="{{ cls }}"><a class="sort-link{% if cur.startswith(base ~ '_') %} active{% endif %}" href="{{ url_for('admin_guest_codes', sort=nxt, q=guest_codes_q) }}">{{ label }}{% if cur == base ~ '_asc' %} ▲{% elif cur == base ~ '_desc' %} ▼{% endif %}</a></th>
           {% endmacro %}
+          <th class="col-num">#</th>
           {{ sort_th('Texte', 'texte', '_asc') }}
           {{ sort_th('Code', 'code', '_asc', 'col-code') }}
           {{ sort_th('Créé le', 'created', '_desc', 'col-date') }}
@@ -226,6 +228,7 @@
       <tbody>
         {% for gc in guest_codes %}
         <tr>
+          <td class="col-num">{{ loop.index }}</td>
           <td>
             <form class="code-inline-form" method="post">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
