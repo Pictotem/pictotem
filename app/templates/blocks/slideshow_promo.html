@@ -1,0 +1,389 @@
+  <!-- Fonds : gérés dans la médiathèque (même cartouche d'upload) -->
+  {% from 'blocks/_media_macros.html' import media_uploader with context %}
+  <div class="section" id="promo-backgrounds">
+    <p class="section-title">Fonds des pages promo
+      <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
+        Les fonds viennent de la médiathèque : n'importe quelle image ou dégradé peut être choisi sur une page
+      </span>
+    </p>
+    <p class="upload-hint" style="text-align:left;margin:0 0 14px">
+      Renommer, supprimer ou créer un dégradé : <a href="{{ url_for('admin_media') }}">tuile Médiathèque</a>.
+      {{ promo_backgrounds|length }} fond(s) disponible(s).
+    </p>
+    {{ media_uploader('background', 'promo-bg', block='slideshow_promo',
+                      hint='PNG, JPG, WEBP, GIF — résolution recommandée : 1920×1080', with_label=True) }}
+  </div>
+
+  <!-- Pages promo -->
+  <div class="section" id="promo-pages">
+    <p class="section-title">Pages promo
+      <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
+        Insérées dans le diaporama selon leur propre fréquence, en rotation dans l'ordre de passage
+      </span>
+    </p>
+
+    <script id="promo-editor-config" type="application/json">
+      {"fonts": {{ promo_fonts | tojson }}, "sizes": {{ promo_text_sizes | tojson }}, "colors": {{ promo_colors | tojson }}}
+    </script>
+
+    <!-- Timeline visuelle 24h : vue d'ensemble des fréquences de TOUTES les
+         pages promo selon leurs plages horaires (voir promo_schedules
+         ci-dessous et static/promo-timeline.js). Chaque créneau peut être
+         redimensionné (poignées gauche/droite) ou déplacé (glisser le bloc)
+         directement ici -- un aller-retour AJAX met à jour la base et les
+         petits formulaires de la page concernée à chaque relâchement.
+         Les créneaux traversant minuit (fin < début) sont affichés en deux
+         tronçons mais restent modifiables seulement via leur formulaire
+         (pas de glisser fiable pour une plage coupée en deux visuellement). -->
+    <div class="promo-timeline-section">
+      <p class="section-title" style="font-size:15px;border:none;margin-bottom:10px">
+        Timeline des fréquences (0h → 24h)
+        <span style="font-weight:400;font-size:13px;color:var(--muted);margin-left:8px">
+          Glissez le bord ou le centre d'un créneau pour changer ses heures
+        </span>
+      </p>
+      <div class="promo-timeline-wrap">
+        <div class="promo-timeline-ruler" id="promo-timeline-ruler"></div>
+        <div class="promo-timeline-rows" id="promo-timeline-rows">
+          <p class="promo-timeline-empty">Chargement…</p>
+        </div>
+      </div>
+    </div>
+    <script id="promo-timeline-data" type="application/json">
+      {"pages": {{ timeline_pages | tojson }}, "schedules": {{ timeline_schedules | tojson }}}
+    </script>
+
+    {% if promo_pages %}
+    {% for page in promo_pages %}
+    <div class="promo-page-card{% if not page.active %} promo-page-inactive{% endif %}" id="promo-page-{{ page.id }}">
+      <div class="promo-page-head">
+        <button type="button" class="promo-page-toggle-open" aria-label="Déplier / replier">▾</button>
+        <span class="promo-page-title">
+          Page #{{ page.id }}
+          {% if page.active %}<span class="promo-badge promo-badge-on">Active</span>
+          {% else %}<span class="promo-badge promo-badge-off">Inactive</span>{% endif %}
+        </span>
+        <span class="promo-page-meta">Ordre {{ page.sort_order }} · 1 fois / {{ page.frequency }} slides · {{ page.pause_seconds }}s</span>
+        <div class="promo-page-move">
+          <form method="post" action="{{ url_for('admin_promo_page_move', page_id=page.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="direction" value="up">
+            <button type="submit" title="Monter dans l'ordre de passage">▲</button>
+          </form>
+          <form method="post" action="{{ url_for('admin_promo_page_move', page_id=page.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="direction" value="down">
+            <button type="submit" title="Descendre dans l'ordre de passage">▼</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="promo-page-body">
+        <form method="post" action="{{ url_for('admin_promo_page_update', page_id=page.id) }}" class="promo-page-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+          <div class="checkbox-field">
+            <input type="checkbox" id="active-{{ page.id }}" name="active" {% if page.active %}checked{% endif %}>
+            <label for="active-{{ page.id }}">Page active (diffusée dans le diaporama)</label>
+          </div>
+
+          <div class="field">
+            <label>URL dédiée <span style="font-weight:400;color:var(--muted)">(hors diaporama, optionnel)</span></label>
+            <div class="field-row" style="align-items:center;gap:10px;flex-wrap:wrap">
+              <span style="color:var(--muted);font-size:14px;white-space:nowrap">{{ request.host_url }}pages/</span>
+              <input type="text" name="slug" value="{{ page.slug }}" placeholder="ma-page"
+                     maxlength="80" pattern="[a-z0-9]+(-[a-z0-9]+)*" style="max-width:240px">
+              {% if page.slug %}
+              <a class="preview-link" href="{{ url_for('promo_page_view', slug=page.slug) }}" target="_blank">↗ Ouvrir cette page</a>
+              {% endif %}
+            </div>
+            <p class="upload-hint">
+              Accessible directement par lien ou QR code, indépendamment de la rotation du diaporama
+              (fonctionne même si la page est inactive ou retirée du diaporama) — minuscules,
+              chiffres et tirets uniquement (accents et espaces convertis automatiquement).
+              Laissez vide pour désactiver cette URL dédiée. En cas de doublon avec une autre
+              page promo, un suffixe (-2, -3...) est ajouté automatiquement à l'enregistrement.
+            </p>
+          </div>
+
+          <div class="field-row">
+            <div class="field field-third">
+              <label>Ordre de passage</label>
+              <input type="number" name="sort_order" value="{{ page.sort_order }}" style="max-width:120px">
+            </div>
+            <div class="field field-third">
+              <label>Fréquence (1 fois toutes les N slides)</label>
+              <input type="number" name="frequency" min="1" max="200" value="{{ page.frequency }}" style="max-width:120px">
+            </div>
+            <div class="field field-third">
+              <label>Temps de pause (s)</label>
+              <input type="number" name="pause_seconds" min="1" max="120" value="{{ page.pause_seconds }}" style="max-width:120px">
+            </div>
+          </div>
+
+          <div class="checkbox-field">
+            <input type="checkbox" id="overlay-{{ page.id }}" name="overlay_enabled" {% if page.overlay_enabled %}checked{% endif %}>
+            <label for="overlay-{{ page.id }}">Assombrir le fond (lisibilité du texte)</label>
+          </div>
+
+          <div class="field">
+            <label>Effet visuel à l'apparition</label>
+            <select name="effect" style="max-width:320px">
+              {% for value, label in promo_effects %}
+              <option value="{{ value }}" {% if page.effect == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Marges avec les bords de l'écran (px)</label>
+            <div class="field-row" style="gap:14px">
+              <div class="field" style="max-width:140px">
+                <label style="font-weight:400;font-size:12px;color:var(--muted)">Haute</label>
+                <input type="number" name="content_padding_top" min="0" max="300"
+                       value="{{ page.content_padding_top }}">
+              </div>
+              <div class="field" style="max-width:140px">
+                <label style="font-weight:400;font-size:12px;color:var(--muted)">Basse</label>
+                <input type="number" name="content_padding_bottom" min="0" max="300"
+                       value="{{ page.content_padding_bottom }}">
+              </div>
+              <div class="field" style="max-width:140px">
+                <label style="font-weight:400;font-size:12px;color:var(--muted)">Gauche</label>
+                <input type="number" name="content_padding_left" min="0" max="300"
+                       value="{{ page.content_padding_left }}">
+              </div>
+              <div class="field" style="max-width:140px">
+                <label style="font-weight:400;font-size:12px;color:var(--muted)">Droite</label>
+                <input type="number" name="content_padding_right" min="0" max="300"
+                       value="{{ page.content_padding_right }}">
+              </div>
+            </div>
+            <p class="upload-hint">
+              Espace entre le bloc texte/QR code et chaque bord de l'écran (le fond, lui, couvre
+              toujours l'écran en entier).
+            </p>
+          </div>
+
+          <div class="field">
+            <label>Fond</label>
+            <div class="img-grid promo-bg-picker">
+              <label class="img-card promo-bg-choice{% if not page.background_id %} selected{% endif %}">
+                <input type="radio" name="background_id" value="" {% if not page.background_id %}checked{% endif %}>
+                <div class="promo-bg-none">Aucun fond<br>(neutre)</div>
+              </label>
+              {% for bg in promo_backgrounds %}
+              <label class="img-card promo-bg-choice{% if page.background_id == bg.id %} selected{% endif %}">
+                <input type="radio" name="background_id" value="{{ bg.id }}" {% if page.background_id == bg.id %}checked{% endif %}>
+                {% if bg.kind == 'gradient' %}
+                <div class="bg-gradient-swatch" style="background:linear-gradient({{ bg.angle }}deg, {{ bg.color1 }}, {{ bg.color2 }})"
+                     title="{{ bg.label or 'Dégradé' }}"></div>
+                {% else %}
+                <img src="{{ bg.url }}" alt="{{ bg.label or bg.filename }}"
+                     title="{{ bg.category_label }} — {{ bg.label or bg.filename }}" loading="lazy">
+                {% endif %}
+              </label>
+              {% endfor %}
+            </div>
+            <p class="upload-hint">Toutes les images de la médiathèque sont proposées ; ajoutez-en depuis la tuile Médiathèque.</p>
+          </div>
+
+          <div class="field">
+            <label>Couleur du fond d'écran</label>
+            <input type="color" name="background_bg_color" value="{{ page.background_bg_color }}">
+            <p class="upload-hint">
+              Visible derrière l'image (ou le dégradé) de fond sélectionnée ci-dessus --
+              utile pour une image avec de la transparence, ou si aucun fond n'est choisi.
+            </p>
+          </div>
+
+          <div class="field">
+            <label>Texte</label>
+            <div class="field-row" style="align-items:center;gap:10px;margin-bottom:10px">
+              <input type="color" name="editor_bg_color" value="{{ page.editor_bg_color }}">
+              <span style="font-size:12px;color:var(--muted)">
+                Couleur de fond du champ ci-dessous, pour distinguer le texte pendant l'édition --
+                sans aucun effet sur l'affichage final (/bestof).
+              </span>
+            </div>
+            <div id="wysiwyg-{{ page.id }}" class="promo-ck-editor"
+                 data-placeholder="Un photobox est à votre disposition !"
+                 data-editor-bg-color="{{ page.editor_bg_color }}">{{ page.html_content | safe }}</div>
+            <input type="hidden" name="html_content">
+            <p class="upload-hint">
+              Emplacements dynamiques disponibles, résolus à l'affichage : <code>{ip}</code>, <code>{port}</code>.
+              QR code : placez <code>{qrcode="texte ou URL", taille="150", color="#000000", bgcolor="#ffffff"}</code>
+              où vous voulez dans le texte (texte vide = lien vers la galerie ;
+              taille en px, couleurs en hexa) — utilisez le bouton QR de la barre
+              d'outils pour l'insérer. Le bouton "Source" affiche le code source
+              (HTML + styles) — au retour en mode visuel, le contenu est réinterprété
+              par l'éditeur (une balise ou un style non autorisé peut être simplifié,
+              et sera de toute façon retiré à l'enregistrement si non conforme).
+            </p>
+          </div>
+
+          <div class="field">
+            <label>CSS libre pour cette page <span style="font-weight:400;color:var(--muted)">(avancé)</span></label>
+            <textarea name="custom_css" rows="6" class="promo-custom-css" spellcheck="false"
+                      placeholder=".promo-text { text-shadow: 0 2px 10px #000; }">{{ page.custom_css }}</textarea>
+            <p class="upload-hint">
+              Appliqué uniquement à cette page (portée automatique via <code>@scope</code>, aucune fuite vers les
+              autres pages ni le reste du site) — <strong>non filtré</strong> côté serveur : une erreur ici peut
+              casser l'affichage de cette page (jamais celui des autres).
+            </p>
+          </div>
+
+          <button class="btn-primary" type="submit">Enregistrer la page</button>
+          <a class="preview-link" href="{{ url_for('bestof') }}" target="_blank">↗ Voir le slideshow</a>
+        </form>
+
+        <!-- Plages horaires à fréquence différente : formulaires séparés du
+             formulaire d'édition ci-dessus (chaque créneau a son propre
+             submit, indépendant du reste de la page) -- voir promo_schedules
+             (app.py, groupé par page) et les routes admin_promo_schedule_*.
+             La timeline visuelle tout en haut de la section permet aussi de
+             glisser ces mêmes créneaux directement (voir data-schedule-id
+             ci-dessous, ciblé par static/promo-timeline.js pour tenir ces
+             champs à jour après un glisser). -->
+        <div class="field promo-schedule-block" style="margin-top:20px">
+          <label>Plages horaires à fréquence différente
+            <span style="font-weight:400;color:var(--muted)">(optionnel)</span>
+          </label>
+          <p class="promo-schedule-hint">
+            En dehors de ces plages, la fréquence par défaut ci-dessus reste utilisée.
+            En cas de chevauchement entre deux plages, la plus récemment créée l'emporte.
+          </p>
+
+          {% set page_schedules = promo_schedules.get(page.id, []) %}
+          {% if page_schedules %}
+          <div class="promo-schedule-list">
+            {% for sch in page_schedules %}
+            <div class="promo-schedule-row" id="promo-schedule-row-{{ sch.id }}" data-schedule-id="{{ sch.id }}">
+              <form method="post" action="{{ url_for('admin_promo_schedule_update', page_id=page.id, schedule_id=sch.id) }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="time" name="start" class="promo-schedule-start-input"
+                       value="{{ '%02d:%02d' | format(sch.start_minutes // 60, sch.start_minutes % 60) }}">
+                <span class="promo-schedule-sep">→</span>
+                <input type="time" name="end" class="promo-schedule-end-input"
+                       value="{{ '%02d:%02d' | format(sch.end_minutes // 60, sch.end_minutes % 60) }}">
+                <span class="promo-schedule-sep">1 fois /</span>
+                <input type="number" name="frequency" min="1" max="200" value="{{ sch.frequency }}" style="max-width:80px">
+                <button type="submit" class="btn-primary" style="padding:6px 14px;font-size:12px">Enregistrer</button>
+              </form>
+              <form method="post" action="{{ url_for('admin_promo_schedule_delete', page_id=page.id, schedule_id=sch.id) }}"
+                    onsubmit="return confirm('Supprimer cette plage horaire ?')">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button class="btn-danger" type="submit" title="Supprimer cette plage">✕</button>
+              </form>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <div class="promo-schedule-row promo-schedule-add">
+            <form method="post" action="{{ url_for('admin_promo_schedule_create', page_id=page.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="time" name="start" value="18:00">
+              <span class="promo-schedule-sep">→</span>
+              <input type="time" name="end" value="20:00">
+              <span class="promo-schedule-sep">1 fois /</span>
+              <input type="number" name="frequency" min="1" max="200" value="3" style="max-width:80px">
+              <button type="submit" class="btn-primary" style="padding:6px 14px;font-size:12px">+ Ajouter une plage</button>
+            </form>
+          </div>
+        </div>
+
+        <form method="post" action="{{ url_for('admin_promo_page_delete', page_id=page.id) }}"
+              onsubmit="return confirm('Supprimer définitivement cette page promo ?')" style="margin-top:14px">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button class="btn-danger" type="submit">Supprimer cette page</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:var(--muted);font-size:14px;margin-bottom:20px">Aucune page promo — créez-en une ci-dessous.</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('admin_promo_page_create') }}" style="margin-top:8px">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="field-row" style="align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+        <span style="color:var(--muted);font-size:14px;white-space:nowrap">URL dédiée (optionnel) : {{ request.host_url }}pages/</span>
+        <input type="text" name="slug" placeholder="ma-page" maxlength="80"
+               pattern="[a-z0-9]+(-[a-z0-9]+)*" style="max-width:220px">
+      </div>
+      <button class="btn-primary" type="submit">+ Nouvelle page promo</button>
+    </form>
+  </div>
+
+  <!-- Sélecteur d'image du WYSIWYG (partagé par toutes les pages promo) —
+       voir static/promo-editor.js. Trois onglets : Médiathèque (médias
+       « site » agrégés depuis la tuile Médiathèque, voir
+       _promo_media_library côté serveur, LECTURE SEULE ici), Captures
+       (dernières photos visiteurs, voir _promo_capture_library, LECTURE
+       SEULE) et Mes images (v2.0.8 -- bibliothèque DÉDIÉE au texte des
+       pages promo, CRUD complet directement dans cet onglet : ajout via le
+       formulaire d'upload, suppression par image, voir
+       promo_content_images/db.py et les routes admin_promo_content_image_*
+       ci-dessous dans app.py). -->
+
+  <div id="media-picker-modal" class="media-picker-modal hidden" aria-hidden="true">
+    <div class="media-picker-dialog">
+      <div class="media-picker-head">
+        <div class="media-picker-tabs">
+          <button type="button" class="media-picker-tab active" data-tab="site">Médiathèque</button>
+          <button type="button" class="media-picker-tab" data-tab="captures">Captures</button>
+          <button type="button" class="media-picker-tab" data-tab="promo">Mes images</button>
+        </div>
+        <button type="button" class="media-picker-close" aria-label="Fermer">✕</button>
+      </div>
+      <div class="media-picker-body">
+        <div class="media-picker-grid media-picker-panel" data-panel="site">
+          {% for m in media_library %}
+          <button type="button" class="media-picker-item" data-url="{{ m.url }}" title="{{ m.label }}">
+            <img src="{{ m.url }}" alt="{{ m.label }}" loading="lazy">
+          </button>
+          {% else %}
+          <p class="media-picker-empty">Aucun média dans la Médiathèque.</p>
+          {% endfor %}
+        </div>
+        <div class="media-picker-grid media-picker-panel hidden" data-panel="captures">
+          {% for m in capture_library %}
+          <button type="button" class="media-picker-item" data-url="{{ m.url }}" title="{{ m.label }}">
+            <img src="{{ m.thumb_url }}" alt="{{ m.label }}" loading="lazy">
+          </button>
+          {% else %}
+          <p class="media-picker-empty">Aucune capture disponible.</p>
+          {% endfor %}
+        </div>
+        <div class="media-picker-panel hidden" data-panel="promo">
+          <form method="post" action="{{ url_for('admin_promo_content_image_upload') }}"
+                enctype="multipart/form-data" class="media-picker-upload-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <label class="upload-label" for="promo-content-image-input" style="margin:0">Ajouter une image…</label>
+            <input type="file" id="promo-content-image-input" name="image" accept=".png,.jpg,.jpeg,.webp" required
+                   onchange="document.getElementById('promo-content-image-name').textContent = this.files[0]?.name || ''">
+            <span id="promo-content-image-name" style="font-size:12px;color:var(--muted)"></span>
+            <input type="text" name="label" maxlength="80" placeholder="Nom (optionnel)">
+            <button type="submit" class="btn-primary">Ajouter</button>
+          </form>
+          <div class="media-picker-grid">
+            {% for m in promo_content_images %}
+            <div class="media-picker-content-card">
+              <button type="button" class="media-picker-item" data-url="{{ m.url }}" title="{{ m.label }}">
+                <img src="{{ m.url }}" alt="{{ m.label }}" loading="lazy">
+              </button>
+              <form method="post" action="{{ url_for('admin_promo_content_image_delete', image_id=m.id) }}"
+                    onsubmit="return confirm('Supprimer cette image ? Elle restera visible là où elle a déjà été insérée dans un texte, mais deviendra une image cassée.')">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="media-picker-content-delete">✕ Supprimer</button>
+              </form>
+            </div>
+            {% else %}
+            <p class="media-picker-empty">Aucune image ajoutée pour l'instant -- utilisez le formulaire ci-dessus.</p>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>

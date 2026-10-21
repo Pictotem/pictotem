@@ -1,0 +1,10 @@
+{# CSS/JS du bloc « Pages promo » : à inclure dans le <head> de toute tuile à blocs.
+   Ne charge rien si le bloc slideshow_promo n'est pas affiché sur la tuile. #}
+{% if blocks and blocks|selectattr('id', 'equalto', 'slideshow_promo')|list %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='ckeditor5/ckeditor5-editor.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-promo.css') }}">
+  <script src="{{ url_for('static', filename='ckeditor5/ckeditor5.umd.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='ckeditor5/translations/fr.umd.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='promo-editor.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='promo-timeline.js') }}" defer></script>
+{% endif %}

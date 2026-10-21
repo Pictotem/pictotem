@@ -1,0 +1,209 @@
+/* Bloc « Pages promo » (templates/blocks/slideshow_promo.html), chargé par
+   _promo_assets.html sur toute tuile qui affiche ce bloc. */
+.promo-bg-preview {
+  display: flex; align-items: center; gap: 16px; margin-bottom: 18px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px;
+}
+.promo-bg-preview img {
+  width: 140px; height: 79px; object-fit: cover; border-radius: 8px; flex-shrink: 0;
+}
+
+.field-third { flex: 1; min-width: 140px; }
+
+.promo-page-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+                    margin-bottom: 20px; overflow: hidden; }
+.promo-page-inactive { opacity: .6; }
+.promo-page-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px;
+                    border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.promo-page-toggle-open { background: none; border: none; color: var(--muted); font-size: 16px;
+                           cursor: pointer; padding: 2px 6px; }
+.promo-page-collapsed .promo-page-toggle-open { transform: rotate(-90deg); }
+.promo-page-title { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 10px; }
+.promo-page-meta { color: var(--muted); font-size: 13px; margin-left: auto; }
+.promo-page-move { display: flex; gap: 4px; }
+.promo-page-move form { margin: 0; }
+.promo-page-move button { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+                           border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
+.promo-page-move button:hover { border-color: var(--accent); }
+.promo-page-body { padding: 20px; }
+.promo-page-collapsed .promo-page-body { display: none; }
+.promo-badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+               padding: 2px 9px; border-radius: 999px; }
+.promo-badge-on  { background: rgba(50,200,100,.18); color: #4ecca0; }
+.promo-badge-off { background: rgba(150,150,150,.18); color: var(--muted); }
+
+/* Éditeur WYSIWYG (CKEditor 5, voir static/promo-editor.js) reskinné en
+   sombre pour coller au reste de l'admin -- le thème par défaut de
+   CKEditor est clair. CKEditor pilote son thème via des variables CSS
+   (--ck-color-*) : les redéfinir au niveau :root (plutôt que scopées à
+   .promo-ck-editor) est nécessaire pour atteindre aussi les panneaux
+   flottants (menus déroulants, bulles Propriétés du tableau/image,
+   vue Source) que CKEditor ajoute directement à <body>, hors de
+   l'arborescence de l'éditeur. */
+:root {
+  --ck-color-base-foreground: var(--surface-2);
+  --ck-color-base-background: var(--surface-2);
+  --ck-color-base-border: var(--border);
+  --ck-color-base-text: var(--text);
+  --ck-color-base-active: var(--accent);
+  --ck-color-base-active-focus: var(--accent);
+  --ck-color-button-on-background: var(--surface);
+  --ck-color-button-on-color: var(--accent);
+  --ck-color-button-on-hover-background: var(--surface);
+  --ck-color-dropdown-panel-background: var(--surface);
+  --ck-color-dropdown-panel-border: var(--border);
+  --ck-color-panel-background: var(--surface);
+  --ck-color-panel-border: var(--border);
+  --ck-color-toolbar-border: var(--border);
+  --ck-color-input-background: var(--surface-2);
+  --ck-color-input-border: var(--border);
+  --ck-color-input-text: var(--text);
+  --ck-color-list-background: var(--surface);
+  --ck-color-list-button-hover-background: var(--surface-2);
+}
+.promo-ck-editor .ck.ck-editor__top { border-radius: 10px 10px 0 0; overflow: hidden; }
+.promo-ck-editor .ck.ck-editor__main { border-radius: 0 0 10px 10px; overflow: hidden; }
+.promo-ck-editor .ck.ck-content { min-height: 110px; font-size: 15px; }
+/* Rendu des tableaux/images DANS l'éditeur, cohérent avec la page
+   publique (voir ckeditor5-content.css + bestof.html) : par défaut
+   CKEditor affiche une bordure de tableau visible ("1px double") même
+   sans bordure explicitement posée -- annulée ici comme sur la page
+   publique, une bordure posée depuis le panneau "Propriétés" (style
+   en ligne, toujours plus prioritaire) reste inchangée. */
+.promo-ck-editor .ck-content table.table:not(.layout-table),
+.promo-ck-editor .ck-content figure.table:not(.layout-table) > table,
+.promo-ck-editor .ck-content table.table:not(.layout-table) > * > tr > td,
+.promo-ck-editor .ck-content table.table:not(.layout-table) > * > tr > th {
+  border: none; background: transparent;
+}
+
+.promo-custom-css { width: 100%; box-sizing: border-box; background: var(--surface-2);
+                     border: 1px solid var(--border); color: var(--text); border-radius: 10px;
+                     padding: 12px 14px; font-size: 13px; font-family: "Courier New", monospace;
+                     resize: vertical; }
+.promo-custom-css:focus { outline: none; border-color: var(--accent); }
+
+.wysiwyg-media-btn { font-size: 15px; }
+
+.media-picker-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.6);
+                       display: flex; align-items: center; justify-content: center; padding: 24px; }
+.media-picker-modal.hidden { display: none; }
+.media-picker-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+                        width: 100%; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column;
+                        overflow: hidden; }
+.media-picker-head { display: flex; align-items: center; justify-content: space-between;
+                      padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.media-picker-tabs { display: flex; gap: 6px; }
+.media-picker-tab { background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+                     border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+.media-picker-tab.active { color: var(--text); border-color: var(--accent); }
+.media-picker-close { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+.media-picker-close:hover { color: var(--text); }
+.media-picker-body { padding: 18px; overflow-y: auto; }
+.media-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+.media-picker-grid.hidden { display: none; }
+.media-picker-item { padding: 0; border: 2px solid transparent; border-radius: 10px; overflow: hidden;
+                      cursor: pointer; background: var(--surface-2); line-height: 0; }
+.media-picker-item:hover { border-color: var(--accent); }
+.media-picker-item img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; }
+.media-picker-empty { color: var(--muted); font-size: 13px; grid-column: 1 / -1; }
+/* v2.0.8 : "Mes images" (voir promo_content_images, app.py) -- 3e onglet
+   du sélecteur, propre bibliothèque d'images à insérer dans le texte
+   (Créer/Lister/Supprimer, en plus du Lire déjà offert par Médiathèque/
+   Captures). .media-picker-panel généralise le mécanisme de bascule
+   d'onglet à un panneau qui n'est pas qu'une simple grille de vignettes
+   (voir static/promo-editor.js) -- Médiathèque/Captures gardent EN PLUS
+   leur classe .media-picker-grid (mise en page grille, inchangée). */
+.media-picker-panel.hidden { display: none; }
+.media-picker-upload-form { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                             margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.media-picker-upload-form input[type=text] {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 6px 10px; font-size: 13px; max-width: 160px;
+}
+.media-picker-content-card { background: var(--surface-2); border: 1px solid var(--border);
+                              border-radius: 10px; overflow: hidden; }
+.media-picker-content-card .media-picker-item { border-radius: 0; }
+.media-picker-content-delete { width: 100%; background: none; border: none; border-top: 1px solid var(--border);
+                                color: #e57373; font-size: 11px; padding: 5px; cursor: pointer; }
+.media-picker-content-delete:hover { background: rgba(180,40,40,.15); }
+
+.promo-bg-picker { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); margin-bottom: 4px; }
+.promo-bg-choice { display: block; cursor: pointer; border: 2px solid transparent; position: relative; }
+.promo-bg-choice input { position: absolute; top: 8px; left: 8px; z-index: 2; }
+.promo-bg-choice.selected { border-color: var(--accent); }
+.promo-bg-choice:has(input:checked) { border-color: var(--accent); }
+.promo-bg-none { aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center;
+                 background: #14161a;
+                 color: #fff; font-size: 12px; text-align: center; padding: 8px; }
+.bg-gradient-swatch { aspect-ratio: 16/9; width: 100%; display: block; }
+
+/* Plages horaires par page promo (fréquence variable) — petits
+   formulaires sous chaque page (voir la boucle promo_schedules
+   ci-dessous) : une ligne = un créneau, édition + suppression côte à
+   côte (deux <form> distincts, un seul <form> ne peut pas imbriquer un
+   bouton "supprimer" avec confirmation séparée du bouton "enregistrer"
+   du créneau). */
+.promo-schedule-block { margin-top: 4px; }
+.promo-schedule-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.promo-schedule-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+                       background: var(--surface-2); border: 1px solid var(--border);
+                       border-radius: 10px; padding: 8px 10px; }
+.promo-schedule-row form { display: flex; align-items: center; gap: 8px; margin: 0; flex-wrap: wrap; }
+.promo-schedule-sep { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.promo-schedule-row input[type=time] {
+  background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 6px 8px; font-size: 13px;
+}
+.promo-schedule-row input[type=number] {
+  background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 6px 8px; font-size: 13px;
+}
+.promo-schedule-row .btn-danger { padding: 6px 10px; font-size: 12px; }
+.promo-schedule-add { background: transparent; border-style: dashed; }
+.promo-schedule-hint { font-size: 12px; color: var(--muted); margin: 6px 0 14px; }
+
+/* Timeline visuelle 24h (toutes les pages promo, tous leurs créneaux) —
+   voir static/promo-timeline.js, qui construit .promo-timeline-rows à
+   partir de #promo-timeline-data. Bâtie en pourcentages (0-100% = 0h-24h)
+   plutôt qu'en SVG : plus simple à styliser (thème sombre existant) et à
+   manipuler au glisser (calcul de position = simple règle de trois sur
+   la largeur du conteneur). */
+.promo-timeline-section { margin-bottom: 32px; }
+.promo-timeline-wrap { background: var(--surface); border: 1px solid var(--border);
+                        border-radius: 16px; padding: 20px 24px 16px; }
+.promo-timeline-ruler { position: relative; height: 18px; margin-left: 160px;
+                         border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+.promo-timeline-tick { position: absolute; top: 0; transform: translateX(-50%);
+                        font-size: 11px; color: var(--muted); white-space: nowrap; }
+.promo-timeline-rows { display: flex; flex-direction: column; gap: 8px; }
+.promo-timeline-row { display: flex; align-items: center; gap: 0; min-height: 34px; }
+.promo-timeline-row-inactive { opacity: .45; }
+.promo-timeline-row-label { width: 160px; flex: 0 0 160px; font-size: 12px; color: var(--text);
+                             padding-right: 12px; overflow: hidden; text-overflow: ellipsis;
+                             white-space: nowrap; }
+.promo-timeline-track { position: relative; flex: 1; height: 30px; background: var(--surface-2);
+                         border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.promo-timeline-track::before,
+.promo-timeline-track::after,
+.promo-timeline-track .promo-timeline-gridline { position: absolute; top: 0; bottom: 0; width: 1px;
+                         background: rgba(255,255,255,.06); }
+.promo-timeline-segment { position: absolute; top: 2px; bottom: 2px; border-radius: 5px;
+                           display: flex; align-items: center; justify-content: center;
+                           font-size: 10px; font-weight: 700; color: #fff; overflow: hidden;
+                           cursor: grab; user-select: none; box-shadow: 0 0 0 1px rgba(0,0,0,.25) inset; }
+.promo-timeline-segment:active { cursor: grabbing; }
+.promo-timeline-segment.is-dragging { z-index: 5; filter: brightness(1.15); }
+.promo-timeline-segment.is-wrap { cursor: default; }
+.promo-timeline-handle { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.promo-timeline-handle-left  { left: 0; }
+.promo-timeline-handle-right { right: 0; }
+.promo-timeline-handle::after { content: ''; position: absolute; top: 50%; left: 50%;
+                                 width: 2px; height: 60%; background: rgba(255,255,255,.6);
+                                 transform: translate(-50%, -50%); border-radius: 2px; }
+.promo-timeline-now { position: absolute; top: -4px; bottom: -4px; width: 2px;
+                       background: #e57373; z-index: 6; pointer-events: none; }
+.promo-timeline-now::before { content: ''; position: absolute; top: -4px; left: 50%;
+                               width: 7px; height: 7px; border-radius: 50%; background: #e57373;
+                               transform: translateX(-50%); }
+.promo-timeline-empty { color: var(--muted); font-size: 13px; }

@@ -3635,6 +3635,7 @@ _ADMIN_BLOCKS = {
     'tags_media_id':       {'title': "ID unique par média",                     'default_page': 'tags',        'template': 'blocks/tags_media_id.html',       'context_fn': '_block_ctx_tags_media_id'},
     'tags_display':        {'title': "Affichage sur /bestof",                   'default_page': 'tags',        'template': 'blocks/tags_display.html',        'context_fn': '_block_ctx_tags_display'},
     'tags_media_api':      {'title': "API REST — accès aux ID média & tags",     'default_page': 'tags',        'template': 'blocks/tags_media_api.html',      'context_fn': '_block_ctx_tags_media_api'},
+    'slideshow_promo':         {'title': "Pages promo",                          'default_page': 'slideshow',   'template': 'blocks/slideshow_promo.html',         'context_fn': '_block_ctx_slideshow_promo'},
     'slideshow_settings':      {'title': "Paramètres",                          'default_page': 'slideshow',   'template': 'blocks/slideshow_settings.html',      'context_fn': '_block_ctx_slideshow_settings'},
     'screensaver_settings':    {'title': "Paramètres",                          'default_page': 'screensaver', 'template': 'blocks/screensaver_settings.html',    'context_fn': '_block_ctx_screensaver_settings'},
     'instructions_page':       {'title': "Page d'instructions au réveil",       'default_page': 'screensaver', 'template': 'blocks/instructions_page.html',       'context_fn': '_block_ctx_instructions_page'},
@@ -4050,6 +4051,51 @@ def _block_ctx_tags_media_api() -> dict:
     return {'media_api': status}
 
 
+def _block_ctx_slideshow_promo() -> dict:
+    promo_pages_list = list_promo_pages()
+    promo_schedules_all = list_promo_schedules()
+    # Groupées par page pour les petits formulaires ajout/édition/suppression
+    # sous chaque page promo (voir admin_slideshow.html -> promo_schedules).
+    promo_schedules_by_page = {}
+    for s in promo_schedules_all:
+        promo_schedules_by_page.setdefault(s['page_id'], []).append(s)
+    # Version allégée (pas de html_content/custom_css...) pour la timeline
+    # visuelle 24h -- voir static/promo-timeline.js, qui lit ce JSON via
+    # #promo-timeline-data plutôt que de parcourir le HTML déjà rendu.
+    timeline_pages = [
+        {'id': p['id'], 'frequency': p['frequency'], 'active': bool(p['active']), 'sort_order': p['sort_order']}
+        for p in promo_pages_list
+    ]
+    timeline_schedules = [
+        {'id': s['id'], 'page_id': s['page_id'], 'start_minutes': s['start_minutes'],
+         'end_minutes': s['end_minutes'], 'frequency': s['frequency']}
+        for s in promo_schedules_all
+    ]
+    return {
+        'promo_pages': promo_pages_list,
+        'promo_schedules': promo_schedules_by_page,
+        'timeline_pages': timeline_pages,
+        'timeline_schedules': timeline_schedules,
+        'promo_backgrounds': _promo_background_choices(),
+        'promo_content_images': [
+            {'id': i['id'], 'url': f"/static/promo_content/{i['filename']}", 'label': i.get('label') or i['filename']}
+            for i in list_promo_content_images()
+        ],
+        'promo_fonts': _all_fonts(),
+        'promo_colors': _charte_colors_for_ckeditor(),
+        'promo_text_sizes': _PROMO_TEXT_SIZES,
+        'promo_effects': _PROMO_EFFECTS,
+        'media_library': _promo_media_library(),
+        'capture_library': _promo_capture_library(),
+    }
+
+
+def _promo_redirect(anchor: str = '', **kwargs):
+    """Redirection après une route du bloc « Pages promo » : vers la tuile qui
+    affiche ACTUELLEMENT ce bloc (voir _admin_block_redirect), avec ancre."""
+    return redirect(_admin_page_url(_admin_block_page('slideshow_promo'), **kwargs) + anchor)
+
+
 def _block_ctx_slideshow_settings() -> dict:
     # forced_promo (voir _forced_promo_public ci-dessus) : affiché dans ce
     # même bloc, juste sous le contrôle pause (voir
@@ -4066,6 +4112,7 @@ def _block_ctx_slideshow_settings() -> dict:
     return {
         'slideshow_settings': _slideshow_settings(),
         'forced_promo': _forced_promo_public(),
+        'promo_pages': list_promo_pages(),
         'promo_force_options': [{'id': p['id'], 'active': bool(p['active'])} for p in list_promo_pages()],
         'countdown_positions': _BADGE_POSITIONS,
     }
@@ -7448,44 +7495,10 @@ def admin_slideshow():
     sont pas des réglages mais la gestion de contenu lui-même (CRUD à
     plusieurs entrées, comme admin_captures/admin_frames)."""
     blocks, block_context = _admin_render_blocks('slideshow')
-    promo_pages_list = list_promo_pages()
-    promo_schedules_all = list_promo_schedules()
-    # Groupées par page pour les petits formulaires ajout/édition/suppression
-    # sous chaque page promo (voir admin_slideshow.html -> promo_schedules).
-    promo_schedules_by_page = {}
-    for s in promo_schedules_all:
-        promo_schedules_by_page.setdefault(s['page_id'], []).append(s)
-    # Version allégée (pas de html_content/custom_css...) pour la timeline
-    # visuelle 24h -- voir static/promo-timeline.js, qui lit ce JSON via
-    # #promo-timeline-data plutôt que de parcourir le HTML déjà rendu.
-    timeline_pages = [
-        {'id': p['id'], 'frequency': p['frequency'], 'active': bool(p['active']), 'sort_order': p['sort_order']}
-        for p in promo_pages_list
-    ]
-    timeline_schedules = [
-        {'id': s['id'], 'page_id': s['page_id'], 'start_minutes': s['start_minutes'],
-         'end_minutes': s['end_minutes'], 'frequency': s['frequency']}
-        for s in promo_schedules_all
-    ]
     return render_template(
         'admin_slideshow.html', config=CONFIG,
         blocks=blocks, current_page='slideshow', admin_pages=_admin_all_pages(),
         page_label=_admin_page_label('slideshow', 'Slideshow Best Of'),
-        promo_pages=promo_pages_list,
-        promo_schedules=promo_schedules_by_page,
-        timeline_pages=timeline_pages,
-        timeline_schedules=timeline_schedules,
-        promo_backgrounds=_promo_background_choices(),
-        promo_content_images=[
-            {'id': i['id'], 'url': f"/static/promo_content/{i['filename']}", 'label': i.get('label') or i['filename']}
-            for i in list_promo_content_images()
-        ],
-        promo_fonts=_all_fonts(),
-        promo_colors=_charte_colors_for_ckeditor(),
-        promo_text_sizes=_PROMO_TEXT_SIZES,
-        promo_effects=_PROMO_EFFECTS,
-        media_library=_promo_media_library(),
-        capture_library=_promo_capture_library(),
         alert_success=request.args.get('ok'),
         alert_error=request.args.get('err'),
         **block_context,
@@ -7594,7 +7607,7 @@ def admin_promo_page_create():
     # pas une (ici ou dans le formulaire d'édition ci-dessous).
     slug = _normalize_promo_slug(request.form.get('slug', ''))
     create_promo_page(slug=slug)
-    return redirect(url_for('admin_slideshow', ok='Page promo créée — complétez-la ci-dessous.'))
+    return _promo_redirect(ok='Page promo créée — complétez-la ci-dessous.')
 
 
 @app.route('/admin/slideshow/promo/<int:page_id>/update', methods=['POST'])
@@ -7675,7 +7688,7 @@ def admin_promo_page_update(page_id):
     fields['custom_css'] = (request.form.get('custom_css', '') or '')[:20000]
 
     update_promo_page(page_id, **fields)
-    return redirect(url_for('admin_slideshow', ok='Page promo mise à jour.'))
+    return _promo_redirect(ok='Page promo mise à jour.')
 
 
 @app.route('/admin/slideshow/promo/<int:page_id>/delete', methods=['POST'])
@@ -7684,8 +7697,8 @@ def admin_promo_page_update(page_id):
 def admin_promo_page_delete(page_id):
     page = delete_promo_page_db(page_id)
     if not page:
-        return redirect(url_for('admin_slideshow', err='Page promo introuvable.'))
-    return redirect(url_for('admin_slideshow', ok='Page promo supprimée.'))
+        return _promo_redirect(err='Page promo introuvable.')
+    return _promo_redirect(ok='Page promo supprimée.')
 
 
 @app.route('/admin/slideshow/promo/<int:page_id>/move', methods=['POST'])
@@ -7695,7 +7708,7 @@ def admin_promo_page_move(page_id):
     direction = request.form.get('direction', '')
     if direction in ('up', 'down'):
         move_promo_page(page_id, direction)
-    return redirect(url_for('admin_slideshow', ok='Ordre mis à jour.'))
+    return _promo_redirect(ok='Ordre mis à jour.')
 
 
 # ── Pages promo — plages horaires (fréquence variable) ──────────────────────
@@ -7720,9 +7733,9 @@ def admin_promo_schedule_create(page_id):
     end = _parse_hhmm(request.form.get('end', ''))
     raw_freq = (request.form.get('frequency') or '').strip()
     if start is None or end is None or start == end or not raw_freq.isdigit() or int(raw_freq) <= 0:
-        return redirect(url_for('admin_slideshow', err='Plage horaire invalide.') + anchor)
+        return _promo_redirect(anchor, err='Plage horaire invalide.')
     create_promo_schedule(page_id, start, end, int(raw_freq))
-    return redirect(url_for('admin_slideshow', ok='Plage horaire ajoutée.') + anchor)
+    return _promo_redirect(anchor, ok='Plage horaire ajoutée.')
 
 
 @app.route('/admin/slideshow/promo/<int:page_id>/schedule/<int:schedule_id>/update', methods=['POST'])
@@ -7748,7 +7761,7 @@ def admin_promo_schedule_update(page_id, schedule_id):
     # pas besoin d'une redirection complète, juste un statut de succès.
     if request.form.get('ajax') == '1':
         return ('', 204)
-    return redirect(url_for('admin_slideshow', ok='Plage horaire mise à jour.') + f"#promo-page-{page_id}")
+    return _promo_redirect(f"#promo-page-{page_id}", ok='Plage horaire mise à jour.')
 
 
 @app.route('/admin/slideshow/promo/<int:page_id>/schedule/<int:schedule_id>/delete', methods=['POST'])
@@ -7756,7 +7769,7 @@ def admin_promo_schedule_update(page_id, schedule_id):
 @csrf_protect
 def admin_promo_schedule_delete(page_id, schedule_id):
     delete_promo_schedule(schedule_id)
-    return redirect(url_for('admin_slideshow', ok='Plage horaire supprimée.') + f"#promo-page-{page_id}")
+    return _promo_redirect(f"#promo-page-{page_id}", ok='Plage horaire supprimée.')
 
 
 # v2.0.8 : bibliothèque d'images dédiées au texte des pages promo -- voir
@@ -7772,16 +7785,16 @@ def admin_promo_schedule_delete(page_id, schedule_id):
 def admin_promo_content_image_upload():
     file = request.files.get('image')
     if not file or not file.filename:
-        return redirect(url_for('admin_slideshow', err='Aucun fichier sélectionné.'))
+        return _promo_redirect(err='Aucun fichier sélectionné.')
     ext = Path(file.filename).suffix.lower()
     if ext not in _PROMO_ALLOWED_EXT:
-        return redirect(url_for('admin_slideshow', err='Format non supporté (PNG, JPG, WEBP).'))
+        return _promo_redirect(err='Format non supporté (PNG, JPG, WEBP).')
     PROMO_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
     safe = f'promo-img-{int(datetime.now().timestamp())}{ext}'
     file.save(str(PROMO_CONTENT_DIR / safe))
     label = (request.form.get('label', '') or '').strip()[:80]
     add_promo_content_image(safe, label)
-    return redirect(url_for('admin_slideshow', ok='Image ajoutée -- disponible dans le sélecteur du WYSIWYG (onglet « Mes images »).'))
+    return _promo_redirect(ok='Image ajoutée -- disponible dans le sélecteur du WYSIWYG (onglet « Mes images »).')
 
 
 @app.route('/admin/slideshow/promo/content_image/<int:image_id>/delete', methods=['POST'])
@@ -7791,8 +7804,8 @@ def admin_promo_content_image_delete(image_id):
     img = delete_promo_content_image_db(image_id)
     if img:
         (PROMO_CONTENT_DIR / img['filename']).unlink(missing_ok=True)
-        return redirect(url_for('admin_slideshow', ok='Image supprimée de la bibliothèque.'))
-    return redirect(url_for('admin_slideshow', err='Image introuvable.'))
+        return _promo_redirect(ok='Image supprimée de la bibliothèque.')
+    return _promo_redirect(err='Image introuvable.')
 
 
 # ── Rétrospective (tuile dédiée) ─────────────────────────────────────────────

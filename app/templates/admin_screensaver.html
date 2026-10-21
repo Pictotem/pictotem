@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin-blocks.css') }}">
   <script src="{{ url_for('static', filename='admin-blocks.js') }}" defer></script>
+  {% include 'blocks/_promo_assets.html' %}
   <style>
     .admin-wrap  { max-width: 900px; margin: 0 auto; padding: 40px 20px 60px; }
     .back-link   { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
