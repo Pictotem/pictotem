@@ -63,6 +63,8 @@
       text-transform: uppercase; letter-spacing: .07em;
       padding: 8px 10px; border-bottom: 1px solid var(--border);
     }
+    .code-table th .sort-link { color: inherit; text-decoration: none; white-space: nowrap; }
+    .code-table th .sort-link:hover, .code-table th .sort-link.active { color: var(--text, #fff); }
     .code-table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.05); vertical-align: middle; }
     .code-table .col-code { width: 110px; }
     .code-table .col-date { width: 150px; font-size: 12px; color: var(--muted); }
@@ -210,9 +212,14 @@
     <table class="code-table">
       <thead>
         <tr>
-          <th>Texte</th>
-          <th class="col-code">Code</th>
-          <th class="col-date">Créé le</th>
+          {% macro sort_th(label, base, default_dir, cls='') %}
+          {% set cur = guest_codes_sort %}
+          {% set nxt = base ~ ('_desc' if cur == base ~ '_asc' else '_asc' if cur == base ~ '_desc' else default_dir) %}
+          <th class="{{ cls }}"><a class="sort-link{% if cur.startswith(base ~ '_') %} active{% endif %}" href="{{ url_for('admin_guest_codes', sort=nxt, q=guest_codes_q) }}">{{ label }}{% if cur == base ~ '_asc' %} ▲{% elif cur == base ~ '_desc' %} ▼{% endif %}</a></th>
+          {% endmacro %}
+          {{ sort_th('Texte', 'texte', '_asc') }}
+          {{ sort_th('Code', 'code', '_asc', 'col-code') }}
+          {{ sort_th('Créé le', 'created', '_desc', 'col-date') }}
           <th class="col-act">Actions</th>
         </tr>
       </thead>
