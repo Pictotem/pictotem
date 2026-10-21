@@ -6702,17 +6702,51 @@ def _promo_media_library() -> list:
     return items
 
 
+_media_hash_cache: dict = {}
+
+
+def _media_content_key(it) -> str:
+    """Clé d'identité d'une image : hash de son contenu (une même image
+    téléversée dans plusieurs catégories a des URLs différentes), repli sur
+    le nom de fichier si le fichier est introuvable. Cache par (chemin, mtime)."""
+    import hashlib
+    folder = MEDIA_CATEGORIES.get(it['category'], ('', it['category']))[1]
+    path = BASE_DIR / 'app' / 'static' / folder / it['filename']
+    try:
+        mtime = path.stat().st_mtime
+        cached = _media_hash_cache.get(str(path))
+        if cached and cached[0] == mtime:
+            return cached[1]
+        digest = hashlib.sha1(path.read_bytes()).hexdigest()
+        _media_hash_cache[str(path)] = (mtime, digest)
+        return digest
+    except OSError:
+        return 'name:' + (it['filename'] or '').lower()
+
+
 def _promo_background_choices() -> list:
     """Fonds proposés à une page promo : les fonds dédiés d'abord (images et
-    dégradés), puis toutes les autres images de la médiathèque."""
+    dégradés), puis les autres images de la médiathèque — sans doublon (une
+    même image présente dans plusieurs catégories n'est proposée qu'une fois,
+    la catégorie « background » l'emportant). Les fonds déjà choisis par une
+    page promo sont toujours conservés pour que leur sélection reste visible."""
+    in_use = {p.get('background_id') for p in list_promo_pages()}
     items = []
     for it in list_media():
         it['url'] = media_url(it)
         it['category_label'] = MEDIA_CATEGORIES.get(it['category'], (it['category'],))[0]
-        if it['category'] != 'promo_content':
+        if it['category'] not in ('promo_content', 'retro_bg', 'retro_overlay'):
             items.append(it)
     items.sort(key=lambda i: i['category'] != 'background')
-    return items
+    seen, out = set(), []
+    for it in items:
+        if it.get('kind') != 'gradient' and it.get('filename'):
+            key = _media_content_key(it)
+            if key in seen and it['id'] not in in_use:
+                continue
+            seen.add(key)
+        out.append(it)
+    return out
 
 
 def _promo_capture_library(limit: int = 60) -> list:
