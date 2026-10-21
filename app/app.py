@@ -3759,7 +3759,10 @@ def _admin_tuile_order(candidate_ids: list) -> list:
         stored = json.loads(raw) if raw else []
     except (ValueError, TypeError):
         stored = []
-    ordered = [p for p in stored if p in candidate_ids]
+    ordered = []
+    for p in stored:
+        if p in candidate_ids and p not in ordered:  # dédoublonne les ordres déjà corrompus
+            ordered.append(p)
     ordered += [p for p in candidate_ids if p not in ordered]
     return ordered
 
@@ -4271,8 +4274,9 @@ def admin_tuiles_create():
     custom_pages = _admin_custom_page_ids()
     custom_pages.append(page_id)
     set_setting('ui.custom_pages', json.dumps(custom_pages))
+    # page_id est déjà dans ui.custom_pages : _admin_tuile_order le place
+    # lui-même en fin de liste (inutile de l'ajouter, ça le dupliquerait).
     order = _admin_tuile_order(_admin_all_page_ids())
-    order.append(page_id)
     set_setting('ui.tuile_order', json.dumps(order))
     return redirect(url_for('admin_custom_page', page_id=page_id, ok=f"Tuile « {label} » créée."))
 
