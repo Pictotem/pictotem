@@ -2854,6 +2854,57 @@ def download_guest(filename):
     return send_from_directory(GUEST_UPLOAD_DIR, filename, as_attachment=True)
 
 
+# ── Média par ID unique (accès public, sans authentification) ────────────────
+# Volontairement SANS @require_media_auth : permet à un outil tiers de
+# récupérer un média à partir de son ID média (media_uid) seul. Distinct de
+# l'API REST authentifiée de media_api.py (autre port, JSON uniquement).
+# Le media_uid ne sert jamais de chemin : seul le nom de fichier lu en base
+# est passé à send_from_directory (protégé contre le path traversal).
+
+def _public_media_file(media):
+    """(dossier, nom de fichier) du fichier d'origine d'un média, ou None."""
+    if media.get('source') == 'guest':
+        directory = GUEST_UPLOAD_DIR
+    else:
+        directory = PHOTO_DIR if media.get('kind') == 'photo' else VIDEO_DIR
+    return (directory, media['filename']) if media.get('filename') else None
+
+
+@app.route('/api/media/<media_uid>')
+def api_media_by_uid(media_uid):
+    media = get_media_by_uid(media_uid)
+    target = _public_media_file(media) if media else None
+    if not target:
+        abort(404)
+    return send_from_directory(*target)
+
+
+@app.route('/api/media/<media_uid>/thumb')
+def api_media_thumb_by_uid(media_uid):
+    media = get_media_by_uid(media_uid)
+    if not media or not media.get('thumb_filename'):
+        abort(404)
+    return send_from_directory(THUMBS_DIR, media['thumb_filename'])
+
+
+@app.route('/api/media/<media_uid>/info')
+def api_media_info_by_uid(media_uid):
+    media = get_media_by_uid(media_uid)
+    if not media:
+        return jsonify({'ok': False, 'error': 'Média introuvable'}), 404
+    uid = media['media_uid']
+    return jsonify({
+        'ok': True,
+        'media_uid': uid,
+        'kind': media.get('kind'),
+        'source': media.get('source'),
+        'created_at': media.get('created_at'),
+        'url': url_for('api_media_by_uid', media_uid=uid),
+        'thumb_url': (url_for('api_media_thumb_by_uid', media_uid=uid)
+                      if media.get('thumb_filename') else None),
+    })
+
+
 # ── Admin — général / tableau de bord ────────────────────────────────────────
 
 def _dir_size_bytes(path: Path) -> int:
